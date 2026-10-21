@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>y-zero-agent · AI Coding Agent 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-panel: #161b22;
+    --bg-elevated: #1c2128;
+    --bg-hover: #22272e;
+    --border: #2d333b;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-faint: #6e7681;
+    --accent: #58a6ff;
+    --accent-soft: rgba(88, 166, 255, 0.12);
+    --green: #3fb950;
+    --green-soft: rgba(63, 185, 80, 0.12);
+    --orange: #d29922;
+    --orange-soft: rgba(210, 153, 34, 0.12);
+    --red: #f85149;
+    --red-soft: rgba(248, 81, 73, 0.12);
+    --purple: #bc8cff;
+    --purple-soft: rgba(188, 140, 255, 0.12);
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    overflow: hidden;
+  }
+
+  .app { display: flex; height: 100vh; }
+
+  /* ══════════ 侧边栏 ══════════ */
+  .sidebar {
+    width: 268px; min-width: 268px;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px 16px 12px;
+  }
+  .brand-logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: linear-gradient(135deg, #58a6ff, #bc8cff);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; color: #fff;
+    font-family: var(--mono);
+  }
+  .brand-name { font-weight: 600; font-size: 15px; }
+  .brand-sub { font-size: 11px; color: var(--text-faint); }
+
+  .sidebar-actions { padding: 4px 12px 8px; display: flex; gap: 8px; }
+  .btn-sm {
+    flex: 1; padding: 7px 0; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--bg-elevated);
+    color: var(--text); font-size: 12.5px; cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-sm:hover { background: var(--bg-hover); border-color: #444c56; }
+  .btn-sm.primary { background: var(--accent-soft); border-color: rgba(88,166,255,.4); color: var(--accent); }
+  .btn-sm.primary:hover { background: rgba(88,166,255,.2); }
+
+  .sidebar-scroll { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
+  .sidebar-scroll::-webkit-scrollbar { width: 6px; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+  .project-group { margin-top: 8px; }
+  .project-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 8px; border-radius: 7px; cursor: pointer;
+    transition: background .15s;
+  }
+  .project-header:hover { background: var(--bg-hover); }
+  .project-header.active { background: var(--accent-soft); }
+  .project-caret { font-size: 10px; color: var(--text-faint); transition: transform .15s; width: 10px; }
+  .project-caret.open { transform: rotate(90deg); }
+  .project-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green); flex-shrink: 0;
+  }
+  .project-name { font-weight: 600; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .project-count { font-size: 11px; color: var(--text-faint); background: var(--bg-elevated); padding: 1px 7px; border-radius: 8px; }
+
+  .session-list { margin: 2px 0 4px 18px; border-left: 1px solid var(--border); padding-left: 8px; }
+  .session-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    color: var(--text-dim); font-size: 12.5px;
+    transition: all .15s; margin: 1px 0;
+  }
+  .session-item:hover { background: var(--bg-hover); color: var(--text); }
+  .session-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .item-del {
+    opacity: 0; width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+    border: none; background: transparent; color: var(--text-faint);
+    cursor: pointer; font-size: 12px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .session-item:hover .item-del, .project-header:hover .item-del { opacity: 1; }
+  .item-del:hover { background: var(--red-soft); color: var(--red); }
+
+  /* 确认弹窗 */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    width: 400px; background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px 24px 18px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.6); animation: fadeIn .18s ease;
+  }
+  .modal h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .modal h3 .warn { color: var(--red); }
+  .modal p { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
+  .modal p b { color: var(--text); }
+  .modal input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 12px; color: var(--text);
+    font-size: 13px; outline: none; margin-bottom: 14px; display: none;
+  }
+  .modal input:focus { border-color: rgba(88,166,255,.5); }
+  .modal input.show { display: block; }
+  .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal-btns button { padding: 8px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-dim); }
+  .modal-btns .danger { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+  .modal-btns .danger:disabled { opacity: .4; cursor: not-allowed; }
+
+  .session-icon { font-size: 11px; opacity: .7; width: 14px; text-align: center; }
+  .session-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .session-mode { font-size: 9.5px; padding: 1px 5px; border-radius: 4px; font-family: var(--mono); }
+  .session-mode.react { background: var(--green-soft); color: var(--green); }
+  .session-mode.plan { background: var(--orange-soft); color: var(--orange); }
+  .session-mode.multi { background: var(--purple-soft); color: var(--purple); }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--border); padding: 10px 14px;
+    font-size: 11.5px; color: var(--text-faint);
+  }
+  .footer-row { display: flex; justify-content: space-between; padding: 2.5px 0; }
+  .footer-val { font-family: var(--mono); color: var(--text-dim); }
+  .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); margin-right: 5px; }
+
+  /* ══════════ 主区域 ══════════ */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  .topbar {
+    height: 52px; min-height: 52px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 18px; background: var(--bg-panel);
+  }
+  .topbar-crumb { font-size: 13.5px; }
+  .topbar-crumb .dim { color: var(--text-faint); }
+  .topbar-crumb .sep { margin: 0 6px; color: var(--text-faint); }
+
+  .mode-switch { display: flex; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 3px; margin-left: auto; }
+  .mode-btn {
+    padding: 5px 13px; border-radius: 6px; border: none;
+    background: transparent; color: var(--text-dim);
+    font-size: 12.5px; cursor: pointer; transition: all .15s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .mode-btn:hover { color: var(--text); }
+  .mode-btn.active { background: var(--bg-hover); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .mode-ico { font-size: 12px; }
+  .mode-btn.active.react-mode .mode-ico { color: var(--green); }
+  .mode-btn.active.plan-mode .mode-ico { color: var(--orange); }
+  .mode-btn.active.multi-mode .mode-ico { color: var(--purple); }
+
+  .model-select {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 6px 10px;
+    font-size: 12.5px; font-family: var(--mono); cursor: pointer; outline: none;
+  }
+
+  .budget-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border-radius: 8px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    font-size: 11.5px; font-family: var(--mono);
+  }
+  .budget-bar { width: 64px; height: 5px; background: #30363d; border-radius: 3px; overflow: hidden; }
+  .budget-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width .4s; }
+
+  /* ══════════ 消息流 ══════════ */
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 0; }
+  .chat-scroll::-webkit-scrollbar { width: 8px; }
+  .chat-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+  .chat-inner { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  .msg { margin-bottom: 18px; animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .msg-user { display: flex; gap: 12px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+  }
+  .avatar.user { background: #30363d; color: var(--text-dim); }
+  .avatar.ai { background: linear-gradient(135deg, #58a6ff, #bc8cff); color: #fff; font-size: 11px; font-family: var(--mono); }
+  .bubble {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 16px; line-height: 1.65;
+  }
+  .msg-user .bubble { background: var(--accent-soft); border-color: rgba(88,166,255,.25); }
+  .bubble .file-ref {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 5px; padding: 1px 7px; margin: 0 2px;
+    font-family: var(--mono); font-size: 12px; color: var(--accent);
+  }
+
+  .msg-meta { font-size: 11px; color: var(--text-faint); margin-bottom: 5px; display: flex; gap: 8px; align-items: center; }
+  .tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; }
+  .tag.turn { background: var(--bg-elevated); color: var(--text-dim); }
+  .tag.tok { background: var(--purple-soft); color: var(--purple); }
+
+  .msg-text { line-height: 1.7; color: var(--text); }
+  .msg-text code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; color: #79c0ff;
+  }
+  .msg-text .diff-add { color: var(--green); }
+  .msg-text .diff-del { color: var(--red); }
+
+  /* 工具调用卡片 */
+  .tool-card {
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-panel); margin: 10px 0 10px 42px;
+    overflow: hidden; animation: fadeIn .25s ease;
+  }
+  .tool-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; cursor: pointer; user-select: none;
+  }
+  .tool-head:hover { background: var(--bg-hover); }
+  .tool-status {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 10px;
+  }
+  .tool-status.ok { background: var(--green-soft); color: var(--green); }
+  .tool-status.run { background: var(--orange-soft); color: var(--orange); }
+  .tool-status.confirm { background: var(--red-soft); color: var(--red); }
+  .tool-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--accent); }
+  .tool-args { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tool-ms { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); }
+  .tool-caret { color: var(--text-faint); font-size: 10px; transition: transform .15s; }
+  .tool-card.open .tool-caret { transform: rotate(90deg); }
+  .tool-body { display: none; border-top: 1px solid var(--border); }
+  .tool-card.open .tool-body { display: block; }
+  .tool-body pre {
+    font-family: var(--mono); font-size: 12px; line-height: 1.6;
+    padding: 12px 16px; overflow-x: auto; color: var(--text-dim);
+    background: var(--bg); margin: 0; white-space: pre;
+  }
+  .confirm-bar {
+    display: flex; gap: 10px; padding: 10px 16px;
+    border-top: 1px solid var(--border); background: var(--red-soft);
+  }
+  .btn-confirm {
+    padding: 5px 16px; border-radius: 6px; border: none;
+    font-size: 12.5px; cursor: pointer; font-weight: 600;
+  }
+  .btn-yes { background: var(--green); color: #fff; }
+  .btn-no { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+
+  /* 事件卡片：压缩 / 预算 / 计划 */
+  .event-card {
+    display: flex; align-items: center; gap: 12px;
+    margin: 14px 0 14px 42px; padding: 10px 16px;
+    border-radius: 10px; font-size: 12.5px;
+    border: 1px dashed var(--border); color: var(--text-dim);
+    animation: fadeIn .25s ease;
+  }
+  .event-ico { font-size: 15px; }
+  .event-card.compact { border-color: rgba(188,140,255,.4); background: var(--purple-soft); }
+  .event-card.compact .event-ico { color: var(--purple); }
+  .event-card.budget { border-color: rgba(210,153,34,.4); background: var(--orange-soft); }
+  .event-card.budget .event-ico { color: var(--orange); }
+  .event-metric { font-family: var(--mono); font-weight: 600; }
+  .event-card.compact .event-metric { color: var(--purple); }
+  .event-card.budget .event-metric { color: var(--orange); }
+
+  .plan-card {
+    margin: 10px 0 10px 42px; border: 1px solid rgba(210,153,34,.35);
+    border-radius: 10px; background: var(--orange-soft); overflow: hidden;
+    animation: fadeIn .25s ease;
+  }
+  .plan-head { padding: 10px 16px; font-size: 12.5px; font-weight: 600; color: var(--orange); display: flex; gap: 8px; align-items: center; }
+  .plan-step { display: flex; gap: 10px; padding: 7px 16px; font-size: 12.5px; align-items: flex-start; border-top: 1px solid rgba(210,153,34,.15); }
+  .plan-step .st { font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-top: 1px; flex-shrink: 0; }
+  .st.done { background: var(--green-soft); color: var(--green); }
+  .st.doing { background: var(--orange-soft); color: var(--orange); }
+  .st.todo { background: var(--bg-elevated); color: var(--text-faint); }
+  .plan-step .sd { color: var(--text-dim); line-height: 1.5; }
+
+  .agent-row { display: flex; gap: 10px; margin: 10px 0 10px 42px; animation: fadeIn .25s ease; }
+  .agent-chip {
+    flex: 1; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg-panel); padding: 10px 14px;
+  }
+  .agent-chip .an { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .agent-chip.planner .an { color: var(--orange); }
+  .agent-chip.executor .an { color: var(--accent); }
+  .agent-chip.reviewer .an { color: var(--green); }
+  .agent-chip .as { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; line-height: 1.5; }
+
+  /* ══════════ 输入区 ══════════ */
+  .composer-wrap { padding: 0 24px 18px; }
+  .composer {
+    max-width: 860px; margin: 0 auto;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 12px 14px 10px;
+    transition: border-color .15s;
+  }
+  .composer:focus-within { border-color: rgba(88,166,255,.5); }
+  .composer textarea {
+    width: 100%; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 14px; font-family: var(--sans);
+    resize: none; height: 44px; line-height: 1.5;
+  }
+  .composer textarea::placeholder { color: var(--text-faint); }
+  .composer-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .hint-chip {
+    font-size: 11px; color: var(--text-faint);
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px 9px; cursor: default;
+  }
+  .hint-chip b { color: var(--accent); font-weight: 500; font-family: var(--mono); }
+  .send-btn {
+    margin-left: auto; padding: 7px 20px; border: none; border-radius: 8px;
+    background: linear-gradient(135deg, #58a6ff, #4c8dff);
+    color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+    display: flex; align-items: center; gap: 7px; transition: opacity .15s;
+  }
+  .send-btn:hover { opacity: .88; }
+  .stop-btn {
+    margin-left: auto; padding: 7px 20px; border: 1px solid var(--red);
+    border-radius: 8px; background: var(--red-soft); color: var(--red);
+    font-size: 13px; font-weight: 600; cursor: pointer; display: none;
+    align-items: center; gap: 7px;
+  }
+  .kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text-faint); }
+
+  /* 消息流 Markdown 渲染样式 */
+  .msg-text pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; overflow-x: auto; margin: 8px 0;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+  }
+  .msg-text pre code { border: none; background: none; padding: 0; }
+  .msg-text ul, .msg-text ol { padding-left: 20px; margin: 6px 0; }
+  .msg-text blockquote {
+    border-left: 3px solid var(--accent); padding: 2px 0 2px 10px;
+    color: var(--text-dim); margin: 6px 0;
+  }
+
+  /* 模型配置弹窗 */
+  .cfg-modal { width: 560px; }
+  .cfg-list { max-height: 300px; overflow-y: auto; margin: 12px 0; }
+  .cfg-row {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 8px;
+  }
+  .cfg-row.current { border-color: rgba(88,166,255,.45); background: var(--accent-soft); }
+  .cfg-logo {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; color: #fff;
+  }
+  .cfg-info { flex: 1; min-width: 0; }
+  .cfg-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .cfg-meta { font-size: 11px; color: var(--text-faint); font-family: var(--mono); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfg-key { font-size: 11px; color: var(--green); font-family: var(--mono); }
+  .cfg-tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; background: var(--bg-elevated); color: var(--text-dim); }
+  .cfg-ops { display: flex; gap: 6px; align-items: center; }
+  .cfg-op {
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-dim); font-size: 11.5px; cursor: pointer; transition: all .12s;
+  }
+  .cfg-op:hover { background: var(--bg-hover); color: var(--text); }
+  .cfg-op.test-ok { color: var(--green); border-color: rgba(63,185,80,.4); }
+  .cfg-op.test-fail { color: var(--red); border-color: rgba(248,81,73,.4); }
+  .cfg-switch { position: relative; width: 34px; height: 18px; border-radius: 9px; background: #30363d; cursor: pointer; transition: background .15s; border: none; flex-shrink: 0; }
+  .cfg-switch.on { background: var(--green); }
+  .cfg-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .cfg-switch.on::after { left: 18px; }
+  .cfg-add {
+    width: 100%; padding: 9px 0; border: 1px dashed var(--border); border-radius: 10px;
+    background: transparent; color: var(--text-faint); font-size: 12.5px; cursor: pointer;
+  }
+  .cfg-add:hover { border-color: rgba(88,166,255,.4); color: var(--accent); }
+  .cfg-note { font-size: 11px; color: var(--text-faint); line-height: 1.6; margin-top: 10px; }
+  .cfg-note b { color: var(--text-dim); }
+
+  /* 记忆面板 */
+  .mem-tabs { display: flex; gap: 6px; margin: 12px 0 10px; }
+  .mem-tab {
+    padding: 5px 14px; border-radius: 7px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-dim); font-size: 12.5px; cursor: pointer;
+  }
+  .mem-tab.on { background: var(--accent-soft); border-color: rgba(88,166,255,.4); color: var(--accent); font-weight: 600; }
+  .mem-tab .n { font-family: var(--mono); font-size: 10.5px; opacity: .8; margin-left: 3px; }
+  .mem-list { max-height: 300px; overflow-y: auto; }
+  .mem-row {
+    display: flex; align-items: flex-start; gap: 11px;
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 14px; margin-bottom: 8px;
+  }
+  .mem-row.pending { border-color: rgba(210,153,34,.4); background: var(--orange-soft); }
+  .mem-kind { font-size: 9.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px; flex-shrink: 0; margin-top: 1px; }
+  .mem-kind.preference { background: var(--purple-soft); color: var(--purple); }
+  .mem-kind.fact { background: var(--accent-soft); color: var(--accent); }
+  .mem-kind.decision { background: var(--green-soft); color: var(--green); }
+  .mem-kind.pitfall { background: var(--red-soft); color: var(--red); }
+  .mem-kind.workflow { background: var(--orange-soft); color: var(--orange); }
+  .mem-body { flex: 1; min-width: 0; }
+  .mem-content { font-size: 12.5px; line-height: 1.6; color: var(--text); }
+  .mem-row.off .mem-content { text-decoration: line-through; color: var(--text-faint); }
+  .mem-stats { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .mem-stats .sc { color: var(--accent); font-weight: 600; }
+  .mem-ops { display: flex; gap: 6px; flex-shrink: 0; }
+  .mem-pending-tip { font-size: 10.5px; color: var(--orange); margin-top: 4px; }
+  .mem-footer {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    padding-top: 12px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim);
+  }
+  .mem-footer .quota { font-family: var(--mono); color: var(--text-faint); margin-left: auto; font-size: 11px; }
+
+
+
+  .typing { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; }
+  .typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 70%, 100% { opacity: .25; } 35% { opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══════════ 侧边栏：多项目 × 多对话 ══════════ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">y0</div>
+      <div>
+        <div class="brand-name">y-zero-agent</div>
+        <div class="brand-sub">AI Coding Agent · v0.1.0</div>
+      </div>
+    </div>
+
+    <div class="sidebar-actions">
+      <button class="btn-sm primary" onclick="fakeToast('新建项目：选择目录后自动注册')">＋ 新项目</button>
+      <button class="btn-sm" onclick="newSession()">＋ 新对话</button>
+    </div>
+
+    <div class="sidebar-scroll" id="sidebar"></div>
+
+    <div class="sidebar-footer">
+      <div class="footer-row"><span>Token 预算（今日）</span><span class="footer-val" id="footTokens">182k / 2M</span></div>
+      <div class="footer-row"><span>MCP Servers</span><span class="footer-val"><span class="status-dot"></span>3 已连接</span></div>
+      <div class="footer-row"><span>Skills</span><span class="footer-val">5 已加载</span></div>
+      <div class="footer-row"><span>平台</span><span class="footer-val" id="footPlatform">macOS · zsh</span></div>
+    </div>
+  </aside>
+
+  <!-- ══════════ 主区域 ══════════ -->
+  <div class="main">
+
+    <div class="topbar">
+      <div class="topbar-crumb" id="crumb">y-zero-agent <span class="dim">/</span> quant-engine <span class="dim">/</span> <span id="crumbSession">修复回测 look-ahead bias</span></div>
+
+      <div class="mode-switch">
+        <button class="mode-btn react-mode active" data-mode="react" onclick="setMode(this)">
+          <span class="mode-ico">⚡</span> ReAct
+        </button>
+        <button class="mode-btn plan-mode" data-mode="plan" onclick="setMode(this)">
+          <span class="mode-ico">📋</span> Plan &amp; Execute
+        </button>
+        <button class="mode-btn multi-mode" data-mode="multi" onclick="setMode(this)">
+          <span class="mode-ico">🤖</span> Multi-Agent
+        </button>
+      </div>
+
+      <select class="model-select" id="modelSelect">
+        <option>claude-sonnet-4-5</option>
+        <option>gpt-5-codex</option>
+        <option>deepseek-v3.2</option>
+        <option>qwen3-coder-plus</option>
+      </select>
+
+      <button class="cfg-op" style="padding:6px 12px" onclick="openModelConfig()" title="大模型配置">⚙ 模型配置</button>
+      <button class="cfg-op" style="padding:6px 12px;position:relative" onclick="openMemoryPanel()" title="记忆管理">🧠 记忆<span id="memBadge" style="position:absolute;top:-4px;right:-4px;background:var(--orange);color:#fff;font-size:9px;border-radius:8px;padding:1px 5px;font-weight:700">2</span></button>
+
+      <div class="budget-pill">
+        <span style="color:var(--text-faint)">预算</span>
+        <div class="budget-bar"><div class="budget-fill" id="budgetFill" style="width:23%"></div></div>
+        <span id="budgetText">23%</span>
+      </div>
+    </div>
+
+    <div class="chat-scroll" id="chatScroll">
+      <div class="chat-inner" id="chatInner"></div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea id="input" placeholder="描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill（Enter 发送，Shift+Enter 换行）" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"></textarea>
+        <div class="composer-bar">
+          <span class="hint-chip"><b>@</b> 文件引用</span>
+          <span class="hint-chip"><b>/skill</b> 技能</span>
+          <span class="hint-chip"><b>/mcp</b> 扩展工具</span>
+          <span class="hint-chip" id="modeHintChip">当前模式：<b>ReAct</b></span>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送 <span class="kbd">↵</span></button>
+          <button class="stop-btn" id="stopBtn" onclick="stopRun()">■ 停止</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 记忆面板弹窗 ══════════ -->
+<div class="modal-mask" id="memMask" onclick="if(event.target===this)closeMem()">
+  <div class="modal cfg-modal">
+    <h3>🧠 记忆管理 <span class="cfg-tag">三层记忆 · L2 动态</span></h3>
+    <div class="mem-tabs" id="memTabs">
+      <button class="mem-tab on" data-tab="all" onclick="switchMemTab(this)">全部<span class="n" id="memN"></span></button>
+      <button class="mem-tab" data-tab="pending" onclick="switchMemTab(this)">待确认<span class="n" id="pendN"></span></button>
+      <button class="mem-tab" data-tab="off" onclick="switchMemTab(this)">已停用</button>
+    </div>
+    <div class="mem-list" id="memList"></div>
+    <div class="mem-footer">
+      <span>自动提炼（会话结束/压缩时）</span>
+      <button class="cfg-switch on" id="distillSwitch" onclick="toggleDistill(this)" title="memory.autoDistill"></button>
+      <span class="quota" id="memQuota"></span>
+    </div>
+    <div class="cfg-note">召回评分：<b>词汇覆盖 72% + 重要性 12% + 置信度 8% + 时间衰减 6%（半衰期 30 天）+ 访问频率 2%</b>，Top-5 注入对话；淘汰项进回收站保留 30 天。</div>
+    <div class="modal-btns" style="margin-top:12px"><button onclick="closeMem()">关闭</button></div>
+  </div>
+</div>
+
+<!-- ══════════ 大模型配置弹窗 ══════════ -->
+<div class="modal-mask" id="cfgMask" onclick="if(event.target===this)closeCfg()">
+  <div class="modal cfg-modal">
+    <h3>⚙ 大模型配置 <span class="cfg-tag">Provider Registry</span></h3>
+    <div class="cfg-list" id="cfgList"></div>
+    <button class="cfg-add" onclick="addProvider()">＋ 添加模型服务（Anthropic / OpenAI 兼容 / DeepSeek / Qwen…）</button>
+    <div class="cfg-note">
+      🔐 API Key 存储于<b>系统钥匙串</b>（mac Keychain / Win Credential Manager），界面不回显；保存前自动<b>连通性测试</b>。
+      配置修改仅对<b>新对话</b>生效；项目级 <b>.y-zero/models.json</b> 可覆盖全局默认。
+    </div>
+    <div class="modal-btns" style="margin-top:14px">
+      <button onclick="closeCfg()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 移除确认弹窗 ══════════ -->
+<div class="modal-mask" id="modalMask" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3><span class="warn">⚠</span> <span id="modalTitle">确认删除</span></h3>
+    <p id="modalDesc"></p>
+    <input id="modalInput" placeholder="输入项目名以确认" oninput="document.getElementById('modalConfirmBtn').disabled = this.value !== pendingName">
+    <div class="modal-btns">
+      <button onclick="closeModal()">取消</button>
+      <button class="danger" id="modalConfirmBtn" onclick="doRemove()">移除（软删除）</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════ Mock 数据：多项目 × 多对话 ══════════ */
+const projects = [
+  {
+    id: 'quant', name: 'quant-engine', dot: 'var(--green)', sessions: [
+      { id: 's1', title: '修复回测 look-ahead bias', mode: 'react', active: true },
+      { id: 's2', title: '配置序列化 500 排查', mode: 'react', active: false },
+      { id: 's3', title: '新增策略回测模块规划', mode: 'plan', active: false },
+    ]
+  },
+  {
+    id: 'wms', name: 'wky-wms (WMS)', dot: 'var(--accent)', sessions: [
+      { id: 's4', title: 'Sa-Token 权限拦截器', mode: 'react', active: false },
+      { id: 's5', title: '库位分配重构 · 多Agent', mode: 'multi', active: false },
+    ]
+  },
+  {
+    id: 'plan', name: '学科规划系统', dot: 'var(--purple)', sessions: [
+      { id: 's6', title: '排课重复规则点选 Bug', mode: 'react', active: false },
+      { id: 's7', title: 'SQL → PostgreSQL 迁移', mode: 'plan', active: false },
+    ]
+  },
+];
+
+let currentMode = 'react';
+let busy = false;
+
+/* ══════════ 侧边栏渲染 ══════════ */
+function renderSidebar() {
+  const el = document.getElementById('sidebar');
+  el.innerHTML = projects.map(p => `
+    <div class="project-group">
+      <div class="project-header ${p.id==='quant'?'active':''}">
+        <span class="project-caret open">▶</span>
+        <span class="project-dot" style="background:${p.dot}"></span>
+        <span class="project-name">${p.name}</span>
+        <span class="project-count">${p.sessions.length}</span>
+      </div>
+      <div class="session-list">
+        ${p.sessions.map(s => `
+          <div class="session-item ${s.active?'active':''}" onclick="switchSession('${p.id}','${s.id}')">
+            <span class="session-icon">💬</span>
+            <span class="session-title">${s.title}</span>
+            <span class="session-mode ${s.mode==='react'?'react':s.mode==='plan'?'plan':'multi'}">${s.mode==='react'?'REACT':s.mode==='plan'?'PLAN':'MULTI'}</span>
+            <button class="item-del" title="删除会话" onclick="event.stopPropagation();askRemove('session','${s.id}','${s.title}')">✕</button>
+          </div>`).join('')}
+      </div>
+    </div>`).join('') + `
+    <div class="project-group">
+      <div class="project-header" style="color:var(--text-faint)" onclick="fakeToast('新建项目：选择目录后自动注册')">
+        <span class="project-caret"></span><span style="font-size:12px">＋ 添加项目目录…</span>
+      </div>
+    </div>`;
+  // 项目头部绑定删除按钮（在字符串外逐个注入，避免嵌套引号问题）
+  document.querySelectorAll('.project-header').forEach((h, i) => {
+    const p = projects[i];
+    if (!p) return;
+    const del = document.createElement('button');
+    del.className = 'item-del';
+    del.title = '移除项目';
+    del.textContent = '✕';
+    del.onclick = (e) => { e.stopPropagation(); askRemove('project', p.id, p.name); };
+    h.appendChild(del);
+  });
+}
+
+function switchSession(pid, sid) {
+  projects.forEach(p => p.sessions.forEach(s => s.active = (p.id===pid && s.id===sid)));
+  renderSidebar();
+  const p = projects.find(p=>p.id===pid), s = p.sessions.find(s=>s.id===sid);
+  document.getElementById('crumb').innerHTML =
+    `y-zero-agent <span class="dim">/</span> ${p.name} <span class="dim">/</span> <span>${s.title}</span>`;
+  fakeToast(`已切换对话：${s.title}（上下文已恢复）`);
+}
+
+function newSession() {
+  const p = projects[0];
+  p.sessions.unshift({ id: 's'+Date.now(), title: '新对话 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}), mode: currentMode, active: true });
+  p.sessions.forEach((s,i)=>{ if(i>0) s.active=false; });
+  renderSidebar();
+  fakeToast('已创建新对话');
+}
+
+/* ══════════ 模式切换 ══════════ */
+function setMode(btn) {
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentMode = btn.dataset.mode;
+  const names = { react: 'ReAct', plan: 'Plan & Execute', multi: 'Multi-Agent' };
+  document.getElementById('modeHintChip').innerHTML = `当前模式：<b>${names[currentMode]}</b>`;
+  fakeToast(`已切换至 ${names[currentMode]} 模式`);
+}
+
+/* ══════════ 消息渲染 ══════════ */
+function addUserMsg(html) {
+  const d = document.createElement('div');
+  d.className = 'msg msg-user';
+  d.innerHTML = `<div class="avatar user">LW</div><div class="bubble">${html}</div>`;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+}
+function addAIMsg(html, meta) {
+  const d = document.createElement('div');
+  d.className = 'msg';
+  d.innerHTML = `
+    <div class="msg-meta"><div class="avatar ai" style="width:22px;height:22px;font-size:9px;border-radius:6px">y0</div>
+      <span>y-zero-agent</span>
+      <span class="tag turn">${meta.turn}</span>
+      <span class="tag tok">${meta.tok}</span></div>
+    <div style="margin-left:30px"><div class="msg-text">${html}</div></div>`;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+  return d;
+}
+function addToolCard(name, args, ms, status, body, needConfirm) {
+  const d = document.createElement('div');
+  d.className = 'tool-card';
+  const stIcon = status==='ok' ? '✓' : status==='run' ? '⟳' : '!';
+  d.innerHTML = `
+    <div class="tool-head" onclick="this.parentElement.classList.toggle('open')">
+      <div class="tool-status ${status}">${stIcon}</div>
+      <span class="tool-name">${name}</span>
+      <span class="tool-args">${args}</span>
+      <span class="tool-ms">${ms}</span>
+      <span class="tool-caret">▶</span>
+    </div>
+    <div class="tool-body"><pre>${body}</pre></div>
+    ${needConfirm ? `<div class="confirm-bar"><button class="btn-confirm btn-yes" onclick="confirmTool(this,true)">✓ 允许执行</button><button class="btn-confirm btn-no" onclick="confirmTool(this,false)">✕ 拒绝</button></div>` : ''}
+  `;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+  return d;
+}
+function confirmTool(btn, yes) {
+  const bar = btn.parentElement;
+  bar.innerHTML = yes
+    ? '<span style="font-size:12px;color:var(--green)">✓ 已允许 · 工具执行完成（1.2s）</span>'
+    : '<span style="font-size:12px;color:var(--red)">✕ 已拒绝 · Agent 将调整方案</span>';
+  if (yes) setTimeout(() => addAIMsg('变更已写入 <code>engine/loop.ts</code>，回归测试 <b>42/42 全部通过</b>。<br>本轮任务完成，共消耗 <b>38.2k tokens</b>，费用 <b>¥0.46</b>。', { turn: 'TURN 6/50', tok: 'in 12.1k · out 1.8k' }), 400);
+}
+function addEvent(kind, html) {
+  const d = document.createElement('div');
+  d.className = `event-card ${kind}`;
+  d.innerHTML = `<span class="event-ico">${kind==='compact'?'🗜️':'⚠️'}</span><div>${html}</div>`;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+}
+function addPlanCard() {
+  const d = document.createElement('div');
+  d.className = 'plan-card';
+  d.innerHTML = `
+    <div class="plan-head">📋 执行计划（可编辑 · 确认后逐步执行）</div>
+    <div class="plan-step"><span class="st done">✓ 完成</span><span class="sd">定位 loop.ts:42 预算检查位于 LLM 调用之后（look-ahead 根因）</span></div>
+    <div class="plan-step"><span class="st doing">⟳ 执行中</span><span class="sd">将 budget.check 前移至轮首，注入剩余预算到系统提示词</span></div>
+    <div class="plan-step"><span class="st todo">○ 待执行</span><span class="sd">补充单测：预算耗尽场景事件流快照</span></div>
+    <div class="plan-step"><span class="st todo">○ 待执行</span><span class="sd">全量回归 + 更新 CHANGELOG</span></div>`;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+}
+function addAgentRow() {
+  const d = document.createElement('div');
+  d.className = 'agent-row';
+  d.innerHTML = `
+    <div class="agent-chip planner"><div class="an">🧠 Planner</div><div class="as">拆解为 3 个子任务，分配给 2 个 Executor</div></div>
+    <div class="agent-chip executor"><div class="an">⚙️ Executor-1</div><div class="as">修改 engine/loop.ts 主循环逻辑 · 运行中</div></div>
+    <div class="agent-chip reviewer"><div class="an">🔍 Reviewer</div><div class="as">等待 Executor 完成后进行代码审查</div></div>`;
+  document.getElementById('chatInner').appendChild(d);
+  scrollBottom();
+}
+function scrollBottom() {
+  const el = document.getElementById('chatScroll');
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ══════════ 发送（模拟流式） ══════════ */
+function sendMessage() {
+  if (busy) return;
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  busy = true;
+  document.getElementById('sendBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'flex';
+
+  // 隐形 Markdown：先按 Markdown 渲染，再替换 @ 文件引用
+  const refHtml = mdRender(text).replace(/@([\w\-./]+)/g, '<span class="file-ref">📄 $1</span>');
+  addUserMsg(refHtml);
+
+  setTimeout(() => {
+    if (currentMode === 'plan') {
+      addAIMsg('收到。这是一个多步骤任务，我先制定执行计划：<div class="typing"><span></span><span></span><span></span></div>', { turn: 'TURN 1/50', tok: 'in 2.3k · out 0.4k' });
+      setTimeout(addPlanCard, 600);
+      setTimeout(() => {
+        addToolCard('read_file', 'engine/loop.ts · offset 30 · limit 40', '0.4s', 'ok',
+`→ const result = await llm.chat(messages, tools);
++ const guard = budget.check(ctx);      // ← 前移至轮首
++ if (guard.exceeded) return summary();
+  const stream = llm.chat(messages, tools);`);
+        endRun();
+      }, 1400);
+    } else if (currentMode === 'multi') {
+      addAIMsg('任务较复杂，启动 <b>Multi-Agent</b> 协作（Planner → Executor×2 → Reviewer）：<div class="typing"><span></span><span></span><span></span></div>', { turn: 'TURN 1/50', tok: 'in 2.1k · out 0.3k' });
+      setTimeout(addAgentRow, 700);
+      setTimeout(() => {
+        addToolCard('todo_write', '3 子任务 · owner: executor-1, executor-2', '0.1s', 'ok',
+`[
+  { task: "主循环预算前移", owner: "executor-1", status: "doing" },
+  { task: "压缩阈值回归用例", owner: "executor-2", status: "doing" },
+  { task: "代码审查 + 汇合", owner: "reviewer", status: "pending" }
+]`);
+        endRun();
+      }, 1600);
+    } else {
+      addAIMsg('好的，我先检查上下文预算，然后逐步执行：<div class="typing"><span></span><span></span><span></span></div>', { turn: 'TURN 2/50', tok: 'in 2.4k · out 0.2k' });
+      setTimeout(() => addEvent('compact',
+        `上下文自动压缩完成 · 压缩率 <span class="event-metric">76%</span>（12.4k → 3.0k tokens）<br><span style="font-size:11.5px;opacity:.8">保留系统提示词 + 最近 3 轮原文，历史已折叠为结构化摘要（可展开回看）</span>`), 900);
+      setTimeout(() => addToolCard('grep_search', 'pattern="budget.check" · path="engine/"', '0.3s', 'ok',
+`engine/loop.ts:42:  const result = await llm.chat(messages, tools);
+engine/loop.ts:58:  const guard = budget.check(ctx);   // ← 检查时机晚于调用（bug）
+engine/budget.ts:12: export function check(ctx: RunContext): GuardResult {`), 1800);
+      setTimeout(() => {
+        addToolCard('edit_file', 'engine/loop.ts · 替换 1 处（高危 · 需确认）', '—', 'confirm',
+`- const result = await llm.chat(messages, tools);
++ const guard = budget.check(ctx);
++ if (guard.exceeded) return emitSummary(ctx);
++ const stream = llm.chat(messages, tools);`, true);
+      }, 2600);
+    }
+  }, 500);
+}
+
+function endRun() {
+  busy = false;
+  document.getElementById('sendBtn').style.display = 'flex';
+  document.getElementById('stopBtn').style.display = 'none';
+}
+function stopRun() {
+  endRun();
+  addAIMsg('⏹ 已中断。当前进度与已产生变更已保存至会话，可随时恢复继续。', { turn: 'ABORT', tok: 'usage 已记录' });
+}
+function fakeToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1c2128;border:1px solid #2d333b;color:#e6edf3;padding:9px 20px;border-radius:10px;font-size:13px;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.5);animation:fadeIn .2s';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 2200);
+}
+
+/* ══════════ 移除项目 / 会话 ══════════ */
+let pendingRemove = null; // { kind, id, name }
+let pendingName = '';
+
+function askRemove(kind, id, name) {
+  pendingRemove = { kind, id, name };
+  pendingName = name;
+  const mask = document.getElementById('modalMask');
+  const title = document.getElementById('modalTitle');
+  const desc = document.getElementById('modalDesc');
+  const input = document.getElementById('modalInput');
+  const btn = document.getElementById('modalConfirmBtn');
+  if (kind === 'session') {
+    title.textContent = '删除会话';
+    desc.innerHTML = `将删除会话 <b>「${name}」</b>。<br>默认<b>软删除</b>：30 天内可在回收站恢复，期间不参与上下文与检索；运行中的任务会先中止。`;
+    input.classList.remove('show'); btn.disabled = false; btn.textContent = '删除（软删除）';
+  } else {
+    title.textContent = '移除项目';
+    desc.innerHTML = `将移除项目 <b>「${name}」</b> 及其下<b>所有会话</b>（级联软删除，30 天内可恢复）。<br>⚠ 仅解除注册与停用项目级 MCP/Skills 配置，<b>不会删除磁盘上的源码与 .y-zero/ 目录</b>。<br>为防误操作，请输入项目名确认：`;
+    input.classList.add('show'); input.value = ''; btn.disabled = true; btn.textContent = '移除（软删除）';
+  }
+  mask.classList.add('show');
+  if (kind === 'project') input.focus();
+}
+function doRemove() {
+  if (!pendingRemove) return;
+  const { kind, id, name } = pendingRemove;
+  if (kind === 'project') {
+    const idx = projects.findIndex(p => p.id === id);
+    projects.splice(idx, 1);
+    if (!projects.length) projects.push({ id: 'new', name: '（空）', dot: 'var(--text-faint)', sessions: [] });
+    fakeToast(`项目「${name}」已移除（软删除 · 30 天内可从回收站恢复）`);
+  } else {
+    projects.forEach(p => {
+      const i = p.sessions.findIndex(s => s.id === id);
+      if (i >= 0) {
+        p.sessions.splice(i, 1);
+        if (p.sessions.length) p.sessions[0].active = true;
+      }
+    });
+    fakeToast(`会话「${name}」已删除（软删除 · 可恢复）`);
+  }
+  closeModal();
+  renderSidebar();
+}
+function closeModal() {
+  document.getElementById('modalMask').classList.remove('show');
+  pendingRemove = null;
+}
+
+/* ══════════ 大模型配置 ══════════ */
+const providers = [
+  { id: 'anthropic-main', name: 'Anthropic 官方', type: 'anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5', key: true, enabled: true, current: true, color: '#d97757' },
+  { id: 'openai-proxy', name: 'OpenAI（中转）', type: 'openai-compatible', baseUrl: 'https://proxy.example.com/v1', model: 'gpt-5-codex', key: true, enabled: true, current: false, color: '#10a37f' },
+  { id: 'deepseek', name: 'DeepSeek', type: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-v3.2', key: true, enabled: true, current: false, color: '#4d6bfe' },
+  { id: 'qwen', name: 'Qwen 火山引擎', type: 'qwen', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'qwen3-coder-plus', key: false, enabled: false, current: false, color: '#615ced' },
+];
+
+function openModelConfig() { renderCfgList(); document.getElementById('cfgMask').classList.add('show'); }
+function closeCfg() { document.getElementById('cfgMask').classList.remove('show'); }
+
+function renderCfgList() {
+  document.getElementById('cfgList').innerHTML = providers.map(p => `
+    <div class="cfg-row ${p.current?'current':''}">
+      <div class="cfg-logo" style="background:${p.color}">${p.name[0].toUpperCase()}</div>
+      <div class="cfg-info">
+        <div class="cfg-name">${p.name}
+          <span class="cfg-tag">${p.type}</span>
+          ${p.current ? '<span class="cfg-tag" style="background:var(--accent-soft);color:var(--accent)">当前使用</span>' : ''}
+        </div>
+        <div class="cfg-meta">${p.baseUrl} · ${p.model}</div>
+        <div class="cfg-key">${p.key ? '🔑 API Key 已配置（不回显）' : '⚠ 未配置 API Key'}</div>
+      </div>
+      <div class="cfg-ops">
+        <button class="cfg-op" onclick="testProvider('${p.id}',this)">测试连通</button>
+        <button class="cfg-op" onclick="useProvider('${p.id}')">设为默认</button>
+        <button class="cfg-op" onclick="fakeToast('编辑配置：${p.name}（名称 / Base URL / 参数）')">编辑</button>
+        <button class="cfg-switch ${p.enabled?'on':''}" title="启用/停用" onclick="toggleProvider('${p.id}',this)"></button>
+      </div>
+    </div>`).join('');
+}
+function testProvider(id, btn) {
+  const p = providers.find(x=>x.id===id);
+  btn.textContent = '⟳ 测试中…'; btn.className = 'cfg-op';
+  setTimeout(() => {
+    if (p.key) { btn.textContent = '✓ 连通正常（4 模型可用）'; btn.className = 'cfg-op test-ok'; }
+    else { btn.textContent = '✗ 失败：未配置 API Key'; btn.className = 'cfg-op test-fail'; }
+  }, 900);
+}
+function useProvider(id) {
+  providers.forEach(p => p.current = (p.id === id));
+  const p = providers.find(x=>x.id===id);
+  const sel = document.getElementById('modelSelect');
+  sel.options.length = 0;
+  const pool = { 'anthropic': ['claude-sonnet-4-5','claude-opus-4-1'], 'openai-compatible': ['gpt-5-codex'], 'deepseek': ['deepseek-v3.2'], 'qwen': ['qwen3-coder-plus'] };
+  pool[p.type].forEach(m => sel.add(new Option(m, m)));
+  renderCfgList();
+  fakeToast(`默认模型服务已切换：${p.name}（对新对话生效）`);
+}
+function toggleProvider(id, sw) {
+  const p = providers.find(x=>x.id===id);
+  p.enabled = !p.enabled;
+  sw.classList.toggle('on', p.enabled);
+  fakeToast(p.enabled ? `${p.name} 已启用` : `${p.name} 已停用（下拉列表隐藏）`);
+}
+function addProvider() { fakeToast('打开新增表单：名称 / 类型 / Base URL / API Key / 默认模型 / 参数'); }
+
+/* ══════════ 记忆面板 ══════════ */
+let memTab = 'all';
+let memories = [
+  { id:'m1', kind:'preference', on:true,  content:'用户偏好中文沟通，代码注释与提交信息用中文', imp:0.9, conf:0.95, score:87.4, access:23, src:'tool' },
+  { id:'m2', kind:'decision',  on:true,  content:'QuantEdge 遵循"先修底层再开新模块"原则，压缩参数统一 80%/55%', imp:0.8, conf:0.9, score:65.8, access:11, src:'auto' },
+  { id:'m3', kind:'pitfall',   on:true,  content:'wzky-wms 的 Sa-Token 拦截器需排除 /auth/** 路径，否则登录接口 401', imp:0.7, conf:0.85, score:42.6, access:7, src:'tool' },
+  { id:'m4', kind:'fact',      on:true,  content:'用户主力项目目录：y-zero-agent（TS Agent）、wzky-wms（Java WMS）', imp:0.6, conf:0.9, score:38.1, access:15, src:'auto' },
+  { id:'m5', kind:'workflow',  on:false, content:'发版前先跑 pnpm test && pnpm build 双平台冒烟', imp:0.5, conf:0.7, score:12.3, access:2, src:'tool' },
+];
+let pendingMemories = [
+  { id:'p1', kind:'preference', content:'用户习惯直接粘贴编译错误与运行时堆栈进行迭代排查，希望主动定位而非反复询问', imp:0.7, conf:0.8, src:'auto' },
+  { id:'p2', kind:'fact', content:'《陆沉天下》已完结，伏笔台账 238 条闭环率 99.2%', imp:0.4, conf:0.75, src:'auto' },
+];
+
+function openMemoryPanel() {
+  renderMemList();
+  document.getElementById('memMask').classList.add('show');
+  document.getElementById('memBadge').style.display = pendingMemories.length ? 'inline-block' : 'none';
+}
+function closeMem() { document.getElementById('memMask').classList.remove('show'); }
+function switchMemTab(btn) {
+  memTab = btn.dataset.tab;
+  document.querySelectorAll('.mem-tab').forEach(b=>b.classList.toggle('on', b===btn));
+  renderMemList();
+}
+function memStats(m, pending) {
+  if (pending) return `<span>importance ${m.imp.toFixed(2)} · confidence ${m.conf.toFixed(2)} · 来源：${m.src==='auto'?'自动提炼':'工具保存'}</span>`;
+  return `<span class="sc">score ${m.score}</span><span>importance ${m.imp.toFixed(2)}</span><span>置信度 ${m.conf.toFixed(2)}</span><span>召回 ${m.access} 次</span><span>${m.src==='auto'?'自动提炼':'工具保存'}</span>`;
+}
+function renderMemList() {
+  document.getElementById('memN').textContent = memories.filter(m=>m.on).length;
+  document.getElementById('pendN').textContent = pendingMemories.length;
+  document.getElementById('memQuota').textContent = `配额 ${memories.filter(m=>m.on).length + pendingMemories.length} / 512 条 · ≈18.2k / 64k tokens`;
+  const list = document.getElementById('memList');
+  let items = [];
+  if (memTab === 'all') items = memories.filter(m=>m.on).map(m => ({ m, pending:false }));
+  else if (memTab === 'pending') items = pendingMemories.map(m => ({ m, pending:true }));
+  else items = memories.filter(m=>!m.on).map(m => ({ m, pending:false }));
+  if (!items.length) { list.innerHTML = '<div style="text-align:center;color:var(--text-faint);font-size:12.5px;padding:24px 0">暂无记忆</div>'; return; }
+  list.innerHTML = items.map(({m, pending}) => `
+    <div class="mem-row ${pending?'pending':''} ${m.on===false?'off':''}">
+      <span class="mem-kind ${m.kind}">${{preference:'偏好',fact:'事实',decision:'决策',pitfall:'踩坑',workflow:'流程'}[m.kind]}</span>
+      <div class="mem-body">
+        <div class="mem-content">${m.content}</div>
+        <div class="mem-stats">${memStats(m, pending)}</div>
+        ${pending?'<div class="mem-pending-tip">ⓘ 来自自动提炼（默认开启），采纳后才会生效参与召回</div>':''}
+      </div>
+      <div class="mem-ops">
+        ${pending
+          ? `<button class="cfg-op" onclick="adoptMem('${m.id}')">✓ 采纳</button><button class="cfg-op" onclick="discardMem('${m.id}')">忽略</button>`
+          : `<button class="cfg-switch ${m.on?'on':''}" title="启用/停用" onclick="toggleMem('${m.id}',this)"></button><button class="cfg-op" onclick="removeMem('${m.id}')">删除</button>`}
+      </div>
+    </div>`).join('');
+}
+function adoptMem(id) {
+  const i = pendingMemories.findIndex(m=>m.id===id);
+  const [m] = pendingMemories.splice(i, 1);
+  memories.unshift({ ...m, on:true, score: 30 + m.imp*50, access: 0 });
+  fakeToast('记忆已采纳，下轮对话起参与召回');
+  renderMemList();
+  document.getElementById('memBadge').style.display = pendingMemories.length ? 'inline-block' : 'none';
+}
+function discardMem(id) {
+  pendingMemories = pendingMemories.filter(m=>m.id!==id);
+  fakeToast('已忽略该提炼候选');
+  renderMemList();
+  document.getElementById('memBadge').style.display = pendingMemories.length ? 'inline-block' : 'none';
+}
+function toggleMem(id, sw) {
+  const m = memories.find(x=>x.id===id);
+  m.on = !m.on;
+  sw.classList.toggle('on', m.on);
+  fakeToast(m.on ? '记忆已启用' : '记忆已停用（不参与召回）');
+  setTimeout(renderMemList, 50);
+}
+function removeMem(id) {
+  memories = memories.filter(m=>m.id!==id);
+  fakeToast('已删除（软删除 · 回收站保留 30 天）');
+  renderMemList();
+}
+function toggleDistill(sw) {
+  sw.classList.toggle('on');
+  fakeToast(sw.classList.contains('on') ? '自动提炼已开启（memory.autoDistill = true）' : '自动提炼已关闭');
+}
+
+/* ══════════ 隐形 Markdown：输入端无 UI，发送后自动渲染 ══════════ */
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function mdRender(src) {
+  let h = esc(src);
+  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code>${code.replace(/\n$/,'')}</code></pre>`);
+  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>').replace(/^## (.+)$/gm, '<h3>$1</h3>').replace(/^# (.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>').replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
+  h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
+  h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" onclick="return false">$1</a>');
+  h = h.split(/\n{2,}/).map(b => /^<(h3|ul|pre|blockquote)/.test(b.trim()) ? b : (b.trim() ? `<div>${b.replace(/\n/g,'<br>')}</div>` : '')).join('');
+  return h;
+}
+
+/* ══════════ 初始演示对话 ══════════ */
+renderSidebar();
+addUserMsg('回测结果和实盘对不上，我怀疑是 look-ahead bias，帮我定位修复 <span class="file-ref">📄 @engine/loop.ts</span>');
+addAIMsg('我来定位。先用搜索确认预算检查与 LLM 调用的先后顺序：<div class="typing"><span></span><span></span><span></span></div>', { turn: 'TURN 1/50', tok: 'in 1.8k · out 0.2k' });
+addToolCard('grep_search', 'pattern="budget.check" · path="engine/"', '0.3s', 'ok',
+`engine/loop.ts:42:  const result = await llm.chat(messages, tools);
+engine/loop.ts:58:  const guard = budget.check(ctx);   // ← 检查时机晚于调用（bug）`);
+addEvent('budget', `任务预算预警 · 已使用 <span class="event-metric">23%</span>（session 14.2k / 200k tokens）`);
+addAIMsg('已确认根因：<code>budget.check</code> 位于 LLM 调用<b>之后</b>，导致本轮仍会消耗预算并看到"未来"数据 —— 这正是 look-ahead bias 的来源。修复方案：将检查前移至轮首，并把剩余预算注入系统提示词。是否执行修改？', { turn: 'TURN 3/50', tok: 'in 3.2k · out 0.6k' });
+scrollBottom();
+</script>
+</body>
+</html>
