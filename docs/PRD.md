@@ -102,9 +102,9 @@ y-zero-agent
 | 编号 | 需求 | 描述 |
 |------|------|------|
 | F-01 | ReAct 主循环引擎 | Thought → Action → Observation 循环；每轮注入剩余预算；异常（工具报错/解析失败）可自愈重试（上限可配） |
-| F-02 | Token 预算管理 | 会话级 + 任务级双层预算；每轮循环前检查；耗尽时优雅终止并输出摘要 |
+| F-02 | Token 预算管理 | **会话级为主**（默认 200k tokens / ¥5，超限可临时追加）；任务级预算为可选开关（默认关闭）；每轮循环前检查；耗尽时优雅终止并输出摘要 |
 | F-03 | 自动上下文压缩 | 达到阈值（默认窗口 80%）自动触发，压缩后控制在 55% 左右；保留系统提示词、最近 6 轮原文、滚动摘要；工具结果 >4000 字截断；长会话累计等效压缩率 70%–80% |
-| F-04 | SSE 多模型接入层 | Provider 抽象 + 至少 3 家实现（Anthropic / OpenAI 兼容 / DeepSeek）；统一 SSE 事件模型；断流重连 |
+| F-04 | SSE 多模型接入层 | Provider 抽象 + **4 家实现**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付；统一 SSE 事件模型；断流重连 |
 | F-04a | 大模型配置管理 | Provider 配置增删改查：名称、类型（anthropic / openai-compatible / deepseek / qwen…）、Base URL、API Key、默认模型、参数（temperature / max_tokens / top_p）；Key 经系统钥匙串或本地加密文件存储、界面不回显；保存前连通性测试；支持配置启停与排序（决定下拉列表顺序）；CLI `agent models` 与 Web 设置页双入口 |
 | F-05 | ToolCall 分片累积解析 | 流式 delta 中 tool_call 分片按 index 累积拼接，结束时统一校验 JSON；兼容不同厂商分片格式差异 |
 | F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；后续扩展至 14 个（+save_memory / recall_memory / load_skill） |
@@ -115,7 +115,7 @@ y-zero-agent
 | F-10 | 三级覆盖机制 | 内置默认 < 项目级（`.y-zero/` 目录） < 对话级（运行时覆盖），逐层 merge |
 | F-11 | 多项目 × 多对话 | 项目注册/切换；项目下多对话；对话持久化（本地存储），可恢复继续 |
 | F-11a | 项目/会话移除 | 会话删除（CLI `agent session rm` + Web 右键/悬浮删除）默认软删除（回收站保留 30 天，可彻底清除）；项目移除需输入项目名二次确认，级联软删除其下会话；正在运行的会话先中止再删除；软删除数据不参与上下文与检索 |
-| F-12 | Vue Web 控制台 | 项目管理、对话管理、对话可视化（含工具调用卡片）、模型配置；本地起服务 + 浏览器访问 |
+| F-12 | Vue Web 控制台 | 项目管理、对话管理、对话可视化（含工具调用卡片）、模型配置、记忆面板；**纯本地部署**：静态资源内嵌 CLI 包 + `agent serve` 本地 server（默认 127.0.0.1:7900） |
 | F-12a | 输入框隐形 Markdown | 输入框保持极简（无工具栏/预览 UI），Markdown 语法透明生效：`**粗**`、`` `码` ``、` ``` 代码块 ``` `、`- 列表`、`> 引用`、`[链接](url)` 等按原样输入；发送后消息流以 markdown-it 完整渲染（DOMPurify 消毒、代码块高亮 + 一键复制）；`@文件` 引用与 Markdown 语法共存 |
 | F-13 | 跨平台支持 | Windows 10+ / macOS 12+；路径、shell、信号处理差异抹平；npm 全局安装即用 |
 
@@ -124,7 +124,7 @@ y-zero-agent
 | 编号 | 需求 | 描述 |
 |------|------|------|
 | F-14 | Plan-and-Execute 模式 | 简单任务检测路由（规则+LLM 兜底，`/plan`/`/direct` 可强制）：简单直达，复杂 LLM 规划 → 生成 DAG → 拓扑排序 → 按层并行执行 → 汇总；计划卡可编辑/调整依赖后确认；节点失败可标 critical 终止。详见 docs/agent-modes-design.md §3 |
-| F-15 | Multi-Agent 模式 | 四角色闭环：编排器（纯调度）→ 规划者（产出 DAG，可按反馈调整）→ 执行者并行工作池（节点级隔离上下文）→ 检查者（质量检查，不通过返回规划者或重试，上限可配默认 2）。详见 docs/agent-modes-design.md §4 |
+| F-15 | Multi-Agent 模式 | 四角色闭环：编排器（纯调度）→ 规划者（产出 DAG，可按反馈调整）→ 执行者并行工作池（节点级隔离上下文）→ 检查者（质量检查，不通过返回规划者或重试，上限可配默认 2）；**完整角色集为四层十角色**（决策/执行/质量/协调层），MVP 实现核心五角色（Orchestrator/Planner/Worker/Reviewer/Verifier），Researcher/Writer/Tool Caller/Memory Keeper/Router 按任务类型动态启用。详见 docs/agent-modes-design.md §4 |
 | F-15a | Worker Pool 并行调度 | 共享任务队列，多 worker 竞争领取（默认 4，可配 1–8）；审查失败任务回队首重新排队；节点状态以事件流推送 CLI/Web。详见 docs/agent-modes-design.md §5 |
 | F-15b | 后台任务可靠恢复 | 任务状态机（queued/running/completed/failed/canceled）持久化 SQLite；租约 60s + 心跳 15s 防重复执行；启动时扫描孤儿任务（租约过期）回队列重排；checkpoint 幂等重试。详见 docs/agent-modes-design.md §6 |
 | F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.y-zero/skills < 项目级 .y-zero/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |
@@ -139,6 +139,22 @@ y-zero-agent
 | F-20 | 团队协作 | 项目/会话共享，权限管理 |
 | F-21 | 插件市场 | MCP Server 与 Skill 的一键安装市场 |
 | F-22 | 定时任务/自动化 | Agent 任务的 cron 调度 |
+| F-23 | 权限模式体系 | 三级模式：`plan`（只读，禁写禁执行）/ `default`（写需确认）/ `yolo`（全放行，双重开启）；工具级 allowlist 规则 + "本会话不再询问"；Web/CLI 统一确认协议 |
+| F-24 | 文件变更管理 | 每次写操作前自动快照（checkpoint）；会话级 diff 汇总；一键回滚到任意检查点；git 集成（建议分支/自动 commit 策略）——与 agent-modes-design §6 任务恢复 checkpoint 打通 |
+| F-25 | 多模态输入 | 消息支持图片附件（截图报错/UI 走查），视觉模型透传；图片 token 计价与压缩策略 |
+| F-26 | 子代理即工具（Task 工具） | 主循环中模型可自主派生隔离子代理执行探索/搜索类任务，结果摘要回填主上下文（区别于 Multi-Agent 的引擎级编排） |
+| F-27 | Hook 系统 | 生命周期钩子：PreToolUse / PostToolUse / SessionStart / SessionEnd / Stop；用户注入自定义逻辑（保存前 lint、禁改 main、结束后跑测试） |
+| F-28 | Evals 评测体系 | 本地任务基准集；多 Provider 横向对比报告；提示词/压缩参数变更后的回归保护 |
+| F-29 | Headless / SDK 形态 | 非交互运行 `agent -p "任务" --json`；退出码协议；结构化输出，供 CI 流水线与脚本集成 |
+| F-30 | 容器级沙箱 | `run_command` 可选 Docker/沙箱执行模式，隔离高危命令（现有白名单+确认之外的增强） |
+| F-31 | 成本与用量报告 | 按项目/会话/模型的费用统计面板；预算分级告警（现有 session 级预算之上） |
+| F-32 | 模型路由 | 按任务难度自动选模型：分类/提炼/摘要用小模型，规划与执行用大模型；可配路由规则 |
+| F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知） |
+| F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认 |
+| F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理） |
+| F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配 |
+
+> 注：F-23~F-26 虽列 P2，但其中权限模式（F-23）与文件变更管理（F-24）对日常使用影响较大，若评审认为必要可提前至 P1。
 
 ### 3.3 内置 11 个核心工具清单
 
@@ -219,18 +235,26 @@ Web 控制台
 
 | 里程碑 | 范围 | 交付物 |
 |--------|------|--------|
-| M1（4 周） | Agent 核心：ReAct 引擎 + 预算 + 压缩 + 11 工具 + 单 Provider | CLI 可用 |
-| M2（3 周） | 接入层：多 Provider SSE + ToolCall 分片解析 + MCP 扩展 + 并行工具 | 多模型 + MCP |
-| M3（3 周） | 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段按需加载/匹配评分 | 提示词架构 |
+| M1（4 周） | Agent 核心：ReAct 引擎 + 预算 + 压缩 + 11 工具 + 单 Provider + ink TUI 确认卡 | CLI 可用（命令名 `yzero`） |
+| M2（3 周） | 接入层：4 家 Provider SSE（Anthropic / OpenAI 兼容 / DeepSeek / Qwen）+ ToolCall 分片解析 + MCP 扩展 + 并行工具 | 多模型 + MCP |
+| M3（3 周） | 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段按需加载/匹配评分（内置 commit-review / test-fix / project-summarize） | 提示词架构 |
 | M4（4 周） | Web 控制台：多项目多对话 + 对话可视化 + 设置中心 + 记忆面板 | Vue 前端 |
 | M5（2 周） | Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务恢复 + 跨平台加固 | v1.0 发布 |
 
 ---
 
-## 7. 待确认问题
+## 7. 待确认问题（已于 2026-10-22 全部确认）
 
-1. **会话存储选型**：本地 SQLite（推荐，可检索）还是 JSON 文件（简单可同步 git）？——倾向 SQLite，需确认。
-2. **Web 控制台部署形态**：纯本地（CLI 内嵌静态资源 + 本地 server）是否足够？是否需要远程部署形态？
-3. **确认策略默认值**：高危工具默认"每次确认"还是"会话内首次确认"？yolo 模式是否需要双重开关？
-4. **Multi-Agent 首版角色集**：Planner/Executor/Reviewer 三角色是否满足，还是需要可自定义角色编排（成本更高，建议 P2）？
-5. **商业形态**：完全开源（GitHub）还是开源核心 + 云端增值？
+| # | 问题 | 决议 |
+|---|------|------|
+| 1 | 会话存储选型 | **本地 SQLite**（better-sqlite3，WAL 模式），不做 JSON 降级之外的其他方案 |
+| 2 | Web 控制台部署形态 | **纯本地**：CLI 内嵌静态资源（Vue 构建产物打包进 npm 包）+ 本地 server（`agent serve`，默认 127.0.0.1），不做远程部署形态 |
+| 3 | 确认策略默认值 | 高危工具（write_file / edit_file / run_command）默认**每次确认**；yolo 模式需双重开启（会话级 + 配置级） |
+| 4 | Multi-Agent 角色集 | 采用**四层十角色**体系（决策层 Orchestrator/Planner，执行层 Worker/Researcher/Writer/Tool Caller，质量层 Reviewer/Verifier，协调层 Memory Keeper/Router）；MVP 先实现核心五角色，其余按任务类型动态启用。详见 agent-modes-design.md §4 |
+| 5 | 商业形态 | **先自用，后续再开源**；开源前不设计云端增值/团队协作付费能力（F-19/F-20 维持 P2 不提前），代码按可开源标准编写（License 头、无硬编码密钥） |
+| 6 | CLI 命令名 / npm 包名 | **`yzero`**（2026-10-22 确认） |
+| 7 | Token 预算层级 | **会话级为主**：默认 200k tokens / ¥5，超限可临时追加；任务级预算作为可选开关（默认关闭） |
+| 8 | 首发模型服务范围 | **全部 4 家**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付 |
+| 9 | CLI 确认交互形态 | **TUI 选择卡**（基于 ink）：方向键选择 允许 / 拒绝 / 编辑参数，M1 即实现 |
+| 10 | 压缩与提炼模型 | 压缩摘要**跟随会话主模型**；记忆自动提炼用**小模型**（衔接 F-32 模型路由） |
+| 11 | 首发内置 Skills | 3 个示范：`commit-review`（审查提交）、`test-fix`（跑测试修错）、`project-summarize`（生成项目摘要） |

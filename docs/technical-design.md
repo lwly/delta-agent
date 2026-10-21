@@ -22,7 +22,7 @@ y-zero-agent/
 │   │   ├── src/context/        # 预算管理 + 上下文压缩
 │   │   ├── src/skills/         # Skills 系统
 │   │   └── src/session/        # 会话/项目模型 + 持久化
-│   ├── cli/                    # CLI 入口（commander + ink 交互）
+│   ├── cli/                    # CLI 入口，命令名 `yzero`（commander + ink TUI）
 │   └── shared/                 # 共享类型 / 协议定义（core ↔ web）
 ├── pnpm-workspace.yaml
 └── turbo.json
@@ -241,7 +241,7 @@ class ToolRegistry {
 - **并行**：单轮多个 tool_call → `Promise.allSettled` 并行，结果按 call 顺序回填 messages。
 - **互斥**：`write_file`/`edit_file` 按文件路径加锁；`run_command` 全局并发 ≤ 2。
 - **沙箱**：所有路径参数经 `path.resolve` 后校验必须在项目根内（防 `../` 逃逸）；`run_command` 默认白名单（node/npm/pnpm/git/ls/cat 等），白名单外需用户确认。
-- **确认流**：`danger: 'confirm'` 的调用先挂起，经 CLI/We b 推送确认请求，用户批准后执行。
+- **确认流**：`danger: 'confirm'` 的调用**默认每次确认**（2026-10-22 决议），先挂起，经 CLI/Web 推送确认请求，用户批准后执行；CLI 侧以 **ink TUI 选择卡**呈现（↑↓ 选择：允许 / 拒绝 / 编辑参数，M1 实现）；"本会话不再询问"白名单属 P2（F-23 权限模式体系）
 
 ### 4.3 MCP 动态扩展
 
@@ -441,7 +441,7 @@ interface SessionService {
 - 物理删除（hard）在事务内执行且先做一次临时备份文件，异常可回滚。
 - 项目移除仅解除注册，**绝不触碰用户源码目录**；`.y-zero/` 项目级配置目录保留（由用户自行决定是否删除）。
 
-Web 控制台（Vue 3 + Pinia）通过本地 HTTP（CLI `agent serve` 启动，默认 `127.0.0.1:7900`）调用 SessionService，AgentEvent 以 SSE 推送到前端渲染。
+Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue 构建产物作为静态资源内嵌 CLI npm 包，CLI `agent serve` 启动本地 server（默认 `127.0.0.1:7900`，仅监听回环地址）调用 SessionService，AgentEvent 以 SSE 推送到前端渲染；不做远程部署形态。
 
 ---
 

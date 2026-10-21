@@ -70,18 +70,30 @@ async function executePlan(plan: Plan, ctx: RunContext): AsyncIterable<AgentEven
 ## 4. Multi-Agent 模式（三角色协作闭环）
 
 ```
-① 编排器 Orchestrator          ② 规划者 Planner            ③ 执行者 Executor（并行工作池）      ④ 检查者 Reviewer
+① 编排器 Orchestrator          ② 规划者 Planner            ③ 执行者 Executor（并行工作池）      ④ 质量层 Reviewer / Verifier
    接收目标 → 理解/拆解需求  →    接收需求 → 产出 DAG 任务图 →   接收任务图 → worker 领取执行  →    汇总执行结果 → 质量检查
    输出结果交付用户  ←────────────────────────────────────────────── 结果收集 ──────────────────────  通过 ✔ / 重试 ✘
                                                                     ↑──────── 不通过：返回规划者调整 DAG 或重试 ────────┘
 ```
 
-| 角色 | 职责 | 上下文 | 可用工具 |
-|------|------|--------|----------|
-| 编排器 | 接收目标、分发、收集、最终交付（无 LLM 或轻量 LLM） | 全局状态视图 | 无（纯调度） |
-| 规划者 | 理解目标 → 拆解需求 → 产出 DAG；收到重试反馈时调整 DAG | 总目标 + Reviewer 反馈 | read/grep 等只读 |
-| 执行者 ×N | 从工作池领取节点执行，产出结果 | 节点级隔离上下文 | 节点 suggestedTools + 默认工具集 |
-| 检查者 | 质量检查（编译/测试/代码审查维度），通过或打回 | DAG + 全部节点结果 | run_tests / read / grep |
+### 4.1 完整角色集（四层十角色，2026-10-22 确认）
+
+| 层级 | 角色 | 职责 | MVP |
+|------|------|------|-----|
+| 决策层 | **Orchestrator**（总编排） | 拆解任务、制定计划、调度其他角色、汇总结果 | ✔ |
+| 决策层 | **Planner**（规划者） | 任务分解为子任务（DAG）、确定依赖顺序；收到重试反馈时调整 DAG | ✔ |
+| 执行层 | **Worker / Executor**（执行者） | 执行具体子任务（写代码、生成内容），并行工作池竞争领取 | ✔ |
+| 执行层 | Researcher（研究员） | 信息检索、数据采集、事实核验（web_fetch/grep 密集型） | 按需启用 |
+| 执行层 | Writer / Creator（创作者） | 内容生成、文案撰写、设计输出 | 按需启用 |
+| 执行层 | Tool Caller（工具调用者） | 调用外部 API、操作文件、运行命令（高危操作专属代理） | 按需启用 |
+| 质量层 | **Reviewer / Critic**（评审者） | 检查产物、找缺陷、提出修改意见（打回闭环） | ✔ |
+| 质量层 | **Verifier**（验证者） | 运行测试、构建、执行校验规则（与 Reviewer 分工：主观审查 vs 客观验证） | ✔ |
+| 协调层 | Memory Keeper（记忆管理者） | 维护跨节点共享状态、长期记忆读写（衔接 memory-design L2） | 按需启用 |
+| 协调层 | Router（路由者） | 意图识别、分发给合适的 Specialist 角色衔接 | 按需启用 |
+
+- **MVP 核心五角色**：Orchestrator / Planner / Worker / Reviewer / Verifier（Reviewer 管主观质量，Verifier 管客观测试构建，二者分工不合并）
+- **动态启用角色**：Researcher / Writer / Tool Caller / Memory Keeper / Router 由 Planner 在生成 DAG 时按子任务类型标注 `role` 字段，编排器按需实例化——无对应任务则不创建，节省 token
+- 角色实现为同一 Worker Pool 的不同"上下文模板 + 工具白名单"组合，而非独立进程：`role` 决定系统提示词模板与可用工具集
 
 **反馈重试闭环**：Reviewer 打回时携带失败原因 → 编排器路由给规划者（调整 DAG：拆分/增删节点）或直接让失败节点重新执行；重试次数上限可配（默认 2），超限终止并汇报遗留问题。
 
