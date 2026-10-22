@@ -113,6 +113,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
         const s = service.createSession(parts[2]!, {
           title: body.title ? String(body.title) : undefined,
           model: body.model ? String(body.model) : undefined,
+          mode: body.mode ? String(body.mode) : undefined,
         });
         return json(res, 200, s);
       }

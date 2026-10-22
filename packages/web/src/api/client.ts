@@ -69,7 +69,7 @@ export const api = {
 
   // sessions
   listSessions: (projectId: string) => request<SessionRow[]>('GET', `/api/projects/${projectId}/sessions`),
-  createSession: (projectId: string, opts?: { title?: string; model?: string }) =>
+  createSession: (projectId: string, opts?: { title?: string; model?: string; mode?: string }) =>
     request<SessionRow>('POST', `/api/projects/${projectId}/sessions`, opts),
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),

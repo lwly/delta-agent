@@ -6,6 +6,7 @@ import { subscribeSession } from '../api/sse';
 export const useChatStore = defineStore('chat', {
   state: () => ({
     sessionId: '' as string,
+    sessionMeta: null as null | { title: string; mode: string; model: string },
     messages: [] as ChatMessage[],
     streamingText: '',
     running: false,
@@ -20,6 +21,11 @@ export const useChatStore = defineStore('chat', {
       this.close();
       this.sessionId = sessionId;
       const detail = await api.getSession(sessionId);
+      this.sessionMeta = {
+        title: detail.session.title,
+        mode: detail.session.mode,
+        model: detail.session.model,
+      };
       this.messages = detail.messages;
       this.streamingText = '';
       this.running = false;
@@ -31,6 +37,7 @@ export const useChatStore = defineStore('chat', {
       this.unsub?.();
       this.unsub = null;
       this.sessionId = '';
+      this.sessionMeta = null;
       this.messages = [];
       this.streamingText = '';
     },

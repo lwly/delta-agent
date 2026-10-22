@@ -67,7 +67,7 @@ export class SessionService {
     return { id, name };
   }
 
-  createSession(projectId: string, opts?: { title?: string; model?: string }): SessionRow {
+  createSession(projectId: string, opts?: { title?: string; model?: string; mode?: string }): SessionRow {
     return this.store.createSession({ id: randomUUID(), projectId, ...opts });
   }
 

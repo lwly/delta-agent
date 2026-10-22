@@ -164,7 +164,9 @@ export class SessionHub {
       const ctx: RunContext = {
         sessionId,
         projectId: session.project_id,
-        mode: 'react',
+        mode: (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
+          ? session.mode
+          : 'react') as RunContext['mode'],
         model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
         systemPrompt: staticText,
         systemPromptParts: { staticText, dynamicText },

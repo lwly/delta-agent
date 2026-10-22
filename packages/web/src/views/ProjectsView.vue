@@ -7,6 +7,12 @@ const store = useWorkspaceStore();
 const router = useRouter();
 const newRoot = ref('');
 const searchQ = ref('');
+const newSessionMode = ref('react');
+const MODES = [
+  { value: 'react', label: '⚡ ReAct（当前唯一已实现）' },
+  { value: 'plan-execute', label: '📋 Plan-and-Execute（M5）' },
+  { value: 'multi-agent', label: '🤖 Multi-Agent（M5）' },
+];
 const searchResults = ref<Array<{ id: string; title: string }>>([]);
 const error = ref('');
 
@@ -27,7 +33,10 @@ async function addProject() {
 }
 
 async function addSession() {
-  const s = await store.createSession({ title: `新对话 ${new Date().toLocaleString('zh-CN')}` });
+  const s = await store.createSession({
+    title: `新对话 ${new Date().toLocaleString('zh-CN')}`,
+    mode: newSessionMode.value,
+  });
   router.push(`/chat/${s.id}`);
 }
 
@@ -74,6 +83,9 @@ async function doSearch() {
       <div class="row">
         <input v-model="searchQ" placeholder="搜索对话（标题/内容）" @keyup.enter="doSearch" />
         <button @click="doSearch">搜索</button>
+        <select v-model="newSessionMode" class="mode-select">
+          <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </select>
         <button class="primary" :disabled="!store.activeProjectId" @click="addSession">新建对话</button>
       </div>
       <ul v-if="searchResults.length" class="list">
@@ -124,6 +136,7 @@ h2 { margin: 0 0 10px; font-size: 15px; }
 }
 .list li:hover, .list li.active { background: #eef2f7; }
 .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mode-select { max-width: 240px; }
 .muted { color: #8b949e; font-size: 12px; }
 .error { color: #cf222e; font-size: 13px; }
 input, button {

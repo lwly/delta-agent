@@ -9,6 +9,15 @@ const store = useChatStore();
 const input = ref('');
 const listRef = ref<HTMLElement | null>(null);
 const sessionId = computed(() => String(route.params.sessionId ?? ''));
+const MODE_LABELS: Record<string, string> = {
+  react: '⚡ ReAct',
+  'plan-execute': '📋 Plan',
+  'multi-agent': '🤖 Multi-Agent',
+};
+const modeBadge = computed(() => {
+  const s = store.sessionMeta?.mode;
+  return s ? (MODE_LABELS[s] ?? s) : '';
+});
 
 onMounted(() => {
   if (sessionId.value) void store.open(sessionId.value);
@@ -45,6 +54,11 @@ async function submit() {
 
 <template>
   <div class="chat">
+    <div v-if="store.sessionMeta" class="head">
+      <span class="title">{{ store.sessionMeta.title }}</span>
+      <span v-if="modeBadge" class="mode">{{ modeBadge }}</span>
+      <span class="muted">{{ store.sessionMeta.model || '默认模型' }}</span>
+    </div>
     <div ref="listRef" class="msgs">
       <template v-for="(m, i) in store.messages" :key="i">
         <!-- 用户消息 -->
@@ -131,6 +145,10 @@ async function submit() {
 
 <style scoped>
 .chat { display: flex; flex-direction: column; height: 100%; max-width: 920px; margin: 0 auto; }
+.head { display: flex; align-items: center; gap: 10px; padding: 4px 2px; border-bottom: 1px solid #d0d7de; }
+.head .title { font-weight: 600; font-size: 14px; }
+.head .mode { background: #ddf4ff; color: #0969da; font-size: 12px; border-radius: 4px; padding: 1px 7px; }
+.head .muted { color: #8b949e; font-size: 12px; }
 .msgs { flex: 1; overflow-y: auto; padding: 8px 4px; }
 .msg { margin: 10px 0; }
 .msg.user { display: flex; justify-content: flex-end; }
