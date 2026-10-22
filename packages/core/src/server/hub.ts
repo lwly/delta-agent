@@ -21,9 +21,11 @@ import {
   SplitPromptAssembler,
   ToolRegistry,
   PermissionState,
+  GitIntegration,
   discoverSkills,
   type SkillRuntime,
   type PermissionMode,
+  type GitPolicy,
 } from '../index.js';
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
@@ -39,6 +41,7 @@ export type HubEvent =
   | { type: 'confirm_request'; request: ConfirmRequest }
   | { type: 'ask_user'; requestId: string; question: string; options?: string[] }
   | { type: 'run_error'; message: string }
+  | { type: 'git_notice'; message: string }
   | { type: 'state'; running: boolean };
 
 export interface SessionHubDeps {
@@ -61,6 +64,8 @@ export interface SessionHubDeps {
   permissionMode?: PermissionMode;
   /** F-23 工具级 allowlist（default 模式下命中跳过确认） */
   allowTools?: string[];
+  /** F-24 git 策略（off/suggest/auto；auto = 任务结束自动提交本会话记录的文件变更） */
+  gitPolicy?: GitPolicy;
 }
 
 interface PendingConfirm {
@@ -311,6 +316,20 @@ export class SessionHub {
                 transcript,
                 signal: ac.signal,
               }).catch(() => undefined); // 提炼失败不阻塞交付
+            }
+            // F-24 git 自动 commit 策略：提交本会话记录在案的文件变更
+            if (this.deps.gitPolicy?.mode === 'auto' && !ac.signal.aborted) {
+              const git = new GitIntegration(project.root_path, this.deps.gitPolicy, ac.signal);
+              void git
+                .autoCommitChanges(sessionId, service.changes, input)
+                .then((out) => {
+                  if (out.ok && out.hash) {
+                    this.publish(sessionId, { type: 'git_notice', message: `已自动提交 ${out.hash}（仅本会话变更的文件）` });
+                  } else if (out.reason && out.reason !== 'nothing to commit for recorded paths') {
+                    this.publish(sessionId, { type: 'git_notice', message: `自动提交跳过：${out.reason}` });
+                  }
+                })
+                .catch(() => undefined);
             }
             break;
           }

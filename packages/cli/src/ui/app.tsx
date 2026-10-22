@@ -10,6 +10,7 @@ import type {
 } from '@y-zero/shared';
 import {
   BudgetManager,
+  GitIntegration,
   PermissionState,
   SessionService,
   ToolRegistry,
@@ -19,6 +20,7 @@ import {
   runMultiAgent,
   modeSegment,
   type EngineMode,
+  type GitPolicyMode,
   type PermissionMode,
   type RunContext,
   type SessionRow,
@@ -53,6 +55,8 @@ export interface AppOptions {
   permissionMode?: PermissionMode;
   /** F-23 工具级 allowlist（default 模式下命中跳过确认） */
   allowTools?: string[];
+  /** F-24 git 策略（off/suggest/auto，默认 suggest） */
+  gitPolicy?: GitPolicyMode;
   debugPrompt: boolean;
   maxTurns: number;
   /** M5: 执行模式（react / plan-execute / multi-agent），默认 react */
@@ -89,6 +93,11 @@ export function App(props: AppOptions) {
           ? 'plan'
           : 'default';
     permsRef.current = new PermissionState({ mode, allowlist: props.allowTools });
+  }
+  // F-24 git 集成（会话级复用同一实例）
+  const gitRef = useRef<GitIntegration | null>(null);
+  if (!gitRef.current) {
+    gitRef.current = new GitIntegration(process.cwd(), { mode: props.gitPolicy ?? 'suggest' });
   }
 
   const addItem = useCallback((item: Omit<Item, 'id'>) => {
@@ -358,6 +367,19 @@ export function App(props: AppOptions) {
               if (!assistantSaved && assistantText) {
                 props.service.appendMessage(props.session.id, { role: 'assistant', content: assistantText });
               }
+              // F-24 git auto：任务结束提交本会话记录在案的文件变更
+              if (props.gitPolicy === 'auto' && abortRef.current && !abortRef.current.signal.aborted) {
+                void gitRef
+                  .current!.autoCommitChanges(props.session.id, props.service.changes, userInput)
+                  .then((out) => {
+                    if (out.ok && out.hash) {
+                      addItem({ kind: 'system', text: `⎇ 已自动提交 ${out.hash}（仅本会话变更的文件）` });
+                    } else if (out.reason && out.reason !== 'nothing to commit for recorded paths') {
+                      addItem({ kind: 'system', text: `⎇ 自动提交跳过：${out.reason}` });
+                    }
+                  })
+                  .catch(() => undefined);
+              }
               break;
             default:
               break;
@@ -489,6 +511,15 @@ export function App(props: AppOptions) {
       abortRef.current?.abort();
     }
   });
+
+  // F-24 suggest：启动时一次性 git 建议（仓库脏 → 建议建工作分支）
+  useEffect(() => {
+    const git = gitRef.current!;
+    void git.advisory(props.session.id).then((note) => {
+      if (note) addItem({ kind: 'system', text: `⎇ ${note}` });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     return () => {

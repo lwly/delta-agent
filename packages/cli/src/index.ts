@@ -27,6 +27,7 @@ interface CliOpts {
   yolo?: boolean;
   permission?: string;
   allow?: string;
+  git?: string;
   debugPrompt?: boolean;
   maxTurns: string;
   db?: string;
@@ -45,6 +46,7 @@ program
   .option('--yolo', 'YOLO 第二重开关（须与 --permission yolo 同时使用；单独使用会降级为 default 并告警）')
   .option('--permission <mode>', 'F-23 权限模式：plan（只读）| default（写需确认）| yolo（全放行，需 --yolo 双重开启）', 'default')
   .option('--allow <tools>', '工具级 allowlist（逗号分隔，default 模式下命中跳过确认，如 write_file,edit_file）')
+  .option('--git <mode>', 'F-24 git 策略：off | suggest（启动建议分支，默认）| auto（任务结束自动提交本会话变更）', 'suggest')
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
   .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
@@ -375,6 +377,7 @@ async function start(opts: CliOpts): Promise<void> {
     yolo: Boolean(opts.yolo),
     permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
     allowTools: parseAllowTools(opts.allow),
+    gitPolicy: normalizeGitPolicy(opts.git),
     debugPrompt: Boolean(opts.debugPrompt),
     maxTurns: Number(opts.maxTurns) || 50,
     engineMode: normalizeMode(opts.mode),
@@ -425,11 +428,16 @@ function resolvePermissionMode(yoloFlag: boolean, permission?: string): 'plan' |
   return requested;
 }
 
-/** F-23 工具级 allowlist：逗号分隔 → 去空白去重。 */
+/** F-24 工具级 allowlist：逗号分隔 → 去空白去重。 */
 function parseAllowTools(raw?: string): string[] | undefined {
   if (!raw?.trim()) return undefined;
   const list = [...new Set(raw.split(',').map((t) => t.trim()).filter(Boolean))];
   return list.length > 0 ? list : undefined;
+}
+
+/** F-24 git 策略解析（非法值降级 suggest）。 */
+function normalizeGitPolicy(mode?: string): 'off' | 'suggest' | 'auto' {
+  return mode === 'off' || mode === 'auto' ? mode : 'suggest';
 }
 
 // keep path import used (win compat helpers may grow here)

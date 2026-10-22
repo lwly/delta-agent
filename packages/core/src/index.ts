@@ -101,6 +101,12 @@ export {
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';
 export { ok as toolOk, fail as toolFail } from './tools/types.js';
+export {
+  GitIntegration,
+  type GitPolicy,
+  type GitPolicyMode,
+  type GitOutcome,
+} from './git/repo.js';
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
 export {
   PermissionState,
