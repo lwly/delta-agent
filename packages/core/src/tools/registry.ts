@@ -1,4 +1,4 @@
-import Ajv from 'ajv';
+import AjvPkg from 'ajv';
 import type {
   ConfirmDecision,
   ConfirmRequest,
@@ -14,10 +14,22 @@ import {
 import { runCommandTool, runTestsTool } from './builtin/exec.js';
 import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
 
+/** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
+interface CompiledValidator {
+  (data: unknown): boolean;
+  errors?: unknown;
+}
+interface AjvLike {
+  compile(schema: object): CompiledValidator;
+}
+const ajv = new (AjvPkg as unknown as new (opts?: object) => AjvLike)({ strict: false });
+
+function errorsText(errors: unknown): string {
+  return JSON.stringify(errors);
+}
+
 /** run_command global concurrency cap (技术方案 §4.2). */
 const CMD_CONCURRENCY = 2;
-
-const ajv = new Ajv({ strict: false });
 
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
@@ -97,14 +109,13 @@ export class ToolRegistry {
     }
 
     // 1. schema validation (args may carry __parse_error marker)
-    const args = call.args ?? {};
     if (!call.args && call.argsJson) {
       const parsed = tryParse(call.argsJson);
-      if (parsed) (call.args as Record<string, unknown>) = parsed;
+      if (parsed) call.args = parsed;
     }
     const validate = ajv.compile(tool.schema);
     if (!validate(call.args ?? {})) {
-      const msg = ajv.errorsText(validate.errors);
+      const msg = errorsText(validate.errors);
       return {
         callId: call.id, name: call.name, ok: false,
         content: `invalid arguments for ${call.name}: ${msg}`,

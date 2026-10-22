@@ -5,7 +5,7 @@ import type {
   StreamEvent,
   ToolDefinition,
 } from '@y-zero/shared';
-import { parseSse, parseDataFrames } from './sse.js';
+import { parseSse, parseDataFrames } from '../sse.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok */
 function estimateTokens(messages: ChatMessage[]): number {
