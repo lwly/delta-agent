@@ -7,12 +7,16 @@ import {
   SessionService,
   resolveProviderFromEnv,
   estimateMessagesTokens,
+  ToolRegistry,
+  McpManager,
+  loadMcpConfig,
 } from '@y-zero/core';
 import { App } from './ui/app.js';
 
 interface CliOpts {
   resume?: string;
   model?: string;
+  provider?: string;
   yolo?: boolean;
   debugPrompt?: boolean;
   maxTurns: string;
@@ -23,10 +27,11 @@ const program = new Command();
 
 program
   .name('yzero')
-  .description('y-zero-agent —— AI 编程命令行工具（M1：ReAct 引擎 + 11 工具 + ink 确认卡）')
+  .description('y-zero-agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
   .version('0.1.0')
   .option('-r, --resume [sessionId]', '恢复指定会话（缺省恢复项目最近会话）')
-  .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回 claude-sonnet-4-5）')
+  .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回各厂商默认）')
+  .option('-p, --provider <name>', '模型厂商：anthropic | deepseek | qwen | openai（默认读 YZERO_PROVIDER，再按已配置 Key 自动探测）')
   .option('--yolo', '跳过高危工具确认（危险）')
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
@@ -36,13 +41,27 @@ program
   });
 
 async function start(opts: CliOpts): Promise<void> {
-  // provider (M1: anthropic via env)
+  // provider (M2: anthropic / deepseek / qwen / openai via env)
   let provider;
   try {
-    provider = await resolveProviderFromEnv();
+    provider = await resolveProviderFromEnv(opts.provider);
   } catch (e) {
     console.error(`✘ ${(e as Error).message}`);
     process.exit(1);
+  }
+
+  // MCP servers: ~/.y-zero/mcp.json + .y-zero/mcp.json（项目级优先）
+  const registry = new ToolRegistry();
+  const mcp = new McpManager();
+  const mcpConfig = loadMcpConfig(process.cwd());
+  for (const [name, cfg] of Object.entries(mcpConfig)) {
+    try {
+      await mcp.connect(name, cfg);
+      const n = await mcp.registerInto(name, registry);
+      console.error(`✔ MCP ${name}：已接入 ${n} 个工具`);
+    } catch (e) {
+      console.error(`✘ MCP ${name} 连接失败（已跳过）：${(e as Error).message}`);
+    }
   }
 
   // session
@@ -93,6 +112,7 @@ async function start(opts: CliOpts): Promise<void> {
     service,
     session,
     provider,
+    registry,
     systemPrompt,
     yolo: Boolean(opts.yolo),
     debugPrompt: Boolean(opts.debugPrompt),
@@ -100,7 +120,11 @@ async function start(opts: CliOpts): Promise<void> {
   });
 
   const { waitUntilExit } = render(app, { exitOnCtrlC: true });
-  await waitUntilExit();
+  try {
+    await waitUntilExit();
+  } finally {
+    await mcp.disconnectAll();
+  }
 }
 
 program.parseAsync(process.argv).catch((e) => {

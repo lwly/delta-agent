@@ -71,18 +71,53 @@ export class SessionService {
   }
 }
 
-/** Resolve the runtime LLM provider from environment (M1: anthropic only). */
-export async function resolveProviderFromEnv(): Promise<LLMProvider> {
-  const { AnthropicProvider } = await import('../llm/providers/anthropic.js');
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      'ANTHROPIC_API_KEY 未设置。M1 阶段请 export ANTHROPIC_API_KEY=sk-ant-... 后重试（M2 将提供 models 命令与本地 Key 管理）。',
-    );
+export type ProviderId = 'anthropic' | 'openai' | 'deepseek' | 'qwen';
+
+/** env var holding the API key for each provider */
+const PROVIDER_ENV: Record<Exclude<ProviderId, 'anthropic'>, { key: string; base?: string }> = {
+  openai: { key: 'OPENAI_API_KEY', base: 'OPENAI_BASE_URL' },
+  deepseek: { key: 'DEEPSEEK_API_KEY', base: 'DEEPSEEK_BASE_URL' },
+  qwen: { key: 'DASHSCOPE_API_KEY', base: 'DASHSCOPE_BASE_URL' },
+};
+
+/** Resolve the runtime LLM provider: explicit id > YZERO_PROVIDER > first configured key. */
+export async function resolveProviderFromEnv(id?: string): Promise<LLMProvider> {
+  const wanted = (id || process.env.YZERO_PROVIDER || '') as ProviderId | '';
+  const candidates: ProviderId[] = wanted
+    ? [wanted]
+    : ['anthropic', 'deepseek', 'qwen', 'openai'];
+
+  for (const pid of candidates) {
+    if (pid === 'anthropic') {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) continue;
+      const { AnthropicProvider } = await import('../llm/providers/anthropic.js');
+      return new AnthropicProvider({
+        apiKey,
+        baseUrl: process.env.ANTHROPIC_BASE_URL,
+        model: process.env.YZERO_MODEL,
+      });
+    }
+    const env = PROVIDER_ENV[pid];
+    const apiKey = process.env[env.key];
+    if (!apiKey) continue;
+    const mod = await import(`../llm/providers/${pid}.js`);
+    const Ctor = mod[`${pid[0]!.toUpperCase()}${pid.slice(1)}Provider`] as new (opts: {
+      apiKey: string;
+      baseUrl?: string;
+      model?: string;
+    }) => LLMProvider;
+    return new Ctor({
+      apiKey,
+      baseUrl: env.base ? process.env[env.base] : undefined,
+      model: process.env.YZERO_MODEL,
+    });
   }
-  return new AnthropicProvider({
-    apiKey,
-    baseUrl: process.env.ANTHROPIC_BASE_URL,
-    model: process.env.YZERO_MODEL,
-  });
+
+  const tried = wanted || 'anthropic/deepseek/qwen/openai';
+  throw new Error(
+    `未找到可用的 Provider（尝试顺序：${tried}）。请设置对应 API Key：` +
+      `ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY，` +
+      `或用 YZERO_PROVIDER 指定厂商。`,
+  );
 }

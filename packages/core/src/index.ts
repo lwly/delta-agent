@@ -21,6 +21,10 @@ export {
 export { parseSse, parseDataFrames } from './llm/sse.js';
 export { ToolCallAccumulator, parseLenientJson } from './llm/accumulator.js';
 export { AnthropicProvider } from './llm/providers/anthropic.js';
+export { OpenAICompatibleProvider } from './llm/providers/openai-compatible.js';
+export { OpenAIProvider } from './llm/providers/openai.js';
+export { DeepSeekProvider } from './llm/providers/deepseek.js';
+export { QwenProvider } from './llm/providers/qwen.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';
@@ -30,4 +34,6 @@ export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './too
 export { runReAct, type RunContext } from './engine/react.js';
 
 export { SessionStore, type SessionRow } from './session/store.js';
-export { SessionService, defaultDbPath, resolveProviderFromEnv } from './session/service.js';
+export { SessionService, defaultDbPath, resolveProviderFromEnv, type ProviderId } from './session/service.js';
+
+export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';

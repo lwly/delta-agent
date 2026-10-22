@@ -66,6 +66,61 @@ describe('ToolRegistry', () => {
     expect(results[1]!.content).toContain('const a = 1;');
   });
 
+  it('runs read tools concurrently (wall time < serial sum)', async () => {
+    const reg = new ToolRegistry();
+    const slow = {
+      name: 'slow_read',
+      description: 'test tool that sleeps',
+      schema: { type: 'object', properties: { ms: { type: 'number' } } } as Record<string, unknown>,
+      danger: 'safe' as const,
+      execute: async (args: Record<string, unknown>) => {
+        await new Promise((r) => setTimeout(r, Number(args.ms ?? 50)));
+        return { callId: '', name: 'slow_read', ok: true, content: 'done' };
+      },
+    };
+    reg.register(slow);
+    const t0 = Date.now();
+    // 4 × 50ms sleeps: concurrent ≈ 50-150ms, serial would be ≥ 200ms
+    await reg.executeAll(
+      Array.from({ length: 4 }, () => call('slow_read', { ms: 50 })),
+      makeCtx(),
+    );
+    expect(Date.now() - t0).toBeLessThan(190);
+  });
+
+  it('serializes same-file writes but different files run parallel', async () => {
+    const reg = new ToolRegistry();
+    const real = reg.get('write_file')!;
+    const orig = real.execute.bind(real);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    real.execute = async (args, ctx) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((r) => setTimeout(r, 30));
+        return await orig(args, ctx);
+      } finally {
+        inFlight--;
+      }
+    };
+
+    // two writes to the SAME file must serialize
+    await reg.executeAll(
+      [call('write_file', { path: 'same.txt', content: '1' }), call('write_file', { path: 'same.txt', content: '2' })],
+      makeCtx(),
+    );
+    expect(maxInFlight).toBe(1);
+
+    // writes to different files may overlap
+    maxInFlight = 0;
+    await reg.executeAll(
+      [call('write_file', { path: 'a.txt', content: '1' }), call('write_file', { path: 'b.txt', content: '2' })],
+      makeCtx(),
+    );
+    expect(maxInFlight).toBe(2);
+  });
+
   it('asks for confirmation on danger tools and honors rejection', async () => {
     const reg = new ToolRegistry();
     const seen: ConfirmRequest[] = [];

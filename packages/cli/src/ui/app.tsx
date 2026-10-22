@@ -31,6 +31,8 @@ export interface AppOptions {
   service: SessionService;
   session: SessionRow;
   provider: Awaited<ReturnType<typeof import('@y-zero/core').resolveProviderFromEnv>>;
+  /** pre-built registry (with MCP tools attached by the CLI entry) */
+  registry?: ToolRegistry;
   systemPrompt: string;
   yolo: boolean;
   debugPrompt: boolean;
@@ -46,7 +48,7 @@ export function App(props: AppOptions) {
   const [running, setRunning] = useState(false);
   const [usage, setUsage] = useState({ input: 0, output: 0, cost: 0 });
   const abortRef = useRef<AbortController | null>(null);
-  const registryRef = useRef<ToolRegistry>(new ToolRegistry());
+  const registryRef = useRef<ToolRegistry>(props.registry ?? new ToolRegistry());
   const todosRef = useRef<Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>>([]);
   const budgetRef = useRef<BudgetManager>(new BudgetManager());
 
