@@ -17,6 +17,11 @@ export interface RunContext {
   mode: 'react' | 'plan-execute' | 'multi-agent';
   model: string;
   systemPrompt: string;
+  /**
+   * M3：静态/动态分段系统提示词（优先于 systemPrompt 单串）。
+   * 引擎按 静态→动态→历史→本轮 恒定顺序拼装，保证 Provider 前缀缓存命中。
+   */
+  systemPromptParts?: { staticText: string; dynamicText: string };
   maxTurns: number; // default 50
   signal: AbortSignal;
   provider: LLMProvider;
@@ -205,6 +210,16 @@ function estimateTokensText(text: string): number {
   return cjk + Math.ceil((text.length - cjk) / 3);
 }
 
+/** 系统消息内容：分段（静态→动态）优先，回退单串 systemPrompt */
+function systemContent(ctx: RunContext): string {
+  if (ctx.systemPromptParts) {
+    return [ctx.systemPromptParts.staticText, ctx.systemPromptParts.dynamicText]
+      .filter((t) => t.length > 0)
+      .join('\n\n');
+  }
+  return ctx.systemPrompt;
+}
+
 type StreamItem =
   | { kind: 'delta'; ev: { type: 'text_delta' | 'thinking_delta'; text: string } }
   | { kind: 'result'; result: { text: string; toolCalls: ToolCall[]; usage: Usage } };
@@ -231,7 +246,7 @@ async function* chatStream(
 
     try {
       for await (const ev of ctx.provider.chat({
-        messages: [{ role: 'system', content: ctx.systemPrompt }, ...messages],
+        messages: [{ role: 'system', content: systemContent(ctx) }, ...messages],
         tools: ctx.registry.definitions(),
         model: ctx.model,
         signal: ctx.signal,

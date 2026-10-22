@@ -37,6 +37,14 @@ export {
   createDefaultLayers,
 } from './prompt/layers.js';
 export { applyOverrides, deepMerge, unionDedupe } from './prompt/merge.js';
+export {
+  SplitPromptAssembler,
+  composeSystemPrompt,
+  type AssembleSplitResult,
+  type DynamicPromptResult,
+  type SplitAssemblerOptions,
+  type StaticPromptEntry,
+} from './prompt/split-assembler.js';
 export type {
   AssembleContext,
   AssembleResult,
