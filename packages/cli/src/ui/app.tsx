@@ -106,6 +106,29 @@ export function App(props: AppOptions) {
       abortRef.current = ac;
       setRunning(true);
 
+      // M3：Skill 自动触发——Top-1 评分 ≥ 阈值时询问用户是否加载
+      if (props.skillsRuntime?.suggest) {
+        try {
+          const suggestion = await props.skillsRuntime.suggest(userInput);
+          if (suggestion) {
+            const answer = await askUser(
+              `检测到可用技能「${suggestion.name}」（${suggestion.description}），是否加载？`,
+              ['是', '否'],
+            );
+            const affirm = /^(是|y|yes|好|加载|ok)$/i.test(answer.trim());
+            addItem({
+              kind: 'system',
+              text: affirm
+                ? `✔ 已加载技能 ${suggestion.name}（下一轮生效）`
+                : `已跳过技能 ${suggestion.name}`,
+            });
+            if (affirm) await props.skillsRuntime.load(suggestion.name);
+          }
+        } catch {
+          // 自动触发失败不打扰主流程
+        }
+      }
+
       // build run context
       const ctx: RunContext = {
         sessionId: props.session.id,

@@ -12,6 +12,7 @@ import {
   PromptBuilder,
   SkillBuffer,
   discoverSkills,
+  suggestSkill,
   buildDebugReport,
   formatDebugReport,
   type SkillMeta,
@@ -95,6 +96,10 @@ export async function assemblePrompt(opts: AssemblePromptOptions): Promise<Promp
         return buffer.unload(name)
           ? { ok: true, content: `Skill ${name} 已卸载（下一轮生效）。` }
           : { ok: false, content: `未加载 Skill：${name}` };
+      },
+      async suggest(query: string) {
+        const top = suggestSkill(skillsMeta, query);
+        return top ? { name: top.skill.name, description: top.skill.description } : undefined;
       },
     },
     refreshDynamic: () => assembler.assemble(ctx()).dynamic.text,

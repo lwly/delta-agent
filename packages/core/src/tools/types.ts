@@ -20,6 +20,12 @@ export interface ToolContext {
 export interface SkillRuntime {
   load(name: string): Promise<{ ok: boolean; content: string }>;
   unload(name: string): { ok: boolean; content: string };
+  /**
+   * M3：自动触发建议——对用户输入做 Skill 匹配评分，
+   * Top-1 ≥ MATCH_THRESHOLD 时返回候选（由 UI 询问用户是否加载）。
+   * 可选：未提供时跳过自动触发，仅靠索引引导模型自行 load_skill。
+   */
+  suggest?(query: string): Promise<{ name: string; description: string } | undefined>;
 }
 
 export type ToolDanger = 'safe' | 'confirm';
