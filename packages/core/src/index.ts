@@ -19,6 +19,36 @@ export {
 } from './context/compressor.js';
 
 export { parseSse, parseDataFrames } from './llm/sse.js';
+
+export {
+  PromptAssembler,
+  ASSEMBLER_VERSION,
+  formatPrompt,
+  renderValue,
+} from './prompt/assembler.js';
+export {
+  IdentityLayer,
+  EnvironmentLayer,
+  ProjectLayer,
+  ToolsLayer,
+  SkillsLayer,
+  MemoryLayer,
+  SessionLayer,
+  createDefaultLayers,
+} from './prompt/layers.js';
+export { applyOverrides, deepMerge, unionDedupe } from './prompt/merge.js';
+export type {
+  AssembleContext,
+  AssembleResult,
+  AssembleWarning,
+  LayerId,
+  LayerOverride,
+  LayerValue,
+  OverrideSet,
+  PromptLayer,
+  PromptSection,
+  SystemPrompt,
+} from './prompt/types.js';
 export { ToolCallAccumulator, parseLenientJson } from './llm/accumulator.js';
 export { AnthropicProvider } from './llm/providers/anthropic.js';
 export { OpenAICompatibleProvider } from './llm/providers/openai-compatible.js';
