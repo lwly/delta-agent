@@ -164,11 +164,14 @@ export class ToolRegistry {
       // 无 permissions 注入时保持历史行为：danger 工具每次确认
       (!perms && tool.danger === 'confirm');
     if (needsConfirm && tool.danger === 'confirm') {
+      // F-30：确认卡必须显示执行环境徽标（badge() 只读探测缓存，绝不触发探测）
+      const badge = ctx.sandbox?.badge();
       const req: ConfirmRequest = {
         id: call.id,
         tool: call.name,
         args: call.args ?? {},
         reason: `工具 ${call.name} 属高危操作，需要确认`,
+        ...(badge ? { sandbox: badge } : {}),
       };
       const decision: ConfirmDecision = await ctx.confirm(req);
       if (decision.kind === 'reject') {

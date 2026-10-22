@@ -165,6 +165,12 @@ export type AgentEvent =
   | { type: 'subtask_done'; nodeId: string; summary: string; ms: number }
   | { type: 'subtask_failed'; nodeId: string; error: string; retries: number }
   | { type: 'review_verdict'; verdict: ReviewVerdict; revision: number }
+  /**
+   * F-30：沙箱提示（降级 / 拉取 / 不可用 / 残留清理建议）。
+   * 只走事件流（TUI addItem / Web SSE toast / headless stderr），**不落库、不进模型上下文**；
+   * 发出者是入口注入的 sink（引擎零改动）。
+   */
+  | { type: 'sandbox_notice'; kind: 'degraded' | 'pulled' | 'unavailable' | 'gc_suggest'; detail: string }
   /** F-31：usage 事件附带当轮模型（引擎填 ctx.model；老消费端可忽略） */
   | { type: 'usage'; usage: Usage; model?: string }
   | { type: 'done'; usage: Usage }
@@ -181,12 +187,31 @@ export type ConfirmDecision =
 /** 权限模式（F-23）：plan=只读 / default=写需确认 / yolo=全放行（双重开启） */
 export type PermissionMode = 'plan' | 'default' | 'yolo';
 
+/**
+ * F-30 执行环境徽标（确认卡 / 工具卡片）：用户必须知道自己在给哪个环境授权。
+ * 只读缓存的探测结论（`available` 为 undefined 表示未知），**绝不因此触发探测**。
+ *
+ * 与 `core/src/sandbox/types.ts` 的同名接口结构完全一致：渲染契约在 shared，
+ * 而 shared 不能反向依赖 core，故两处各声明一份纯结构类型。
+ */
+export interface SandboxBadge {
+  mode: 'local' | 'docker';
+  image?: string;
+  network?: 'none' | 'bridge';
+  /** 缓存中的探测结论（undefined = 未知；false 时卡片加一行「当前不可用，将按 fallback 处理」） */
+  available?: boolean;
+}
+
 export interface ConfirmRequest {
   id: string;
   tool: string;
   args: Record<string, unknown>;
   /** human readable risk hint */
   reason: string;
+  /** F-30：exec 类工具有值（沙箱徽标） */
+  sandbox?: SandboxBadge;
+  /** F-30：缺省 = permission（历史行为）；sandbox_degrade = 降级确认卡（只渲染允许/拒绝） */
+  variant?: 'permission' | 'sandbox_degrade';
 }
 
 export type ConfirmResponder = (req: ConfirmRequest) => Promise<ConfirmDecision>;
