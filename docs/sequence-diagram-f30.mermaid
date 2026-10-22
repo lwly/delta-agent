@@ -1,0 +1,63 @@
+sequenceDiagram
+    autonumber
+    participant R as ToolRegistry
+    participant T as run_command (exec.ts)
+    participant S as SandboxRuntime
+    participant P as DockerProbe
+    participant D as DockerExecutor
+    participant C as DockerCli（real / fake）
+    participant U as 用户侧（TUI / Web / stderr）
+
+    R->>R: 权限判定（permissions.ts 零改动）+ ConfirmRequest.sandbox=badge()
+    R-->>U: 确认卡（执行环境徽标，只读缓存的 probe 结论）
+    R->>T: execute(args, ctx)
+    T->>T: resolveInSandbox(projectRoot, cwd)（路径逃逸在此拒绝，无 docker 调用）
+    T->>S: run(command, cwd, timeoutMs, signal)
+
+    alt 模式 local（默认，零变化）
+        S->>S: resolveExecutionPlan → local / mode_local
+        S->>S: LocalExecutor → runWithShell（与今日同一函数）
+        S-->>T: code / stdout / stderr / timedOut（无 sandbox meta）
+    else 模式 docker
+        S->>P: get(force?)
+        alt 缓存命中（30s 内）
+            P-->>S: SandboxProbeResult fromCache=true
+        else 未命中
+            P->>C: exec(version --format Server.Version, timeout 3000ms)
+            C-->>P: code / stdout / stderr / timedOut
+            P->>P: classifyProbeResult → cli_missing / daemon_down / permission_denied / timeout
+            P-->>S: SandboxProbeResult（写入缓存）
+        end
+        S->>S: resolveExecutionPlan(config, probe, interactive, degradeApproved)
+
+        alt 计划 deny
+            S-->>U: sandbox_notice kind=unavailable, detail=判定依据
+            S-->>T: denied:true, diagnostic: 判定依据+后果+下一步×3
+            T-->>R: fail(diagnostic)（不执行任何命令）
+        else 计划 ask
+            S->>U: confirmDegrade（复用确认卡，variant='sandbox_degrade'）
+            U-->>S: allow / allow_session → degradeApproved=true；reject → deny
+        end
+
+        S->>D: run(command, opts)
+        D->>D: assertSafeWorkspaceRoot + relativeCwdOf
+        D->>C: exec(['image','inspect',image,'--format',Id 模板])（缺失则 pull，独立 pullTimeoutMs）
+        C-->>D: 镜像就绪 / pulled
+        D-->>U: sandbox_notice kind=pulled（仅首次）
+        D->>D: buildDockerRunArgs(...) → argv（有序数组）
+        D->>C: exec(argv, timeoutMs, signal)
+        alt 正常退出（含非 0 退出码）
+            C-->>D: code / stdout / stderr
+            D->>D: buildHints（126/127/137/网络）→ hints[]
+        else 超时 / abort
+            D->>C: execSync(['kill', name], timeoutMs:2000)
+            D->>C: execSync(['rm','-f', name], timeoutMs:2000)
+            D-->>U: 清理失败只 warning
+        end
+        D-->>S: SandboxExecResult(mode=docker, image, containerName, exitCode, ms, pulled)
+        S-->>T: 同上（+ sandbox meta）
+    end
+
+    T->>T: formatOutcome → trimOutput（未改）+ hints
+    T-->>R: ok(text, sandbox) 或 fail(text)
+    R-->>U: 工具卡片（徽标 docker / local；headless → stderr + --json.sandbox.runs[]）
