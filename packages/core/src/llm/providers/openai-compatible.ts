@@ -6,7 +6,7 @@ import type {
   ToolDefinition,
   Usage,
 } from '@y-zero/shared';
-import { parseSse } from '../sse.js';
+import { parseSse, openSseStream, isRetriableOpenError } from '../sse.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok (shared rule) */
 export function estimateTokensOf(messages: ChatMessage[]): number {
@@ -77,7 +77,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (req.temperature !== undefined) body.temperature = req.temperature;
     if (req.tools.length > 0) body.tools = convertTools(req.tools);
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -86,78 +86,93 @@ export class OpenAICompatibleProvider implements LLMProvider {
       },
       body: JSON.stringify(body),
       signal: req.signal,
-    });
+    };
 
-    if (!res.ok || !res.body) {
-      const text = await res.text().catch(() => '');
-      yield {
-        type: 'error',
-        message: `${this.id} http ${res.status}: ${text.slice(0, 300)}`,
-        retriable: res.status === 429 || res.status >= 500,
-      };
-      return;
-    }
-
-    const usage: Usage = { inputTokens: 0, outputTokens: 0 };
-
-    for await (const frame of parseSse(res.body)) {
-      const data = frame.data;
-      if (!data || data === '[DONE]') break;
-      let chunk: Record<string, unknown>;
+    // 断流重连 (F-04): connection failures retry silently inside openSseStream;
+    // a stream that breaks before producing any event gets one silent re-dial.
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      let started = false;
       try {
-        chunk = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        continue; // tolerate keep-alive / partial frames; retries handled upstream
-      }
-
-      const u = chunk.usage as
-        | { prompt_tokens?: number; completion_tokens?: number }
-        | undefined;
-      if (u) {
-        if (u.prompt_tokens) usage.inputTokens = u.prompt_tokens;
-        if (u.completion_tokens) usage.outputTokens = u.completion_tokens;
-      }
-
-      const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
-      const choice = choices?.[0];
-      if (!choice) continue; // usage-only final chunk
-
-      const delta = choice.delta as
-        | {
-            content?: string | null;
-            tool_calls?: Array<{
-              index: number;
-              id?: string;
-              function?: { name?: string; arguments?: string };
-            }>;
+        const res = await openSseStream(`${this.baseUrl}/chat/completions`, init, attempt === 0 ? 1 : 0);
+        const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+        for await (const frame of parseSse(res.body!)) {
+          const data = frame.data;
+          if (!data || data === '[DONE]') break;
+          let chunk: Record<string, unknown>;
+          try {
+            chunk = JSON.parse(data) as Record<string, unknown>;
+          } catch {
+            continue; // tolerate keep-alive / partial frames; retries handled upstream
           }
-        | undefined;
 
-      if (delta?.content) yield { type: 'text_delta', text: delta.content };
+          const u = chunk.usage as
+            | { prompt_tokens?: number; completion_tokens?: number }
+            | undefined;
+          if (u) {
+            if (u.prompt_tokens) usage.inputTokens = u.prompt_tokens;
+            if (u.completion_tokens) usage.outputTokens = u.completion_tokens;
+          }
 
-      if (this.thinkingField && delta) {
-        const thinking = (delta as Record<string, unknown>)[this.thinkingField];
-        if (typeof thinking === 'string' && thinking) {
-          yield { type: 'thinking_delta', text: thinking };
+          const choices = chunk.choices as Array<Record<string, unknown>> | undefined;
+          const choice = choices?.[0];
+          if (!choice) continue; // usage-only final chunk
+
+          const delta = choice.delta as
+            | {
+                content?: string | null;
+                tool_calls?: Array<{
+                  index: number;
+                  id?: string;
+                  function?: { name?: string; arguments?: string };
+                }>;
+              }
+            | undefined;
+
+          if (delta?.content) {
+            started = true;
+            yield { type: 'text_delta', text: delta.content };
+          }
+
+          if (this.thinkingField && delta) {
+            const thinking = (delta as Record<string, unknown>)[this.thinkingField];
+            if (typeof thinking === 'string' && thinking) {
+              started = true;
+              yield { type: 'thinking_delta', text: thinking };
+            }
+          }
+
+          for (const tc of delta?.tool_calls ?? []) {
+            started = true;
+            yield {
+              type: 'tool_call_delta',
+              index: tc.index ?? 0,
+              id: tc.id,
+              name: tc.function?.name,
+              argsDelta: tc.function?.arguments ?? '',
+            };
+          }
+          // NOTE: do NOT break on finish_reason — the usage-only chunk arrives after it
         }
-      }
 
-      for (const tc of delta?.tool_calls ?? []) {
-        yield {
-          type: 'tool_call_delta',
-          index: tc.index ?? 0,
-          id: tc.id,
-          name: tc.function?.name,
-          argsDelta: tc.function?.arguments ?? '',
-        };
+        if (usage.inputTokens || usage.outputTokens) {
+          yield { type: 'usage', input: usage.inputTokens, output: usage.outputTokens };
+        }
+        yield { type: 'done' };
+        return;
+      } catch (e) {
+        const aborted = req.signal?.aborted ?? false;
+        const canRetry = !aborted && isRetriableOpenError(e);
+        if (started || attempt >= 1 || !canRetry) {
+          yield {
+            type: 'error',
+            message: `${this.id} stream failed: ${(e as Error).message}`,
+            retriable: !aborted && isRetriableOpenError(e),
+          };
+          return;
+        }
+        // silent reconnect: nothing emitted yet, one extra dial
       }
-      // NOTE: do NOT break on finish_reason — the usage-only chunk arrives after it
     }
-
-    if (usage.inputTokens || usage.outputTokens) {
-      yield { type: 'usage', input: usage.inputTokens, output: usage.outputTokens };
-    }
-    yield { type: 'done' };
   }
 }
 

@@ -59,3 +59,54 @@ export function parseDataFrames(data: string): StreamEvent[] {
     return [{ type: 'error', message: `bad sse frame: ${data.slice(0, 120)}`, retriable: false }];
   }
 }
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new Error('aborted'));
+    }, { once: true });
+  });
+}
+
+/**
+ * Open an SSE stream with connection-level retry (PRD F-04 断流重连):
+ * network errors and retriable HTTP statuses (429/5xx) are retried once
+ * after a short backoff before surfacing an error event.
+ *
+ * Non-retriable HTTP failures (e.g. 401) throw immediately with a `status`
+ * property so callers can skip their own reconnect loops.
+ */
+export async function openSseStream(
+  url: string,
+  init: RequestInit,
+  retries = 1,
+): Promise<Response> {
+  let lastError: unknown;
+  const signal = (init.signal as AbortSignal | undefined) ?? undefined;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await sleep(Math.min(500 * attempt, 2000), signal);
+    try {
+      const res = await fetch(url, init);
+      if (res.ok && res.body) return res;
+      const text = await res.text().catch(() => '');
+      const err = new Error(`http ${res.status}: ${text.slice(0, 200)}`) as Error & { status?: number };
+      err.status = res.status;
+      lastError = err;
+      if (!(res.status === 429 || res.status >= 500)) throw err; // non-retriable
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      if ((e as { status?: number }).status !== undefined) throw e; // non-retriable marker
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
+/** True when a stream-open error is worth re-dialing (network / 429 / 5xx). */
+export function isRetriableOpenError(e: unknown): boolean {
+  const status = (e as { status?: number }).status;
+  if (status === undefined) return true; // network error, no HTTP status
+  return status === 429 || status >= 500;
+}

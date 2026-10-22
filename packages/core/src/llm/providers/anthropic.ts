@@ -5,7 +5,7 @@ import type {
   StreamEvent,
   ToolDefinition,
 } from '@y-zero/shared';
-import { parseSse, parseDataFrames } from '../sse.js';
+import { parseSse, parseDataFrames, openSseStream, isRetriableOpenError } from '../sse.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok */
 function estimateTokens(messages: ChatMessage[]): number {
@@ -65,7 +65,7 @@ export class AnthropicProvider implements LLMProvider {
     if (req.temperature !== undefined) body.temperature = req.temperature;
     if (req.tools.length > 0) body.tools = convertTools(req.tools);
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -74,77 +74,91 @@ export class AnthropicProvider implements LLMProvider {
       },
       body: JSON.stringify(body),
       signal: req.signal,
-    });
+    };
 
-    if (!res.ok || !res.body) {
-      const text = await res.text().catch(() => '');
-      yield {
-        type: 'error',
-        message: `anthropic http ${res.status}: ${text.slice(0, 300)}`,
-        retriable: res.status === 429 || res.status >= 500,
-      };
-      return;
-    }
+    // 断流重连 (F-04): same policy as the openai-compatible provider.
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      let started = false;
+      try {
+        const res = await openSseStream(`${this.baseUrl}/v1/messages`, init, attempt === 0 ? 1 : 0);
+        // block index -> tool_use id/name (from content_block_start)
+        const blocks = new Map<number, { id: string; name: string }>();
 
-    // block index -> tool_use id/name (from content_block_start)
-    const blocks = new Map<number, { id: string; name: string }>();
-
-    for await (const frame of parseSse(res.body)) {
-      for (const ev of parseDataFrames(frame.data)) {
-        const raw = ev as unknown as Record<string, unknown>;
-        const type = raw.type as string;
-        switch (type) {
-          case 'message_start': {
-            const msg = raw.message as { usage?: { input_tokens?: number } } | undefined;
-            const input = msg?.usage?.input_tokens ?? 0;
-            if (input > 0) yield { type: 'usage', input, output: 0 };
-            break;
-          }
-          case 'content_block_start': {
-            const idx = raw.index as number;
-            const block = raw.content_block as { type: string; id?: string; name?: string };
-            if (block.type === 'tool_use') {
-              blocks.set(idx, { id: block.id ?? '', name: block.name ?? '' });
-              yield { type: 'tool_call_delta', index: idx, id: block.id, name: block.name, argsDelta: '' };
+        for await (const frame of parseSse(res.body!)) {
+          for (const ev of parseDataFrames(frame.data)) {
+            const raw = ev as unknown as Record<string, unknown>;
+            const type = raw.type as string;
+            switch (type) {
+              case 'message_start': {
+                const msg = raw.message as { usage?: { input_tokens?: number } } | undefined;
+                const input = msg?.usage?.input_tokens ?? 0;
+                if (input > 0) yield { type: 'usage', input, output: 0 };
+                break;
+              }
+              case 'content_block_start': {
+                const idx = raw.index as number;
+                const block = raw.content_block as { type: string; id?: string; name?: string };
+                if (block.type === 'tool_use') {
+                  blocks.set(idx, { id: block.id ?? '', name: block.name ?? '' });
+                  started = true;
+                  yield { type: 'tool_call_delta', index: idx, id: block.id, name: block.name, argsDelta: '' };
+                }
+                break;
+              }
+              case 'content_block_delta': {
+                const idx = raw.index as number;
+                const delta = raw.delta as {
+                  type: string;
+                  text?: string;
+                  thinking?: string;
+                  partial_json?: string;
+                };
+                if (delta.type === 'text_delta' && delta.text) {
+                  started = true;
+                  yield { type: 'text_delta', text: delta.text };
+                } else if (delta.type === 'thinking_delta' && delta.thinking) {
+                  started = true;
+                  yield { type: 'thinking_delta', text: delta.thinking };
+                } else if (delta.type === 'input_json_delta') {
+                  started = true;
+                  yield { type: 'tool_call_delta', index: idx, argsDelta: delta.partial_json ?? '' };
+                }
+                break;
+              }
+              case 'message_delta': {
+                const usage = raw.usage as { output_tokens?: number } | undefined;
+                if (usage?.output_tokens) yield { type: 'usage', input: 0, output: usage.output_tokens };
+                break;
+              }
+              case 'message_stop':
+                yield { type: 'done' };
+                return;
+              case 'error': {
+                const err = raw.error as { message?: string } | undefined;
+                yield { type: 'error', message: err?.message ?? 'anthropic stream error', retriable: true };
+                return;
+              }
+              default:
+                break;
             }
-            break;
           }
-          case 'content_block_delta': {
-            const idx = raw.index as number;
-            const delta = raw.delta as {
-              type: string;
-              text?: string;
-              thinking?: string;
-              partial_json?: string;
-            };
-            if (delta.type === 'text_delta' && delta.text) {
-              yield { type: 'text_delta', text: delta.text };
-            } else if (delta.type === 'thinking_delta' && delta.thinking) {
-              yield { type: 'thinking_delta', text: delta.thinking };
-            } else if (delta.type === 'input_json_delta') {
-              yield { type: 'tool_call_delta', index: idx, argsDelta: delta.partial_json ?? '' };
-            }
-            break;
-          }
-          case 'message_delta': {
-            const usage = raw.usage as { output_tokens?: number } | undefined;
-            if (usage?.output_tokens) yield { type: 'usage', input: 0, output: usage.output_tokens };
-            break;
-          }
-          case 'message_stop':
-            yield { type: 'done' };
-            return;
-          case 'error': {
-            const err = raw.error as { message?: string } | undefined;
-            yield { type: 'error', message: err?.message ?? 'anthropic stream error', retriable: true };
-            return;
-          }
-          default:
-            break;
         }
+        yield { type: 'done' };
+        return;
+      } catch (e) {
+        const aborted = req.signal?.aborted ?? false;
+        const canRetry = !aborted && isRetriableOpenError(e);
+        if (started || attempt >= 1 || !canRetry) {
+          yield {
+            type: 'error',
+            message: `anthropic stream failed: ${(e as Error).message}`,
+            retriable: !aborted && isRetriableOpenError(e),
+          };
+          return;
+        }
+        // silent reconnect: nothing emitted yet, one extra dial
       }
     }
-    yield { type: 'done' };
   }
 }
 

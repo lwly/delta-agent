@@ -10,6 +10,7 @@ import {
   ToolRegistry,
   McpManager,
   loadMcpConfig,
+  ProviderManager,
 } from '@y-zero/core';
 import { App } from './ui/app.js';
 
@@ -38,6 +39,122 @@ program
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
   .action(async (opts: CliOpts) => {
     await start(opts);
+  });
+
+// ── yzero models：Provider Key 本地管理（F-04a）──────────────────────────
+
+const models = program.command('models').description('管理模型 Provider 配置（Key 加密存储于 ~/.y-zero/models.json）');
+
+models
+  .command('add')
+  .description('新增/覆盖一个 Provider（id: anthropic | openai | deepseek | qwen 或任意 openai 兼容网关名）')
+  .argument('<id>', 'provider id')
+  .requiredOption('-k, --key <apiKey>', 'API Key（注意 shell history 泄漏风险，可用引号并事后清理）')
+  .option('--base-url <url>', '自定义 API 端点（openai 兼容网关必填）')
+  .option('-m, --model <model>', '默认模型名')
+  .option('--default', '设为默认 Provider')
+  .action((id: string, opts: { key: string; baseUrl?: string; model?: string; default?: boolean }) => {
+    new ProviderManager().add({
+      id,
+      apiKey: opts.key,
+      baseUrl: opts.baseUrl,
+      model: opts.model,
+      setDefault: opts.default,
+    });
+    console.log(`✔ 已保存 ${id}${opts.default ? '（默认）' : ''}，Key 已加密存储`);
+  });
+
+models
+  .command('list')
+  .description('列出已配置的 Provider（Key 脱敏显示）')
+  .action(() => {
+    const list = new ProviderManager().list();
+    if (list.length === 0) {
+      console.log('（空）先用 `yzero models add <id> -k <apiKey>` 添加');
+      return;
+    }
+    for (const p of list) {
+      const flags = [
+        p.default ? '默认' : '',
+        p.enabled ? '' : '已停用',
+      ].filter(Boolean).join(' · ');
+      console.log(
+        `${p.default ? '*' : ' '} ${p.id.padEnd(12)} [${p.vendor}] ${p.keyMasked}` +
+          `${p.model ? ` model=${p.model}` : ''}${p.baseUrl ? ` base=${p.baseUrl}` : ''}` +
+          `${flags ? `  (${flags})` : ''}`,
+      );
+    }
+  });
+
+models
+  .command('remove')
+  .description('删除一个 Provider')
+  .argument('<id>')
+  .action((id: string) => {
+    console.log(new ProviderManager().remove(id) ? `✔ 已删除 ${id}` : `✘ 未找到 ${id}`);
+  });
+
+models
+  .command('default')
+  .description('设置默认 Provider')
+  .argument('<id>')
+  .action((id: string) => {
+    try {
+      new ProviderManager().setDefault(id);
+      console.log(`✔ 默认 Provider 已设为 ${id}`);
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+for (const [name, enabled] of [['enable', true], ['disable', false]] as const) {
+  models
+    .command(name)
+    .description(`${enabled ? '启用' : '停用'}一个 Provider`)
+    .argument('<id>')
+    .action((id: string) => {
+      try {
+        new ProviderManager().setEnabled(id, enabled);
+        console.log(`✔ ${id} 已${enabled ? '启用' : '停用'}`);
+      } catch (e) {
+        console.error(`✘ ${(e as Error).message}`);
+        process.exitCode = 1;
+      }
+    });
+}
+
+models
+  .command('move')
+  .description('调整探测顺序（env Key 均未配置时按此顺序尝试）')
+  .argument('<id>')
+  .argument('<dir>', 'up | down')
+  .action((id: string, dir: 'up' | 'down') => {
+    try {
+      new ProviderManager().move(id, dir);
+      console.log(`✔ ${id} 已${dir === 'up' ? '上移' : '下移'}`);
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+models
+  .command('test')
+  .description('连通性测试（发送最小 chat 请求）')
+  .argument('[id]', '缺省测试默认 Provider')
+  .action(async (id?: string) => {
+    const mgr = new ProviderManager();
+    const target = id ?? mgr.activeIds()[0];
+    if (!target) {
+      console.error('✘ 没有已启用的 Provider，先 `yzero models add`');
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`… 测试 ${target} …`);
+    const r = await mgr.test(target);
+    console.log(`${r.ok ? '✔' : '✘'} ${target}：${r.detail}（${r.latencyMs}ms）`);
+    if (!r.ok) process.exitCode = 1;
   });
 
 async function start(opts: CliOpts): Promise<void> {

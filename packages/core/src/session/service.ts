@@ -80,8 +80,15 @@ const PROVIDER_ENV: Record<Exclude<ProviderId, 'anthropic'>, { key: string; base
   qwen: { key: 'DASHSCOPE_API_KEY', base: 'DASHSCOPE_BASE_URL' },
 };
 
-/** Resolve the runtime LLM provider: explicit id > YZERO_PROVIDER > first configured key. */
-export async function resolveProviderFromEnv(id?: string): Promise<LLMProvider> {
+/**
+ * Resolve the runtime LLM provider:
+ * explicit id > YZERO_PROVIDER > env keys > stored config (`yzero models add`).
+ * `opts.modelsFile` overrides the provider store location (DI / tests).
+ */
+export async function resolveProviderFromEnv(
+  id?: string,
+  opts?: { modelsFile?: string },
+): Promise<LLMProvider> {
   const wanted = (id || process.env.YZERO_PROVIDER || '') as ProviderId | '';
   const candidates: ProviderId[] = wanted
     ? [wanted]
@@ -114,10 +121,24 @@ export async function resolveProviderFromEnv(id?: string): Promise<LLMProvider> 
     });
   }
 
+  // env miss → stored provider config (`yzero models add`)
+  const { ProviderManager } = await import('../llm/manager.js');
+  const mgr = new ProviderManager(opts?.modelsFile);
+  const errors: string[] = [];
+  for (const pid of mgr.activeIds()) {
+    if (wanted && pid !== wanted) continue;
+    try {
+      return await mgr.createProvider(pid);
+    } catch (e) {
+      errors.push(`${pid}: ${(e as Error).message}`);
+    }
+  }
+
   const tried = wanted || 'anthropic/deepseek/qwen/openai';
+  const hint = errors.length ? `\n存储配置解析失败：\n  ${errors.join('\n  ')}` : '';
   throw new Error(
     `未找到可用的 Provider（尝试顺序：${tried}）。请设置对应 API Key：` +
       `ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY，` +
-      `或用 YZERO_PROVIDER 指定厂商。`,
+      `或用 YZERO_PROVIDER / --provider 指定，或运行 \`yzero models add\` 保存配置。${hint}`,
   );
 }
