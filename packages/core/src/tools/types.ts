@@ -12,6 +12,14 @@ export interface ToolContext {
   todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>;
   /** per-call timeout default (ms) */
   defaultTimeoutMs?: number;
+  /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具依赖；未启用时工具报 skills_unavailable） */
+  skills?: SkillRuntime;
+}
+
+/** Skill 加载运行时（engine/session 侧组装 SkillBuffer + 已发现 Skills 后注入） */
+export interface SkillRuntime {
+  load(name: string): Promise<{ ok: boolean; content: string }>;
+  unload(name: string): { ok: boolean; content: string };
 }
 
 export type ToolDanger = 'safe' | 'confirm';

@@ -13,6 +13,7 @@ import {
 } from './builtin/fs.js';
 import { runCommandTool, runTestsTool } from './builtin/exec.js';
 import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
+import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
 
 /** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
 interface CompiledValidator {
@@ -45,6 +46,7 @@ export class ToolRegistry {
     for (const t of [
       readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
       runCommandTool, runTestsTool, webFetchTool, todoWriteTool, askUserTool,
+      loadSkillTool, unloadSkillTool,
     ]) {
       this.register(t);
     }

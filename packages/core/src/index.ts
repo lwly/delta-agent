@@ -100,3 +100,24 @@ export { SessionStore, type SessionRow } from './session/store.js';
 export { SessionService, defaultDbPath, resolveProviderFromEnv, type ProviderId } from './session/service.js';
 
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
+
+export {
+  discoverSkills,
+  defaultBuiltinSkillsDir,
+  readSkillDir,
+  parseFrontmatter,
+  type DiscoverOptions,
+  type SkillLayer,
+  type SkillMeta,
+} from './skills/loader.js';
+export {
+  tokenize,
+  scoreSkill,
+  matchSkills,
+  suggestSkill,
+  MATCH_THRESHOLD,
+  type SkillScore,
+} from './skills/matcher.js';
+export { SkillBuffer, renderSkillContent, type LoadedSkill } from './skills/buffer.js';
+export { loadSkillTool, unloadSkillTool } from './tools/builtin/skill.js';
+export type { SkillRuntime } from './tools/types.js';

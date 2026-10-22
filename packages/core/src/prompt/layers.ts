@@ -88,11 +88,23 @@ export class SkillsLayer implements PromptLayer {
   readonly kind = 'dynamic' as const;
 
   build(ctx: AssembleContext): LayerValue {
-    if (ctx.skillIndex.length === 0) return '';
-    return ctx.skillIndex.map(
-      (s) => `- **${s.name}**：${s.description}${s.triggers.length ? `（触发词：${s.triggers.join('、')}）` : ''}`,
-    ).join('\n')
-      + '\n\n需要某个技能的完整能力时，调用 `load_skill` 工具按需加载。';
+    const parts: string[] = [];
+    if (ctx.skillIndex.length > 0) {
+      parts.push(
+        ctx.skillIndex
+          .map(
+            (s) =>
+              `- **${s.name}**：${s.description}${s.triggers.length ? `（触发词：${s.triggers.join('、')}）` : ''}`,
+          )
+          .join('\n') +
+          '\n\n需要某个技能的完整能力时，调用 `load_skill` 工具按需加载。',
+      );
+    }
+    // 已加载 Skill 的完整内容（跨轮次缓冲区，两阶段加载第⑤步）
+    for (const loaded of ctx.loadedSkills ?? []) {
+      parts.push(loaded.content);
+    }
+    return parts.join('\n\n');
   }
 }
 

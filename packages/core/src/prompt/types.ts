@@ -77,6 +77,8 @@ export interface AssembleResult extends SystemPrompt {
   tools: Array<{ name: string; description: string; schema: Record<string, unknown> }>;
   /** L5：Skill 索引（name + description + 触发词） */
   skillIndex: Array<{ name: string; description: string; triggers: string[] }>;
+  /** L5：已加载 Skill 的完整内容（跨轮次缓冲区，load_skill 后注入） */
+  loadedSkills?: Array<{ name: string; content: string }>;
   /** L6：记忆召回结构化条目（MemoryProvider 产出，优先于 memoryRecall 文本） */
   memoryEntries?: RecalledMemory[];
   /** L6：记忆召回文本（简化接入，未提供 memoryEntries 时使用） */
