@@ -4,7 +4,7 @@
  *       → 不通过：失败节点回队重试或调整目标（携带审查反馈），重试上限默认 2
  *       → 超限终止并汇报遗留问题；通过：Orchestrator 汇总交付。
  */
-import type { AgentEvent, ChatMessage, Plan, ReviewVerdict, TaskNode, Usage } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, MessageImage, Plan, ReviewVerdict, TaskNode, Usage } from '@y-zero/shared';
 import type { RunContext } from './react.js';
 import { buildPlan } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
@@ -18,6 +18,7 @@ export async function* runMultiAgent(
   ctx: RunContext,
   _history: ChatMessage[],
   userInput: string,
+  _images?: MessageImage[], // F-25：多代理模式的图片走历史消息（hub 已落库 user 消息），worker 规划用文本
 ): AsyncIterable<AgentEvent> {
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   const maxReviewRetries = ctx.plan?.maxReviewRetries ?? DEFAULT_MAX_REVIEW_RETRIES;

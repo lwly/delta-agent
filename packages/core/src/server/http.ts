@@ -12,6 +12,7 @@ import type { ConfirmDecision } from '@y-zero/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
+import { normalizeIncomingImages, ImageError } from '../media/images.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -157,9 +158,17 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (method === 'POST' && parts[3] === 'messages') {
           const body = await readBody(req);
           const input = String(body.input ?? '');
-          if (!input.trim()) return err(res, 400, 'input is required');
+          if (!input.trim() && !Array.isArray(body.images)) return err(res, 400, 'input is required');
           if (hub.isRunning(sessionId)) return err(res, 409, 'session is running');
-          void hub.send(sessionId, input).catch(() => undefined); // 错误经 run_error 事件推送
+          // F-25 多模态：可选图片附件（base64，服务端校验格式/大小/数量）
+          let images;
+          try {
+            images = normalizeIncomingImages(body.images);
+          } catch (e) {
+            if (e instanceof ImageError) return err(res, 400, e.message);
+            throw e;
+          }
+          void hub.send(sessionId, input, images).catch(() => undefined); // 错误经 run_error 事件推送
           return json(res, 202, { ok: true, running: true });
         }
         if (method === 'POST' && parts[3] === 'abort') {
@@ -339,6 +348,17 @@ export function createWebServer(opts: ServeOptions): http.Server {
         } catch (e) {
           return err(res, 400, (e as Error).message);
         }
+      }
+      // F-17 对话检索：全文/语义搜索历史消息（置于 /api/search 之前避免被会话检索截获）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'search' && parts[2] === 'messages') {
+        const q = url.searchParams.get('q') ?? '';
+        const mode = url.searchParams.get('mode');
+        const limit = url.searchParams.get('limit');
+        const hits = await service.searchMessages(q, {
+          mode: mode === 'fulltext' || mode === 'semantic' ? mode : 'auto',
+          limit: limit ? Number(limit) : undefined,
+        });
+        return json(res, 200, hits);
       }
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'search') {
         return json(res, 200, service.searchSessions(url.searchParams.get('q') ?? ''));

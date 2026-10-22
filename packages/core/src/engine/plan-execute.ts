@@ -3,7 +3,7 @@
  * 简单任务直达 ReAct；复杂任务 LLM 规划 → DAG → Worker Pool 并行执行 → 汇总。
  * 单节点失败：后继 skipped；critical 失败 → 整个 Plan 终止汇报。
  */
-import type { AgentEvent, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@y-zero/shared';
+import type { AgentEvent, MessageImage, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@y-zero/shared';
 import { runReAct, type RunContext } from './react.js';
 import { buildPlan, resolveSimpleTask } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
@@ -20,6 +20,7 @@ export async function* runPlanExecute(
   ctx: RunContext,
   history: Parameters<typeof runReAct>[1],
   userInput: string,
+  images?: MessageImage[],
 ): AsyncIterable<AgentEvent> {
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   const force = ctx.plan?.force;
@@ -30,7 +31,7 @@ export async function* runPlanExecute(
     (force === 'direct' ||
       (await resolveSimpleTask(ctx.provider, ctx.model, userInput, { signal: ctx.signal })))
   ) {
-    for await (const ev of runReAct(ctx, history, userInput)) {
+    for await (const ev of runReAct(ctx, history, userInput, images)) {
       yield ev;
     }
     return;
@@ -53,7 +54,7 @@ export async function* runPlanExecute(
       if (decision.kind === 'reject') {
         // 拒绝规划 → 回退 ReAct 直达
         yield { type: 'text_delta', text: `（已按你的要求跳过计划，直接执行）\n` };
-        for await (const ev of runReAct(ctx, history, userInput)) {
+        for await (const ev of runReAct(ctx, history, userInput, images)) {
           yield ev;
         }
         return;

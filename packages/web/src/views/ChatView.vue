@@ -3,12 +3,18 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useChatStore } from '../stores/chat';
 import { renderMarkdown } from '../render';
+import type { MessageImage } from '../api/client';
 
 const route = useRoute();
 const store = useChatStore();
 const input = ref('');
 const listRef = ref<HTMLElement | null>(null);
 const sessionId = computed(() => String(route.params.sessionId ?? ''));
+// F-25 多模态：待发送附件（读入为 data URL 预览 + base64 载荷）
+const pendingImages = ref<Array<MessageImage & { preview: string; name: string }>>([]);
+const fileInput = ref<HTMLInputElement | null>(null);
+const MAX_IMAGES = 5;
+const MAX_BYTES = 4 * 1024 * 1024;
 const MODE_LABELS: Record<string, string> = {
   react: '⚡ ReAct',
   'plan-execute': '📋 Plan',
@@ -43,12 +49,57 @@ function argsPretty(argsJson: string): string {
     return argsJson;
   }
 }
+function dataUrlOf(img: MessageImage): string {
+  return `data:${img.mediaType};base64,${img.base64}`;
+}
+
+// F-25：选择图片 → 读入 base64（格式/大小前端预检，服务端仍校验）
+async function onPickImages(ev: Event) {
+  const target = ev.target as HTMLInputElement;
+  const files = Array.from(target.files ?? []);
+  target.value = '';
+  for (const f of files) {
+    if (pendingImages.value.length >= MAX_IMAGES) {
+      store.notice(`最多附加 ${MAX_IMAGES} 张图片`);
+      break;
+    }
+    if (f.size > MAX_BYTES) {
+      store.notice(`✘ ${f.name} 过大（>4MB），请压缩后再附加`);
+      continue;
+    }
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) {
+      store.notice(`✘ ${f.name}：仅支持 png/jpeg/gif/webp`);
+      continue;
+    }
+    const buf = await f.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    pendingImages.value.push({
+      mediaType: f.type,
+      base64: btoa(binary),
+      preview: URL.createObjectURL(f),
+      name: f.name,
+    });
+  }
+}
+function removePendingImage(i: number) {
+  const [item] = pendingImages.value.splice(i, 1);
+  if (item) URL.revokeObjectURL(item.preview);
+}
 
 async function submit() {
   const text = input.value.trim();
-  if (!text || store.running) return;
+  if ((!text && pendingImages.value.length === 0) || store.running) return;
   input.value = '';
-  await store.send(text);
+  const images = pendingImages.value.length
+    ? pendingImages.value.map(({ mediaType, base64 }) => ({ mediaType, base64 }))
+    : undefined;
+  for (const p of pendingImages.value) URL.revokeObjectURL(p.preview);
+  pendingImages.value = [];
+  await store.send(text, images);
 }
 </script>
 
@@ -62,9 +113,19 @@ async function submit() {
     </div>
     <div ref="listRef" class="msgs">
       <template v-for="(m, i) in store.messages" :key="i">
-        <!-- 用户消息 -->
+        <!-- 用户消息（含 F-25 图片附件缩略图） -->
         <div v-if="m.role === 'user'" class="msg user">
-          <div class="bubble">{{ m.content }}</div>
+          <div class="bubble">
+            <div v-if="m.images?.length" class="imgs">
+              <img
+                v-for="(img, ii) in m.images"
+                :key="ii"
+                :src="`data:${img.mediaType};base64,${img.base64}`"
+                alt="附件"
+              />
+            </div>
+            <div v-if="m.content">{{ m.content }}</div>
+          </div>
         </div>
 
         <!-- 工具调用卡片 -->
@@ -155,15 +216,23 @@ async function submit() {
 
     <!-- 输入区 -->
     <div class="inputbar">
+      <div v-if="pendingImages.length" class="pending-imgs">
+        <span v-for="(p, i) in pendingImages" :key="p.preview" class="thumb">
+          <img :src="p.preview" :alt="p.name" />
+          <button class="rm" @click="removePendingImage(i)">×</button>
+        </span>
+      </div>
+      <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="onPickImages" />
+      <button class="attach" title="附加图片" @click="fileInput?.click()">🖼</button>
       <textarea
         v-model="input"
         rows="2"
         :disabled="store.running"
-        :placeholder="store.running ? 'Agent 运行中…' : '输入消息（Markdown 语法直接生效）'"
+        :placeholder="store.running ? 'Agent 运行中…' : '输入消息（Markdown 语法直接生效；🖼 可附加图片）'"
         @keydown.enter.exact.prevent="submit"
       ></textarea>
       <button v-if="store.running" class="danger" @click="store.abort()">中止</button>
-      <button v-else class="primary" :disabled="!input.trim()" @click="submit">发送</button>
+      <button v-else class="primary" :disabled="!input.trim() && !pendingImages.length" @click="submit">发送</button>
     </div>
   </div>
 </template>
@@ -208,9 +277,16 @@ summary { cursor: pointer; }
 .actions { display: flex; gap: 8px; margin: 8px 0; }
 .notices { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
 .notice { font-size: 12px; color: #57606a; }
-.inputbar { display: flex; gap: 8px; padding: 10px 0; }
-.inputbar textarea { flex: 1; resize: none; font-family: inherit; font-size: 14px; padding: 10px; border: 1px solid #d0d7de; border-radius: 8px; }
+.inputbar { display: flex; gap: 8px; padding: 10px 0; flex-wrap: wrap; }
+.inputbar textarea { flex: 1; resize: none; font-family: inherit; font-size: 14px; padding: 10px; border: 1px solid #d0d7de; border-radius: 8px; min-width: 200px; }
 .inputbar button { padding: 0 18px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; }
+.inputbar .attach { padding: 0 12px; }
+.pending-imgs { display: flex; gap: 8px; width: 100%; }
+.thumb { position: relative; display: inline-block; }
+.thumb img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid #d0d7de; display: block; }
+.thumb .rm { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: #cf222e; color: #fff; font-size: 12px; line-height: 18px; padding: 0; cursor: pointer; }
+.msg.user .bubble .imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.msg.user .bubble .imgs img { max-width: 200px; max-height: 150px; border-radius: 8px; display: block; }
 button.primary { background: #1f883d; color: #fff; border-color: #1f883d; }
 button.danger { color: #cf222e; }
 .empty { text-align: center; color: #8b949e; padding: 60px 0; }

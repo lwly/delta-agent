@@ -99,7 +99,14 @@ export {
 } from './llm/keychain.js';
 
 export { ToolRegistry } from './tools/registry.js';
-export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';
+export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
+export {
+  taskTool,
+  SUBAGENT_TOOLS,
+  MAX_SUBAGENT_DEPTH,
+  DEFAULT_SUBAGENT_TURNS,
+  MAX_SUBAGENT_TURNS,
+} from './tools/builtin/task.js';
 export { ok as toolOk, fail as toolFail } from './tools/types.js';
 export {
   GitIntegration,
@@ -118,6 +125,18 @@ export {
 } from './tools/permissions.js';
 
 export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
+export {
+  runHeadless,
+  headlessExitCode,
+  buildHeadlessReport,
+  type HeadlessStatus,
+  type HeadlessOutcome,
+  type HeadlessDeps,
+  type HeadlessService,
+  type HeadlessJsonReport,
+  type HeadlessDeniedConfirmation,
+  type HeadlessToolCallSummary,
+} from './headless.js';
 export {
   runPlanExecute,
   summarize,
@@ -172,6 +191,14 @@ export { detectShell, cmdAdapter, runWithShell, type ShellAdapter } from './engi
 
 export { SessionStore, type SessionRow, type ProjectRow, type TrashItem } from './session/store.js';
 export {
+  MIGRATIONS,
+  LATEST_SCHEMA_VERSION,
+  currentSchemaVersion,
+  migrate,
+  type Migration,
+  type MigrateResult,
+} from './session/migrations.js';
+export {
   SessionService,
   defaultDbPath,
   resolveProviderFromEnv,
@@ -222,7 +249,37 @@ export {
   type DistillResult,
 } from './session/distill.js';
 
+export {
+  SearchStore,
+  ftsTokenize,
+  buildFtsQuery,
+  makeSnippet,
+  formatSearchHits,
+  type SearchMode,
+  type SearchOptions,
+  type SearchHit,
+} from './session/search.js';
+export {
+  EmbeddingClient,
+  resolveEmbedding,
+  VENDOR_EMBEDDING,
+  type EmbeddingOptions,
+} from './llm/embeddings.js';
+
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
+
+export {
+  HookManager,
+  loadHookFiles,
+  hookMatches,
+  HOOK_EVENTS,
+  type HookEvent,
+  type HookDef,
+  type HookPayload,
+  type HookOutcome,
+  type HookFiles,
+  type PreToolUseVerdict,
+} from './hooks/manager.js';
 
 export { SessionHub, createSkillRuntime, type HubEvent, type SessionHubDeps } from './server/hub.js';
 export { createWebServer, type ServeOptions } from './server/http.js';
@@ -247,3 +304,20 @@ export {
 export { SkillBuffer, renderSkillContent, type LoadedSkill } from './skills/buffer.js';
 export { loadSkillTool, unloadSkillTool } from './tools/builtin/skill.js';
 export type { SkillRuntime } from './tools/types.js';
+// F-25 多模态：图片附件加载/校验/计价
+export {
+  ALLOWED_IMAGE_TYPES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES_PER_MESSAGE,
+  MAX_IMAGE_DIM,
+  ImageError,
+  sniffImageMediaType,
+  imageDimensions,
+  estimateImageTokens,
+  prepareImageFromBase64,
+  prepareImageFromFile,
+  prepareImages,
+  normalizeIncomingImages,
+  describeImage,
+  type PreparedImage,
+} from './media/images.js';

@@ -27,6 +27,14 @@ export interface ToolResult {
   meta?: Record<string, unknown>;
 }
 
+/** F-25 多模态：随消息发送的图片附件（base64，发送前已完成大小校验） */
+export interface MessageImage {
+  /** IANA media type，仅支持 image/png | image/jpeg | image/gif | image/webp */
+  mediaType: string;
+  /** 不含 data: 前缀的纯 base64 载荷 */
+  base64: string;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
@@ -34,6 +42,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   /** tool role: which call this result answers */
   toolCallId?: string;
+  /** F-25 多模态：user 消息可携带图片附件（视觉模型透传） */
+  images?: MessageImage[];
   /** rough token estimate kept alongside the message */
   tokens?: number;
 }

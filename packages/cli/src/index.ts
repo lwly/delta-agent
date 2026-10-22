@@ -16,9 +16,21 @@ import {
   SessionHub,
   createWebServer,
   createSkillRuntime,
+  formatSearchHits,
+  HookManager,
+  loadHookFiles,
+  MIGRATIONS,
+  LATEST_SCHEMA_VERSION,
 } from '@y-zero/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
+import { runHeadlessCommand, type RunOptions } from './headless-run.js';
+import {
+  normalizeGitPolicy,
+  normalizeMode,
+  parseAllowTools,
+  resolvePermissionMode,
+} from './shared.js';
 
 interface CliOpts {
   resume?: string;
@@ -233,6 +245,50 @@ memory
     service.close();
   });
 
+// ── yzero migrate：F-35 Schema 版本迁移 ─────────────────────────────────
+
+program
+  .command('migrate')
+  .description('查看/执行数据库 Schema 迁移（打开数据库时自动执行；此命令用于核对版本与迁移历史）')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action((opts: { database?: string }) => {
+    const service = new SessionService(opts.database); // 构造即自动迁移
+    const v = service.store.schemaVersion;
+    console.log(`当前 schema 版本：v${v}（最新 v${LATEST_SCHEMA_VERSION}）`);
+    console.log('迁移历史定义：');
+    for (const m of MIGRATIONS) {
+      const state = m.version <= v ? '✔ 已应用' : '○ 待应用';
+      console.log(`  v${m.version}  ${state}  ${m.name}`);
+    }
+    service.close();
+  });
+
+// ── yzero search：F-17 全文/语义搜索历史对话 ────────────────────────────
+
+program
+  .command('search')
+  .description('搜索历史对话（全文 FTS5 + 语义 embedding 混合；无 embedding 配置时自动降级全文）')
+  .argument('<query>', '检索词（中英文均可）')
+  .option('--mode <mode>', 'auto（混合，默认）| fulltext | semantic', 'auto')
+  .option('--limit <n>', '返回条数（默认 10）', '10')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action(async (query: string, opts: { mode: string; limit: string; database?: string }) => {
+    const service = new SessionService(opts.database);
+    try {
+      const mode = opts.mode === 'fulltext' || opts.mode === 'semantic' ? opts.mode : 'auto';
+      if (mode !== 'fulltext' && !service.search.semanticAvailable) {
+        console.error('ℹ 语义检索不可用（未配置 embedding 或 Key 无效），降级为全文检索');
+      }
+      const hits = await service.searchMessages(query, { mode, limit: Number(opts.limit) || 10 });
+      console.log(formatSearchHits(hits, query));
+    } catch (e) {
+      console.error(`✘ 检索失败：${(e as Error).message}`);
+      process.exitCode = 1;
+    } finally {
+      service.close();
+    }
+  });
+
 // ── yzero serve：Web 控制台本地服务（M4）────────────────────────────────
 
 program
@@ -259,12 +315,17 @@ program
     const projectRoot = process.cwd();
     service.ensureProject(projectRoot); // 注册当前目录为项目
     const skills = await createSkillRuntime(projectRoot);
+    // F-27 Hook 系统：加载用户级 + 项目级 hooks.json（工具钩子 + 生命周期）
+    const hooks = HookManager.load(projectRoot, undefined, (o) => {
+      if (!o.ok) console.error(`⚠ hook ${o.hook.event}(${o.hook.command}) 异常：${o.reason ?? o.stderr.trim().slice(0, 200)}`);
+    });
 
     const hub = new SessionHub({
       service,
       registry,
       resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
       skills,
+      hooks,
     });
 
     const providers = new ProviderManager(); // 设置中心共用同一存储（~/.y-zero/models.json）
@@ -374,6 +435,10 @@ async function start(opts: CliOpts): Promise<void> {
     systemPromptParts: promptAssembly.parts,
     refreshDynamic: promptAssembly.refreshDynamic,
     skillsRuntime: promptAssembly.skills,
+    // F-27 Hook 系统：工具挂钩 + SessionStart/Stop/SessionEnd 生命周期
+    hooks: HookManager.load(cwd, undefined, (o) => {
+      if (!o.ok) console.error(`⚠ hook ${o.hook.event}(${o.hook.command}) 异常：${o.reason ?? o.stderr.trim().slice(0, 200)}`);
+    }),
     yolo: Boolean(opts.yolo),
     permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
     allowTools: parseAllowTools(opts.allow),
@@ -391,54 +456,71 @@ async function start(opts: CliOpts): Promise<void> {
   }
 }
 
+// ── yzero hooks：F-27 生命周期钩子配置查看 ──────────────────────────────
+
+program
+  .command('hooks')
+  .description('查看已加载的 Hook 配置（~/.y-zero/hooks.json + .y-zero/hooks.json；事件与退出码语义见 PRD F-27）')
+  .action(() => {
+    const files = loadHookFiles(process.cwd());
+    const render = (list: typeof files.user, label: string) => {
+      console.log(`${label}（${list.length} 条）`);
+      for (const h of list) {
+        const matcher = h.tool ? ` tool=${h.tool}` : '';
+        console.log(`  ${h.event.padEnd(12)} ${h.command}${matcher}${h.timeout_ms ? ` timeout=${h.timeout_ms}ms` : ''}`);
+      }
+    };
+    render(files.user, '用户级 ~/.y-zero/hooks.json');
+    render(files.project, '项目级 .y-zero/hooks.json');
+    for (const e of files.errors) console.error(`✘ ${e}`);
+    if (files.hooks.length === 0 && files.errors.length === 0) {
+      console.log('（未配置任何钩子）示例：.y-zero/hooks.json → {"hooks":[{"event":"PreToolUse","tool":"write_file","command":"npx lint --fix"}]}');
+    }
+  });
+
+// ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
+
+/** F-25：--image 可重复参数收集。 */
+function collectImages(val: string, prev: string[] = []): string[] {
+  return [...prev, val];
+}
+
+program
+  .command('run')
+  .description('非交互运行一次任务（F-29 Headless/SDK）：供 CI 流水线与脚本集成。退出码：0 成功 / 1 配置错误 / 2 引擎错误 / 3 达最大轮次 / 4 预算耗尽 / 5 中断')
+  .argument('[task...]', '任务描述（也可用 -p 传入）')
+  .option('-p, --prompt <text>', '任务描述（与位置参数等价，便于引用传参）')
+  .option('--json', '结构化输出：最终在 stdout 打印单个 JSON 报告（结果/用量/工具调用/退出码）', false)
+  .option('--output <file>', '把最终结果（--json 时为 JSON 报告）写入文件')
+  .option('-r, --resume [sessionId]', '追加到既有会话（缺省恢复项目最近会话）')
+  .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回各厂商默认）')
+  .option('--provider <name>', '模型厂商：anthropic | deepseek | qwen | openai')
+  .option('--yolo', 'YOLO 第二重开关（须与 --permission yolo 同时使用）')
+  .option('--permission <mode>', 'F-23 权限模式：plan | default | yolo（headless 下需确认操作会被自动拒绝，写任务请用 --allow / yolo）', 'default')
+  .option('--allow <tools>', '工具级 allowlist（逗号分隔，default 模式下命中跳过确认）')
+  .option('--git <mode>', 'F-24 git 策略：off | suggest | auto（auto = 成功结束后自动提交本会话变更）', 'suggest')
+  .option('--max-turns <n>', '单任务最大轮次', '50')
+  .option('--max-cost <usd>', '本次任务费用预算（USD，默认 0.7）')
+  .option('--mode <mode>', '执行模式：react | plan | multi（默认 react）')
+  .option('--image <path>', 'F-25 多模态：附加图片（可重复，最多 5 张；png/jpeg/gif/webp，单张 ≤4MB）', collectImages)
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action(async (task: string[] | undefined, opts: RunOptions) => {
+    opts.task = task?.length ? task.join(' ') : undefined;
+    await runHeadlessCommand(opts);
+  });
+
+// ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
+// 首个非选项参数且不是已知子命令时，重写为 run 子命令。
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'help']);
+const argv = process.argv.slice(2);
+if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
+  process.argv.splice(2, 0, 'run');
+}
+
 program.parseAsync(process.argv).catch((e) => {
   console.error(`✘ ${(e as Error).message}`);
   process.exit(1);
 });
-
-/** CLI --mode → 会话模式（存储值与引擎值对齐）。 */
-function normalizeMode(mode?: string): 'react' | 'plan-execute' | 'multi-agent' {
-  switch (mode) {
-    case 'plan':
-    case 'plan-execute':
-      return 'plan-execute';
-    case 'multi':
-    case 'multi-agent':
-      return 'multi-agent';
-    default:
-      return 'react';
-  }
-}
-
-/**
- * F-23 权限模式解析（双重开启）：
- * - `--permission yolo` 必须同时传 `--yolo`，否则告警降级 default
- * - `--yolo` 单独使用（历史用法）同样告警降级 default
- */
-function resolvePermissionMode(yoloFlag: boolean, permission?: string): 'plan' | 'default' | 'yolo' {
-  const requested = permission === 'plan' || permission === 'yolo' ? permission : 'default';
-  if (requested === 'yolo' && !yoloFlag) {
-    console.error('⚠ yolo 模式需双重开启：同时传入 --permission yolo 与 --yolo；本次降级为 default');
-    return 'default';
-  }
-  if (requested !== 'yolo' && yoloFlag) {
-    console.error('⚠ --yolo 需与 --permission yolo 同时使用（双重开启）；本次降级为 default');
-    return 'default';
-  }
-  return requested;
-}
-
-/** F-24 工具级 allowlist：逗号分隔 → 去空白去重。 */
-function parseAllowTools(raw?: string): string[] | undefined {
-  if (!raw?.trim()) return undefined;
-  const list = [...new Set(raw.split(',').map((t) => t.trim()).filter(Boolean))];
-  return list.length > 0 ? list : undefined;
-}
-
-/** F-24 git 策略解析（非法值降级 suggest）。 */
-function normalizeGitPolicy(mode?: string): 'off' | 'suggest' | 'auto' {
-  return mode === 'off' || mode === 'auto' ? mode : 'suggest';
-}
 
 // keep path import used (win compat helpers may grow here)
 void path;

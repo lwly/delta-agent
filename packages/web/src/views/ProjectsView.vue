@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
+import { api, type MessageHit } from '../api/client';
 
 const store = useWorkspaceStore();
 const router = useRouter();
@@ -14,6 +15,7 @@ const MODES = [
   { value: 'multi-agent', label: '🤖 Multi-Agent（M5）' },
 ];
 const searchResults = ref<Array<{ id: string; title: string }>>([]);
+const messageHits = ref<MessageHit[]>([]);
 const error = ref('');
 
 onMounted(async () => {
@@ -51,8 +53,18 @@ async function removeProject(p: { id: string; name: string }) {
 }
 
 async function doSearch() {
-  searchResults.value = (await store.search(searchQ.value)) as Array<{ id: string; title: string }>;
+  const q = searchQ.value.trim();
+  searchResults.value = (await store.search(q)) as Array<{ id: string; title: string }>;
+  // F-17：同时检索历史消息（全文 + 语义，embedding 不可用时服务端自动降级全文）
+  try {
+    messageHits.value = await api.searchMessages(q);
+  } catch {
+    messageHits.value = [];
+  }
 }
+
+const VIA_LABEL: Record<string, string> = { fulltext: '全文', semantic: '语义', hybrid: '混合' };
+const ROLE_LABEL: Record<string, string> = { user: '用户', assistant: '助手' };
 </script>
 
 <template>
@@ -81,7 +93,7 @@ async function doSearch() {
     <section class="panel">
       <h2>会话</h2>
       <div class="row">
-        <input v-model="searchQ" placeholder="搜索对话（标题/内容）" @keyup.enter="doSearch" />
+        <input v-model="searchQ" placeholder="搜索对话（标题/内容，全文+语义）" @keyup.enter="doSearch" />
         <button @click="doSearch">搜索</button>
         <select v-model="newSessionMode" class="mode-select">
           <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
@@ -90,7 +102,17 @@ async function doSearch() {
       </div>
       <ul v-if="searchResults.length" class="list">
         <li v-for="r in searchResults" :key="r.id" @click="router.push(`/chat/${r.id}`)">
-          <span class="grow">{{ r.title }}</span><span class="muted">检索命中</span>
+          <span class="grow">{{ r.title }}</span><span class="muted">会话命中</span>
+        </li>
+      </ul>
+      <!-- F-17：历史消息命中（含片段与命中方式） -->
+      <ul v-if="messageHits.length" class="list hits">
+        <li v-for="h in messageHits" :key="h.messageId" @click="router.push(`/chat/${h.sessionId}`)">
+          <span class="grow">
+            <span class="hit-title">{{ h.sessionTitle }} · {{ ROLE_LABEL[h.role] || h.role }}</span>
+            <span class="hit-snippet">{{ h.snippet }}</span>
+          </span>
+          <span class="muted">{{ VIA_LABEL[h.via] }}命中</span>
         </li>
       </ul>
       <ul class="list">
@@ -136,6 +158,10 @@ h2 { margin: 0 0 10px; font-size: 15px; }
 }
 .list li:hover, .list li.active { background: #eef2f7; }
 .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hits li { align-items: flex-start; }
+.hits .grow { display: flex; flex-direction: column; gap: 2px; }
+.hit-title { font-size: 13px; }
+.hit-snippet { color: #57606a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mode-select { max-width: 240px; }
 .muted { color: #8b949e; font-size: 12px; }
 .error { color: #cf222e; font-size: 13px; }

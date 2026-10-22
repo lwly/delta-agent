@@ -14,6 +14,10 @@ import {
   PermissionState,
   SessionService,
   ToolRegistry,
+  formatSearchHits,
+  prepareImages,
+  describeImage,
+  ImageError,
   renderSummary,
   runReAct,
   runPlanExecute,
@@ -22,6 +26,7 @@ import {
   type EngineMode,
   type GitPolicyMode,
   type PermissionMode,
+  type PreparedImage,
   type RunContext,
   type SessionRow,
   type SkillRuntime,
@@ -50,6 +55,8 @@ export interface AppOptions {
   refreshDynamic?: () => string;
   /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具） */
   skillsRuntime?: SkillRuntime;
+  /** F-27 Hook 系统（SessionStart/Stop/SessionEnd 生命周期 + 工具挂钩） */
+  hooks?: import('@y-zero/core').HookManager;
   yolo: boolean;
   /** F-23 权限模式（plan/default/yolo；yolo 需与 yolo 标志双重开启，由 CLI 入口保证） */
   permissionMode?: PermissionMode;
@@ -99,6 +106,8 @@ export function App(props: AppOptions) {
   if (!gitRef.current) {
     gitRef.current = new GitIntegration(process.cwd(), { mode: props.gitPolicy ?? 'suggest' });
   }
+  // F-25 多模态：/image 附件暂存区（随下一条消息发送后清空）
+  const pendingImagesRef = useRef<PreparedImage[]>([]);
 
   const addItem = useCallback((item: Omit<Item, 'id'>) => {
     const withId: Item = { ...item, id: nextId++ };
@@ -211,6 +220,18 @@ export function App(props: AppOptions) {
           todos: todosRef.current,
           skills: props.skillsRuntime,
           permissions: permsRef.current ?? undefined,
+          // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写会话预算）
+          registry: registryRef.current,
+          subagent: {
+            provider: props.provider,
+            model: props.session.model || 'claude-sonnet-4-5-20250929',
+            budget: budgetRef.current,
+            budgetConfig: budgetRef.current.config,
+            windowTokens: 200_000,
+            depth: 0,
+          },
+          // F-27 Hook 系统：PreToolUse（可阻断）/ PostToolUse（记录）
+          hooks: props.hooks,
         },
         budget: budgetRef.current,
         windowTokens: 200_000,
@@ -232,7 +253,15 @@ export function App(props: AppOptions) {
       };
 
       const history: ChatMessage[] = props.service.getHistory(props.session.id);
-      props.service.appendMessage(props.session.id, { role: 'user', content: userInput });
+      // F-25：附件随下一条消息发送（发送后清空暂存区）
+      const images = pendingImagesRef.current;
+      pendingImagesRef.current = [];
+      const userMessage: ChatMessage = { role: 'user', content: userInput };
+      if (images.length > 0) userMessage.images = images;
+      props.service.appendMessage(props.session.id, userMessage);
+      for (const img of images) {
+        addItem({ kind: 'user', text: `🖼 ${describeImage(img)}` });
+      }
 
       // stream state
       let assistantText = '';
@@ -259,7 +288,7 @@ export function App(props: AppOptions) {
             : engineMode === 'multi-agent'
               ? runMultiAgent
               : runReAct;
-        for await (const ev of engine(ctx, history, userInput)) {
+        for await (const ev of engine(ctx, history, userInput, images)) {
           const e = ev as AgentEvent;
           switch (e.type) {
             case 'turn_start':
@@ -394,6 +423,11 @@ export function App(props: AppOptions) {
         collectedCalls.length = 0;
         setRunning(false);
         abortRef.current = null;
+        // F-27 Stop 钩子：单次任务结束（旁路触发）
+        void props.hooks?.emit('Stop', {
+          sessionId: props.session.id,
+          projectId: props.session.project_id,
+        });
       }
     },
     [addItem, appendToItem, confirm, askUser, props],
@@ -414,6 +448,8 @@ export function App(props: AppOptions) {
               '  /budget  查看 Token / 费用用量',
               '  /changes 查看会话文件变更汇总（F-24）',
               '  /rollback [id] 回滚变更（缺省全部；id = 回滚该变更之后）',
+              '  /search <词> 全文/语义搜索历史对话（F-17）',
+              '  /image <路径...> 附图片到下一条消息（F-25，最多 5 张；png/jpeg/gif/webp，单张 ≤4MB）',
               '  /exit    退出',
               'Esc 中断当前任务运行。',
             ].join('\n'),
@@ -463,6 +499,44 @@ export function App(props: AppOptions) {
             })
             .catch((e) => addItem({ kind: 'system', text: `回滚失败：${(e as Error).message}` }));
           addItem({ kind: 'system', text: beforeId ? `回滚 #${beforeId} 之后的变更…` : '回滚会话内全部变更…' });
+          return true;
+        }
+        case 'search': {
+          // F-17 对话检索：全文 + 语义混合（embedding 不可用时自动降级全文）
+          const q = rest.join(' ').trim();
+          if (!q) {
+            addItem({ kind: 'system', text: '用法：/search <检索词>（如 /search 数据库连接池）' });
+            return true;
+          }
+          addItem({ kind: 'system', text: `检索「${q}」…` });
+          void props.service
+            .searchMessages(q, { limit: 10 })
+            .then((hits) => addItem({ kind: 'system', text: formatSearchHits(hits, q) }))
+            .catch((e) => addItem({ kind: 'system', text: `检索失败：${(e as Error).message}` }));
+          return true;
+        }
+        case 'image': {
+          // F-25 多模态：附件加入暂存区，随下一条消息发送
+          const paths = rest.map((p) => p.replace(/^"|"$/g, '')).filter(Boolean);
+          if (paths.length === 0) {
+            addItem({
+              kind: 'system',
+              text: `用法：/image <图片路径...>（最多 ${5} 张；png/jpeg/gif/webp，单张 ≤4MB）`,
+            });
+            return true;
+          }
+          try {
+            const prepared = prepareImages(paths);
+            pendingImagesRef.current = [...pendingImagesRef.current, ...prepared];
+            addItem({
+              kind: 'system',
+              text:
+                `已附加 ${prepared.length} 张图片（输入消息后一并发送）：\n` +
+                prepared.map((p) => `  🖼 ${describeImage(p)}`).join('\n'),
+            });
+          } catch (e) {
+            addItem({ kind: 'system', text: `✘ ${(e instanceof ImageError ? e.message : (e as Error).message)}` });
+          }
           return true;
         }
         case 'budget': {
@@ -518,11 +592,21 @@ export function App(props: AppOptions) {
     void git.advisory(props.session.id).then((note) => {
       if (note) addItem({ kind: 'system', text: `⎇ ${note}` });
     });
+    // F-27 SessionStart 钩子（旁路触发）
+    void props.hooks?.emit('SessionStart', {
+      sessionId: props.session.id,
+      projectId: props.session.project_id,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     return () => {
+      // F-27 SessionEnd 钩子（进程退出前旁路触发）
+      void props.hooks?.emit('SessionEnd', {
+        sessionId: props.session.id,
+        projectId: props.session.project_id,
+      });
       props.service.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

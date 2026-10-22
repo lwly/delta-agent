@@ -6,6 +6,8 @@ import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from '
 import { TaskStore } from './tasks.js';
 import { MemoryStore } from './memory.js';
 import { FileChangeStore } from './changes.js';
+import { SearchStore, type SearchOptions, type SearchHit } from './search.js';
+import { resolveEmbedding } from '../llm/embeddings.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
@@ -26,14 +28,17 @@ export class SessionService {
   readonly memory: MemoryStore;
   /** F-24 文件变更管理（同库 file_changes 表：写快照 + diff 汇总 + 回滚） */
   readonly changes: FileChangeStore;
+  /** F-17 对话检索（同库 messages_fts + message_embeddings：全文 + 语义混合） */
+  readonly search: SearchStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
-  constructor(dbPath: string = defaultDbPath()) {
+  constructor(dbPath: string = defaultDbPath(), opts?: { embedderFactory?: () => ReturnType<typeof resolveEmbedding> }) {
     this.store = new SessionStore(dbPath);
     this.tasks = new TaskStore(this.store.db);
     this.memory = new MemoryStore(this.store.db);
     this.changes = new FileChangeStore(this.store.db);
+    this.search = new SearchStore(this.store.db, opts?.embedderFactory ?? resolveEmbedding);
   }
 
   /**
@@ -100,7 +105,8 @@ export class SessionService {
   }
 
   appendMessage(sessionId: string, m: ChatMessage): void {
-    this.store.appendMessage(sessionId, m);
+    const id = this.store.appendMessage(sessionId, m);
+    this.search.indexMessage(id, sessionId, m.role, m.content); // F-17 同步全文索引
     this.store.touchSession(sessionId, {});
   }
 
@@ -283,6 +289,14 @@ export class SessionService {
     const q = query.trim();
     if (!q) return [];
     return this.store.searchSessions(q, limit);
+  }
+
+  /**
+   * F-17 对话检索：全文（FTS5）+ 语义（embedding）混合搜索历史消息。
+   * mode=auto 且 embedding 不可用时自动降级为纯全文。
+   */
+  async searchMessages(query: string, opts?: SearchOptions): Promise<SearchHit[]> {
+    return this.search.search(query, opts);
   }
 }
 

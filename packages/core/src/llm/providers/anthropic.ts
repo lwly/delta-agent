@@ -2,10 +2,12 @@ import type {
   ChatMessage,
   ChatRequest,
   LLMProvider,
+  MessageImage,
   StreamEvent,
   ToolDefinition,
 } from '@y-zero/shared';
 import { parseSse, parseDataFrames, openSseStream, isRetriableOpenError } from '../sse.js';
+import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok */
 function estimateTokens(messages: ChatMessage[]): number {
@@ -13,8 +15,14 @@ function estimateTokens(messages: ChatMessage[]): number {
   for (const m of messages) {
     total += 4 + countTokensOf(m.content);
     for (const c of m.toolCalls ?? []) total += countTokensOf(c.argsJson) + 8;
+    for (const img of m.images ?? []) total += imageTokenCost(img);
   }
   return total;
+}
+
+/** F-25：图片 token 计价（封顶面积/750；无尺寸按字节退化）。 */
+function imageTokenCost(img: MessageImage): number {
+  return estimateImageTokens(img, imageDimensions(Buffer.from(img.base64, 'base64'), img.mediaType));
 }
 
 function countTokensOf(text: string): number {
@@ -170,12 +178,25 @@ function convertTools(tools: ToolDefinition[]): unknown[] {
   }));
 }
 
-/** Map unified messages to Anthropic content blocks. */
-function convertMessages(messages: ChatMessage[]): unknown[] {
+/** Map unified messages to Anthropic content blocks. (exported for tests) */
+export function convertMessages(messages: ChatMessage[]): unknown[] {
   const out: unknown[] = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ role: 'user', content: m.content });
+      // F-25：带图片附件的 user 消息 → content block 数组（文本在前，图片随后）
+      if (m.images?.length) {
+        const content: unknown[] = [];
+        if (m.content) content.push({ type: 'text', text: m.content });
+        for (const img of m.images) {
+          content.push({
+            type: 'image',
+            source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+          });
+        }
+        out.push({ role: 'user', content });
+      } else {
+        out.push({ role: 'user', content: m.content });
+      }
     } else if (m.role === 'assistant') {
       const content: unknown[] = [];
       if (m.content) content.push({ type: 'text', text: m.content });

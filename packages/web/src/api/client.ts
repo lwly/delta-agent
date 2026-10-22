@@ -22,11 +22,18 @@ export interface SessionRow {
   updated_at: string;
 }
 
+export interface MessageImage {
+  mediaType: string;
+  base64: string;
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   toolCalls?: Array<{ id: string; name: string; argsJson: string }>;
   toolCallId?: string;
+  /** F-25 多模态：user 消息的图片附件 */
+  images?: MessageImage[];
 }
 
 export interface TrashItem {
@@ -126,6 +133,19 @@ export interface RunTimeline {
   steps: RunStep[];
 }
 
+/** F-17 对话检索命中 */
+export interface MessageHit {
+  messageId: number;
+  sessionId: string;
+  sessionTitle: string;
+  role: string;
+  content: string;
+  snippet: string;
+  at: string;
+  score: number;
+  via: 'fulltext' | 'semantic' | 'hybrid';
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -142,8 +162,9 @@ export const api = {
   removeSession: (id: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/sessions/${id}?hard=${hard}`),
 
-  // 运行
-  send: (sessionId: string, input: string) => request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/messages`, { input }),
+  // 运行（images = F-25 多模态图片附件，base64 不含 data: 前缀）
+  send: (sessionId: string, input: string, images?: MessageImage[]) =>
+    request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/messages`, { input, images }),
   abort: (sessionId: string) => request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/abort`),
   confirm: (sessionId: string, requestId: string, decision: Record<string, unknown>) =>
     request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/confirm`, { requestId, decision }),
@@ -158,6 +179,12 @@ export const api = {
   restore: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('POST', `/api/trash/restore/${kind}/${id}`),
   purgeTrash: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('DELETE', `/api/trash/${kind}/${id}`),
   search: (q: string) => request<SessionRow[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
+  // F-17 对话检索：全文/语义搜索历史消息
+  searchMessages: (q: string, mode?: 'auto' | 'fulltext' | 'semantic') => {
+    const params = new URLSearchParams({ q });
+    if (mode) params.set('mode', mode);
+    return request<MessageHit[]>('GET', `/api/search/messages?${params.toString()}`);
+  },
 
   // F-18 会话回放
   listRuns: (sessionId: string) => request<RunSummary[]>('GET', `/api/sessions/${sessionId}/runs`),

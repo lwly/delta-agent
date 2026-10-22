@@ -2,11 +2,13 @@ import type {
   ChatMessage,
   ChatRequest,
   LLMProvider,
+  MessageImage,
   StreamEvent,
   ToolDefinition,
   Usage,
 } from '@y-zero/shared';
 import { parseSse, openSseStream, isRetriableOpenError } from '../sse.js';
+import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok (shared rule) */
 export function estimateTokensOf(messages: ChatMessage[]): number {
@@ -14,8 +16,14 @@ export function estimateTokensOf(messages: ChatMessage[]): number {
   for (const m of messages) {
     total += 4 + countTokensOf(m.content);
     for (const c of m.toolCalls ?? []) total += countTokensOf(c.argsJson) + 8;
+    for (const img of m.images ?? []) total += imageTokenCost(img);
   }
   return total;
+}
+
+/** F-25：图片 token 计价（封顶面积/750；无尺寸按字节退化）。 */
+export function imageTokenCost(img: MessageImage): number {
+  return estimateImageTokens(img, imageDimensions(Buffer.from(img.base64, 'base64'), img.mediaType));
 }
 
 function countTokensOf(text: string): number {
@@ -182,8 +190,21 @@ export function convertMessages(messages: ChatMessage[]): unknown[] {
   for (const m of messages) {
     if (m.role === 'system') {
       out.push({ role: 'system', content: m.content });
-    } else if (m.role === 'user') {
-      out.push({ role: 'user', content: m.content });
+    } else     if (m.role === 'user') {
+      // F-25：带图片附件的 user 消息 → content part 数组（text + image_url data URL）
+      if (m.images?.length) {
+        const parts: unknown[] = [];
+        if (m.content) parts.push({ type: 'text', text: m.content });
+        for (const img of m.images) {
+          parts.push({
+            type: 'image_url',
+            image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+          });
+        }
+        out.push({ role: 'user', content: parts });
+      } else {
+        out.push({ role: 'user', content: m.content });
+      }
     } else if (m.role === 'assistant') {
       const msg: Record<string, unknown> = { role: 'assistant', content: m.content || null };
       if (m.toolCalls?.length) {

@@ -2,104 +2,7 @@ import Database from 'better-sqlite3';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import type { ChatMessage } from '@y-zero/shared';
-
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  root_path TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL,
-  settings_json TEXT NOT NULL DEFAULT '{}',
-  deleted_at TEXT DEFAULT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  title TEXT NOT NULL DEFAULT 'New session',
-  mode TEXT NOT NULL DEFAULT 'react',
-  model TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  deleted_at TEXT DEFAULT NULL
-);
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  seq INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  content_json TEXT NOT NULL,
-  tokens INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS compactions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  before_tokens INTEGER NOT NULL,
-  after_tokens INTEGER NOT NULL,
-  summary_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS usage (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  turn INTEGER NOT NULL,
-  input_tokens INTEGER NOT NULL,
-  output_tokens INTEGER NOT NULL,
-  cost_usd REAL NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS tasks (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  plan_revision INTEGER NOT NULL DEFAULT 1,
-  node_id TEXT NOT NULL,
-  node_json TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued',
-  worker_id TEXT,
-  lease_until INTEGER,
-  heartbeat_at INTEGER,
-  retries INTEGER NOT NULL DEFAULT 0,
-  checkpoint_json TEXT,
-  result TEXT,
-  updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS memories (
-  id TEXT PRIMARY KEY,
-  scope TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  content TEXT NOT NULL,
-  keywords TEXT,
-  importance REAL NOT NULL DEFAULT 0.5,
-  confidence REAL NOT NULL DEFAULT 0.8,
-  access_count INTEGER NOT NULL DEFAULT 0,
-  last_access_at INTEGER,
-  content_hash TEXT NOT NULL,
-  source TEXT,
-  status TEXT NOT NULL DEFAULT 'confirmed',
-  superseded_by TEXT,
-  created_at INTEGER NOT NULL,
-  deleted_at INTEGER
-);
-CREATE TABLE IF NOT EXISTS file_changes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  tool TEXT NOT NULL,
-  path TEXT NOT NULL,
-  before_content TEXT,
-  after_content TEXT,
-  before_oversized INTEGER NOT NULL DEFAULT 0,
-  after_oversized INTEGER NOT NULL DEFAULT 0,
-  rolled_back INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
-CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
-CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, status);
-CREATE INDEX IF NOT EXISTS idx_mem_scope ON memories(scope, deleted_at);
-CREATE INDEX IF NOT EXISTS idx_mem_hash ON memories(content_hash);
-CREATE INDEX IF NOT EXISTS idx_changes_session ON file_changes(session_id, id);
-`;
+import { migrate } from './migrations.js';
 
 export interface SessionRow {
   id: string;
@@ -137,6 +40,8 @@ export interface TrashItem {
 export class SessionStore {
   readonly db: Database.Database;
   readonly file: string;
+  /** F-35：打开时自动迁移后的 schema 版本 */
+  readonly schemaVersion: number;
 
   constructor(dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -144,7 +49,7 @@ export class SessionStore {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
-    this.db.exec(SCHEMA);
+    this.schemaVersion = migrate(this.db).to;
   }
 
   close(): void {
@@ -271,6 +176,8 @@ export class SessionStore {
   hardDeleteSession(id: string): void {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
+      this.db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(id); // F-17 级联
+      this.db.prepare('DELETE FROM message_embeddings WHERE message_id NOT IN (SELECT id FROM messages)').run();
       this.db.prepare('DELETE FROM compactions WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(id);
@@ -287,10 +194,12 @@ export class SessionStore {
         .map((r) => r.id);
       for (const sid of ids) {
         this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(sid);
+        this.db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(sid); // F-17 级联
         this.db.prepare('DELETE FROM compactions WHERE session_id = ?').run(sid);
         this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(sid);
         this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(sid);
       }
+      this.db.prepare('DELETE FROM message_embeddings WHERE message_id NOT IN (SELECT id FROM messages)').run();
       this.db.prepare("DELETE FROM memories WHERE scope = ?").run(`project:${id}`);
       this.db.prepare('DELETE FROM sessions WHERE project_id = ?').run(id);
       this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
@@ -325,12 +234,14 @@ export class SessionStore {
 
   // ── messages ──────────────────────────────────────────────────────────────
 
-  appendMessage(sessionId: string, m: ChatMessage): void {
+  /** 追加消息，返回落库 id（F-17 检索索引用）。 */
+  appendMessage(sessionId: string, m: ChatMessage): number {
     const seq = (this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS s FROM messages WHERE session_id = ?')
       .get(sessionId) as { s: number }).s + 1;
-    this.db
+    const r = this.db
       .prepare('INSERT INTO messages (session_id, seq, role, content_json, tokens, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(sessionId, seq, m.role, JSON.stringify(m), Math.max(0, m.tokens ?? 0), new Date().toISOString());
+    return Number(r.lastInsertRowid);
   }
 
   /** Load full history ordered by seq (for resume). */

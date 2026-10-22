@@ -2,6 +2,7 @@ import type {
   AgentEvent,
   ChatMessage,
   LLMProvider,
+  MessageImage,
   ToolCall,
   Usage,
 } from '@y-zero/shared';
@@ -79,9 +80,12 @@ export async function* runReAct(
   ctx: RunContext,
   history: ChatMessage[],
   userInput: string,
+  images?: MessageImage[],
 ): AsyncIterable<AgentEvent> {
   const messages: ChatMessage[] = [...history];
-  push(messages, { role: 'user', content: userInput });
+  const first: ChatMessage = { role: 'user', content: userInput };
+  if (images && images.length > 0) first.images = images; // F-25 多模态附件
+  push(messages, first);
 
   const maxTurns = ctx.maxTurns || 50;
   const maxRetries = ctx.maxRetries ?? 3;
@@ -228,7 +232,12 @@ export async function* runReAct(
 /** push with token estimate attached */
 function push(messages: ChatMessage[], m: ChatMessage): void {
   if (m.tokens === undefined) {
-    m.tokens = 4 + estimateTokensText(m.content);
+    let tokens = 4 + estimateTokensText(m.content);
+    // F-25：图片附件按封顶面积口径计入估算（与 tokens.ts 同规则）
+    for (const img of m.images ?? []) {
+      tokens += Math.min(1600, Math.max(1, Math.ceil(Math.floor(img.base64.length * 0.75) / 750)));
+    }
+    m.tokens = tokens;
   }
   messages.push(m);
 }

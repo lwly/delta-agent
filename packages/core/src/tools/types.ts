@@ -1,6 +1,24 @@
-import type { ConfirmResponder, ToolResult } from '@y-zero/shared';
+import type { ConfirmResponder, ToolResult, ToolCall, ToolDefinition, LLMProvider, BudgetConfig } from '@y-zero/shared';
 import type { PermissionState } from './permissions.js';
 import type { FileChangeStore } from '../session/changes.js';
+import type { HookManager } from '../hooks/manager.js';
+
+/**
+ * F-26 子代理运行时（task 工具依赖）：主循环构建 RunContext 时注入。
+ * 缺省时 task 工具报 task_unavailable（工具定义仍对模型可见，引导降级自主完成）。
+ */
+export interface SubagentRuntime {
+  provider: LLMProvider;
+  model: string;
+  /** 子代理用量回写的父预算（独立状态累加，保证会话费用口径完整） */
+  budget?: import('../context/budget.js').BudgetManager;
+  /** 子代理独立预算配置（缺省继承 DEFAULT_SESSION_BUDGET） */
+  budgetConfig?: Partial<BudgetConfig>;
+  /** 子代理上下文窗口（压缩触发用；缺省 200k） */
+  windowTokens?: number;
+  /** 嵌套深度：主循环 0，子代理派生即 +1；≥ MAX_SUBAGENT_DEPTH 拒绝 */
+  depth?: number;
+}
 
 export interface ToolContext {
   /** project root — hard sandbox boundary for all path parameters */
@@ -31,6 +49,21 @@ export interface ToolContext {
   /** 记忆 scope / 审计归属 */
   sessionId?: string;
   projectId?: string;
+  /**
+   * F-26：父注册表结构视图（task 子代理工具在白名单内复用；缺省时 task 报 task_unavailable）。
+   * 结构与 engine/roles.ts 的 RegistryLike 一致，此处就地定义避免循环依赖。
+   */
+  registry?: {
+    definitions(): ToolDefinition[];
+    executeAll(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]>;
+  };
+  /** F-26 子代理运行时（provider/model/预算/深度）；缺省时 task 报 task_unavailable */
+  subagent?: SubagentRuntime;
+  /**
+   * F-27 Hook 系统：PreToolUse（可阻断）/ PostToolUse（记录）挂接工具执行；
+   * SessionStart/Stop/SessionEnd 由运行入口负责触发；缺省 = 不挂钩。
+   */
+  hooks?: HookManager;
 }
 
 /** Skill 加载运行时（engine/session 侧组装 SkillBuffer + 已发现 Skills 后注入） */

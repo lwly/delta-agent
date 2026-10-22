@@ -19,6 +19,7 @@ import { runCommandTool, runTestsTool } from './builtin/exec.js';
 import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
 import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
 import { saveMemoryTool, recallMemoryTool } from './builtin/memory.js';
+import { taskTool } from './builtin/task.js';
 
 /** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
 interface CompiledValidator {
@@ -53,6 +54,7 @@ export class ToolRegistry {
       runCommandTool, runTestsTool, webFetchTool, todoWriteTool, askUserTool,
       loadSkillTool, unloadSkillTool,
       saveMemoryTool, recallMemoryTool,
+      taskTool,
     ]) {
       this.register(t);
     }
@@ -131,7 +133,22 @@ export class ToolRegistry {
       };
     }
 
-    // 2. F-23 权限判定（plan 拒写/执行；default 写需确认；yolo 放行），
+    // 2. F-27 PreToolUse 钩子：可阻断（exit 2 → stderr 作为拒绝原因回传给模型）
+    if (ctx.hooks?.has('PreToolUse', call.name)) {
+      const verdict = await ctx.hooks.preToolUse(call.name, call.args ?? {}, {
+        sessionId: ctx.sessionId,
+        projectId: ctx.projectId,
+      });
+      if (verdict.blocked) {
+        return {
+          callId: call.id, name: call.name, ok: false,
+          content: `PreToolUse 钩子拦截了该操作${verdict.reason ? `：${verdict.reason}` : ''}。请调整方案（如修改目标路径/命令）或跳过。`,
+          error: 'hook_blocked',
+        };
+      }
+    }
+
+    // 3. F-23 权限判定（plan 拒写/执行；default 写需确认；yolo 放行），
     //    再衔接 danger:'confirm' 确认流（allow_session 记入会话白名单）
     const perms = ctx.permissions;
     const verdict = perms?.check(call.name, call.args);
@@ -170,15 +187,29 @@ export class ToolRegistry {
       // allow / allow_session → proceed
     }
 
-    // 3. dispatch with concurrency policies
+    // 4. dispatch with concurrency policies
+    let dispatched: Promise<ToolResult>;
     if (call.name === 'run_command') {
-      return this.runWithCmdSlot(() => tool.execute(call.args ?? {}, ctx));
-    }
-    if (call.name === 'write_file' || call.name === 'edit_file') {
+      dispatched = this.runWithCmdSlot(() => tool.execute(call.args ?? {}, ctx));
+    } else if (call.name === 'write_file' || call.name === 'edit_file') {
       const key = String((call.args as Record<string, unknown>)?.path ?? '');
-      return this.runWithFileLock(key, () => this.runWithSnapshot(call, tool, ctx));
+      dispatched = this.runWithFileLock(key, () => this.runWithSnapshot(call, tool, ctx));
+    } else {
+      dispatched = tool.execute(call.args ?? {}, ctx);
     }
-    return tool.execute(call.args ?? {}, ctx);
+    // F-27 PostToolUse 钩子：旁路记录，不阻塞、不改变结果
+    void dispatched
+      .then((r) => {
+        if (ctx.hooks?.has('PostToolUse', call.name)) {
+          return ctx.hooks.postToolUse(call.name, call.args ?? {}, r, {
+            sessionId: ctx.sessionId,
+            projectId: ctx.projectId,
+          });
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return dispatched;
   }
 
   /**

@@ -28,7 +28,12 @@ const ROLE_OVERHEAD = 4; // per-message envelope overhead (role separators etc.)
 
 /** Estimate tokens for a chat message list. */
 export function estimateMessagesTokens(
-  messages: Array<{ role: string; content: string; toolCalls?: Array<{ argsJson: string }> }>,
+  messages: Array<{
+    role: string;
+    content: string;
+    toolCalls?: Array<{ argsJson: string }>;
+    images?: Array<{ mediaType: string; base64: string }>;
+  }>,
 ): number {
   let total = 0;
   for (const m of messages) {
@@ -36,6 +41,13 @@ export function estimateMessagesTokens(
     if (m.toolCalls) {
       for (const c of m.toolCalls) {
         total += estimateTextTokens(c.argsJson) + 8; // name + id overhead
+      }
+    }
+    if (m.images?.length) {
+      // F-25 多模态：图片按「封顶面积/750」计价（与 media/images.ts 同口径的保守近似）
+      for (const img of m.images) {
+        const rawBytes = Math.floor(img.base64.length * 0.75);
+        total += Math.min(1600, Math.max(1, Math.ceil(rawBytes / 750)));
       }
     }
   }

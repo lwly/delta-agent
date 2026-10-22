@@ -260,11 +260,11 @@ describe('load_skill / unload_skill 工具', () => {
     expect(again.error).toBe('skill_not_loaded');
   });
 
-  it('registry 注册 15 个内置工具（13 + save/recall_memory）', () => {
+  it('registry 注册 16 个内置工具（15 + task）', () => {
     const reg = new ToolRegistry();
     expect(reg.names()).toContain('load_skill');
     expect(reg.names()).toContain('unload_skill');
-    expect(reg.names()).toHaveLength(15);
+    expect(reg.names()).toHaveLength(16);
   });
 
   it('registry 执行路径：schema 校验 + 分发', async () => {

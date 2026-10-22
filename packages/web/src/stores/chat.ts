@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { api, type ChatMessage, type ConfirmRequest, type PlanPayload } from '../api/client';
+import { api, type ChatMessage, type ConfirmRequest, type MessageImage, type PlanPayload } from '../api/client';
 import { subscribeSession } from '../api/sse';
 
 /** 对话运行时状态：SSE 事件 → 渲染消息流 + 待确认/待回答卡片 */
@@ -160,12 +160,14 @@ export const useChatStore = defineStore('chat', {
           break;
       }
     },
-    async send(input: string) {
+    async send(input: string, images?: MessageImage[]) {
       if (!this.sessionId || this.running) return;
-      this.messages.push({ role: 'user', content: input });
+      const userMessage: ChatMessage = { role: 'user', content: input };
+      if (images?.length) userMessage.images = images; // F-25 多模态
+      this.messages.push(userMessage);
       this.streamingText = '';
       try {
-        await api.send(this.sessionId, input);
+        await api.send(this.sessionId, input, images);
       } catch (e) {
         this.notice(`✘ ${(e as Error).message}`);
         this.messages.pop();

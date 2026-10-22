@@ -107,7 +107,7 @@ y-zero-agent
 | F-04 | SSE 多模型接入层 | Provider 抽象 + **4 家实现**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付；统一 SSE 事件模型；断流重连 |
 | F-04a | 大模型配置管理 | Provider 配置增删改查：名称、类型（anthropic / openai-compatible / deepseek / qwen…）、Base URL、API Key、默认模型、参数（temperature / max_tokens / top_p）；Key 经系统钥匙串或本地加密文件存储、界面不回显；保存前连通性测试；支持配置启停与排序（决定下拉列表顺序）；CLI `agent models` 与 Web 设置页双入口 |
 | F-05 | ToolCall 分片累积解析 | 流式 delta 中 tool_call 分片按 index 累积拼接，结束时统一校验 JSON；兼容不同厂商分片格式差异 |
-| F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；✅ 记忆里程碑再加 save_memory / recall_memory 至 15 个（2026-10-22 交付） |
+| F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；✅ 记忆里程碑再加 save_memory / recall_memory 至 15 个（2026-10-22 交付）；✅ F-26 子代理工具再加 task 至 16 个（2026-10-22 交付） |
 | F-06a | 三层记忆系统 | L1 短期（会话消息列表）；L2 长期动态记忆（SQLite：SHA256 去重 → 配额检查 → FIFO+importance 淘汰的写入管线；词汇覆盖率 72%+重要性 12%+置信度 8%+时间衰减 6%+访问频率 2% 的召回评分）；L3 长期静态记忆（MEMORY.md/.y-zero/agent.md，团队共享、git 版本追踪）；工具再扩展 +2（save_memory / recall_memory，至 15 个）；自动提炼默认开启（可关闭），候选进"待确认"队列防记忆污染；Web 提供记忆管理面板（查看/编辑/停用/待确认）。详见 docs/memory-design.md |
 | F-07 | MCP 动态扩展 | stdio + SSE 两种 MCP transport；`agent mcp add/list/remove`；MCP 工具与内置工具统一注册 |
 | F-08 | 多工具并行执行 | 模型单轮返回多个 tool_call 时并行执行（Promise.allSettled），结果按序回填 |
@@ -128,7 +128,7 @@ y-zero-agent
 | F-15a | Worker Pool 并行调度 | 共享任务队列，多 worker 竞争领取（默认 4，可配 1–8）；审查失败任务回队首重新排队；节点状态以事件流推送 CLI/Web。详见 docs/agent-modes-design.md §5 |
 | F-15b | 后台任务可靠恢复 | 任务状态机（queued/running/completed/failed/canceled）持久化 SQLite；租约 60s + 心跳 15s 防重复执行；启动时扫描孤儿任务（租约过期）回队列重排；checkpoint 幂等重试。详见 docs/agent-modes-design.md §6 |
 | F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.y-zero/skills < 项目级 .y-zero/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |
-| F-17 | 对话检索 | 全文/语义搜索历史对话 |
+| F-17 | 对话检索 | 全文/语义搜索历史对话——✅ 2026-10-22 交付：SQLite FTS5 全文索引（中文 bigram 预分词，随写入同步 + 存量懒回填 + 硬删级联清理）+ 语义向量（OpenAI 兼容 /embeddings，Float32 BLOB 入库，余弦相似度，模型切换自动重建）；RRF 混合排序，embedding 不可用自动降级全文；`yzero search` 子命令 + TUI `/search` + `GET /api/search/messages` + Web 项目页消息命中列表（含片段与命中方式标注） |
 | F-18 | 会话回放 | 以时间线回放一次任务的完整执行轨迹（含工具调用）——✅ 2026-10-22 交付：按 user 消息切分任务边界，GET /runs 与 /runs/:index，Web 回放页（任务列表 + 时间线 + 工具调用/结果按 callId 配对），CLI/Web 入口 |
 
 #### P2 —— 远期
@@ -139,19 +139,19 @@ y-zero-agent
 | F-20 | 团队协作 | 项目/会话共享，权限管理 |
 | F-21 | 插件市场 | MCP Server 与 Skill 的一键安装市场 |
 | F-22 | 定时任务/自动化 | Agent 任务的 cron 调度 |
-| F-23 | 权限模式体系 | 三级模式：`plan`（只读，禁写禁执行）/ `default`（写需确认）/ `yolo`（全放行，双重开启）；工具级 allowlist 规则 + "本会话不再询问"；Web/CLI 统一确认协议 |
-| F-24 | 文件变更管理 | 每次写操作前自动快照（checkpoint）；会话级 diff 汇总；一键回滚到任意检查点；git 集成（建议分支/自动 commit 策略）——与 agent-modes-design §6 任务恢复 checkpoint 打通 |
-| F-25 | 多模态输入 | 消息支持图片附件（截图报错/UI 走查），视觉模型透传；图片 token 计价与压缩策略 |
-| F-26 | 子代理即工具（Task 工具） | 主循环中模型可自主派生隔离子代理执行探索/搜索类任务，结果摘要回填主上下文（区别于 Multi-Agent 的引擎级编排） |
-| F-27 | Hook 系统 | 生命周期钩子：PreToolUse / PostToolUse / SessionStart / SessionEnd / Stop；用户注入自定义逻辑（保存前 lint、禁改 main、结束后跑测试） |
+| F-23 | 权限模式体系 | 三级模式：`plan`（只读，禁写禁执行）/ `default`（写需确认）/ `yolo`（全放行，双重开启）；工具级 allowlist 规则 + "本会话不再询问"；Web/CLI 统一确认协议——✅ 已交付（代码核验 2026-10-22：PermissionState 三级模式 + allowlist + sessionAllowed 记忆） |
+| F-24 | 文件变更管理 | 每次写操作前自动快照（checkpoint）；会话级 diff 汇总；一键回滚到任意检查点；git 集成（建议分支/自动 commit 策略）——与 agent-modes-design §6 任务恢复 checkpoint 打通——✅ 已交付（代码核验 2026-10-22：FileChangeStore + `/changes` + `/rollback` + git suggest/auto 策略） |
+| F-25 | 多模态输入 | 消息支持图片附件（截图报错/UI 走查），视觉模型透传；图片 token 计价与压缩策略——✅ 2026-10-22 交付：`ChatMessage.images`（png/jpeg/gif/webp 魔数嗅探防伪造后缀）；压缩策略：单张 ≤4MB、单条 ≤5 张（超限拒绝并提示，不做有损重编码避免原生图像库依赖）；token 计价按「封顶面积/750」（长边 1568px 封顶，≈Anthropic 口径；无尺寸时按原始字节退化估算并封顶 1600）；Provider 透传：Anthropic content block（`image` + base64 source）/ OpenAI 兼容 content parts（`image_url` data URL，覆盖 openai/deepseek/qwen）；三端入口：CLI `/image <路径...>` 暂存随下一条消息发送、Headless `yzero run --image <path>`（可重复）、Web 聊天输入区 🖼 附件（前端预览/预检 + 服务端二次校验）；附件随 user 消息整体 JSON 落库（messages.content_json，无需 Schema 迁移）；预算/压缩自动计入图片 token；单测 18 例（嗅探/尺寸解析/计价/校验/双 Provider 映射/token 估算） |
+| F-26 | 子代理即工具（Task 工具） | 主循环中模型可自主派生隔离子代理执行探索/搜索类任务，结果摘要回填主上下文（区别于 Multi-Agent 的引擎级编排）——✅ 2026-10-22 交付：`task` 内置工具（16 个）；子代理复用 ReAct 主循环（预算/压缩/自愈同源），上下文隔离（独立消息循环、历史不落主会话）、工具隔离（RestrictedRegistry 只读白名单 read/list/glob/grep/web_fetch/todo + plan 权限模式双保险）、成本隔离（独立 BudgetManager + 用量回写父预算保持会话费用口径完整）、深度上限（子代理不可再派生）；无确认流/无交互（ask 自动应答）；三端注入（TUI App / Web Hub / Headless run）；最终汇报截断 4000 字回填，meta 带 turns/tool_calls/usage；单测 7 例（回填、只读强制不落盘、未注入降级、深度上限、脚本耗尽） |
+| F-27 | Hook 系统 | 生命周期钩子：PreToolUse / PostToolUse / SessionStart / SessionEnd / Stop；用户注入自定义逻辑（保存前 lint、禁改 main、结束后跑测试）——✅ 2026-10-22 交付：配置 `~/.y-zero/hooks.json`（用户级）+ `.y-zero/hooks.json`（项目级，两级都执行用户先项目后），`{hooks:[{event,tool?,command,timeout_ms?}]}`；事件上下文以 JSON 写入钩子 stdin（event/session_id/project_id/tool/args/result）；退出码语义：PreToolUse exit 2=阻断（stderr 回传模型为 hook_blocked，调整方案引导）其余非 0 与超时=告警放行，PostToolUse/生命周期仅记录永不影响主流程；注册表接线（PreToolUse 在权限判定前、PostToolUse 旁路异步）；生命周期：TUI（挂载/每轮 finally/卸载）、Web Hub（会话首跑/每轮 finally）、Headless run（起止）三端触发；`yzero hooks` 查看配置；钩子输出观察口接 CLI stderr 告警；单测 17 例（加载合并/匹配/阻断/payload/超时/注册表集成） |
 | F-28 | Evals 评测体系 | 本地任务基准集；多 Provider 横向对比报告；提示词/压缩参数变更后的回归保护 |
-| F-29 | Headless / SDK 形态 | 非交互运行 `agent -p "任务" --json`；退出码协议；结构化输出，供 CI 流水线与脚本集成 |
+| F-29 | Headless / SDK 形态 | 非交互运行 `agent -p "任务" --json`；退出码协议；结构化输出，供 CI 流水线与脚本集成——✅ 2026-10-22 交付：`yzero run "任务"`（裸任务 `yzero "任务"` 自动路由，`-p/--prompt` 等价）；`--json` 输出单份 snake_case JSON 报告（result/usage/tool_calls/todos/denied_confirmations/error/exit_code）；退出码协议 0 成功 / 1 配置错误 / 2 引擎致命错误 / 3 达最大轮次 / 4 预算耗尽 / 5 SIGINT 中断；非交互语义：高危确认自动拒绝（记录在案）、ask_user 自动应答、计划自动批准，写任务放行用 `--allow`/`--permission yolo`；`--output` 落文件、`--max-cost` 费用预算、`-r` 续会话、git auto 策略成功后自动提交；内核 `packages/core/src/headless.ts` 不触碰 stdio，可作 SDK 复用，单测覆盖 5 种状态 × 退出码映射 |
 | F-30 | 容器级沙箱 | `run_command` 可选 Docker/沙箱执行模式，隔离高危命令（现有白名单+确认之外的增强） |
 | F-31 | 成本与用量报告 | 按项目/会话/模型的费用统计面板；预算分级告警（现有 session 级预算之上） |
 | F-32 | 模型路由 | 按任务难度自动选模型：分类/提炼/摘要用小模型，规划与执行用大模型；可配路由规则 |
 | F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知） |
 | F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认 |
-| F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理） |
+| F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理）——✅ 2026-10-22 交付：`session/migrations.ts` 迁移列表（version/name/sql），版本号存 `PRAGMA user_version`，每迁移独立事务原子生效，SQL 强制幂等使空库与历史库收敛到最新；打开数据库自动执行，版本高于程序支持时拒绝打开防降级写坏；`yzero migrate` 核对版本与迁移历史；v1 baseline 核心表 + v2 F-17 检索索引 |
 | F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配 |
 
 > 注：F-23~F-26 虽列 P2，但其中权限模式（F-23）与文件变更管理（F-24）对日常使用影响较大，若评审认为必要可提前至 P1。

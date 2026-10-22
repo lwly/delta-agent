@@ -10,6 +10,7 @@ import type {
   ConfirmDecision,
   ConfirmRequest,
   LLMProvider,
+  MessageImage,
   PlanDecision,
   ToolCall,
 } from '@y-zero/shared';
@@ -32,6 +33,7 @@ import { runPlanExecute } from '../engine/plan-execute.js';
 import { runMultiAgent } from '../engine/orchestrator.js';
 import { modeSegment } from '../engine/mode-prompt.js';
 import { distillMemories } from '../session/distill.js';
+import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -66,6 +68,8 @@ export interface SessionHubDeps {
   allowTools?: string[];
   /** F-24 git 策略（off/suggest/auto；auto = 任务结束自动提交本会话记录的文件变更） */
   gitPolicy?: GitPolicy;
+  /** F-27 Hook 系统（工具钩子 + SessionStart/Stop 生命周期；缺省不挂钩） */
+  hooks?: HookManager;
 }
 
 interface PendingConfirm {
@@ -82,6 +86,8 @@ interface PendingPlan {
 }
 
 export class SessionHub {
+  /** F-27：已触发 SessionStart 的会话（每会话一次） */
+  private readonly sessionStarted = new Set<string>();
   private readonly subs = new Map<string, Set<(ev: HubEvent) => void>>();
   private readonly waiters = new Map<string, PendingConfirm | PendingAsk | PendingPlan>();
   private running = new Set<string>();
@@ -152,8 +158,8 @@ export class SessionHub {
     return this.deps.service.abortRun(sessionId);
   }
 
-  /** 发起一轮对话：阻塞到引擎结束（事件经 publish 实时推送）。 */
-  async send(sessionId: string, input: string): Promise<void> {
+  /** 发起一轮对话：阻塞到引擎结束（事件经 publish 实时推送）。images = F-25 图片附件（已完成校验）。 */
+  async send(sessionId: string, input: string, images?: MessageImage[]): Promise<void> {
     if (this.running.has(sessionId)) {
       throw new Error('session is already running');
     }
@@ -171,7 +177,9 @@ export class SessionHub {
       // 恢复失败不阻塞本轮运行
     }
     // 用户消息立即落库（即使 Provider 解析失败也不丢输入）
-    this.deps.service.appendMessage(sessionId, { role: 'user', content: input });
+    const userMessage: ChatMessage = { role: 'user', content: input };
+    if (images && images.length > 0) userMessage.images = images;
+    this.deps.service.appendMessage(sessionId, userMessage);
 
     const service = this.deps.service;
     let assistantText = '';
@@ -191,6 +199,12 @@ export class SessionHub {
       const provider = await this.deps.resolveProvider();
       const ac = new AbortController();
       service.registerRun(sessionId, ac);
+
+      // F-27 SessionStart 钩子：每会话首次运行触发一次（旁路触发）
+      if (this.deps.hooks?.has('SessionStart') && !this.sessionStarted.has(sessionId)) {
+        this.sessionStarted.add(sessionId);
+        void this.deps.hooks.emit('SessionStart', { sessionId, projectId: session.project_id });
+      }
 
       const budget = new BudgetManager();
       const { staticText, dynamicText } = await this.buildPrompt(
@@ -251,6 +265,18 @@ export class SessionHub {
           },
           todos: [],
           skills: this.deps.skills,
+          // F-27 Hook 系统：工具执行挂钩（PreToolUse 可阻断 / PostToolUse 记录）
+          hooks: this.deps.hooks,
+          // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写本运行预算）
+          registry: this.deps.registry,
+          subagent: {
+            provider,
+            model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
+            budget,
+            budgetConfig: budget.config,
+            windowTokens: this.deps.windowTokens ?? 200_000,
+            depth: 0,
+          },
         },
         budget,
         windowTokens: this.deps.windowTokens ?? 200_000,
@@ -277,7 +303,7 @@ export class SessionHub {
           : ctx.mode === 'multi-agent'
             ? runMultiAgent
             : runReAct;
-      for await (const ev of engine(ctx, history.slice(0, -1), input)) {
+      for await (const ev of engine(ctx, history.slice(0, -1), input, images)) {
         this.publish(sessionId, ev);
         switch (ev.type) {
           case 'text_delta':
@@ -349,6 +375,8 @@ export class SessionHub {
       this.running.delete(sessionId);
       this.deps.service.unregisterRun(sessionId);
       this.publish(sessionId, { type: 'state', running: false });
+      // F-27 Stop 钩子：单次任务结束（旁路触发，不影响结果）
+      void this.deps.hooks?.emit('Stop', { sessionId, projectId: session.project_id });
     }
   }
 
