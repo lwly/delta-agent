@@ -145,6 +145,14 @@ export function createWebServer(opts: ServeOptions): http.Server {
             return err(res, 404, 'session not found');
           }
         }
+        // F-18 会话回放：任务列表 + 单次任务时间线
+        if (method === 'GET' && parts[3] === 'runs' && parts.length === 4) {
+          return json(res, 200, service.getRuns(sessionId));
+        }
+        if (method === 'GET' && parts[3] === 'runs' && parts[4] !== undefined) {
+          const timeline = service.getRunTimeline(sessionId, Number(parts[4]));
+          return timeline ? json(res, 200, timeline) : err(res, 404, 'run not found');
+        }
         // 发起一轮对话：后台运行，事件走 SSE
         if (method === 'POST' && parts[3] === 'messages') {
           const body = await readBody(req);

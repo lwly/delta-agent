@@ -16,6 +16,11 @@ export const router = createRouter({
       component: () => import('./views/ChatView.vue'),
     },
     {
+      path: '/replay/:sessionId',
+      name: 'replay',
+      component: () => import('./views/ReplayView.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('./views/SettingsView.vue'),

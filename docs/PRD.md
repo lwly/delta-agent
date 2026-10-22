@@ -129,7 +129,7 @@ y-zero-agent
 | F-15b | 后台任务可靠恢复 | 任务状态机（queued/running/completed/failed/canceled）持久化 SQLite；租约 60s + 心跳 15s 防重复执行；启动时扫描孤儿任务（租约过期）回队列重排；checkpoint 幂等重试。详见 docs/agent-modes-design.md §6 |
 | F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.y-zero/skills < 项目级 .y-zero/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |
 | F-17 | 对话检索 | 全文/语义搜索历史对话 |
-| F-18 | 会话回放 | 以时间线回放一次任务的完整执行轨迹（含工具调用） |
+| F-18 | 会话回放 | 以时间线回放一次任务的完整执行轨迹（含工具调用）——✅ 2026-10-22 交付：按 user 消息切分任务边界，GET /runs 与 /runs/:index，Web 回放页（任务列表 + 时间线 + 工具调用/结果按 callId 配对），CLI/Web 入口 |
 
 #### P2 —— 远期
 

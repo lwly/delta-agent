@@ -155,6 +155,8 @@ export {
   resolveProviderFromEnv,
   TRASH_RETENTION_DAYS,
   type ProviderId,
+  type RunSummary,
+  type RunTimeline,
 } from './session/service.js';
 export {
   TaskStore,

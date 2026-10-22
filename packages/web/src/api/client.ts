@@ -101,6 +101,31 @@ export interface PlanPayload {
   nodes: PlanNode[];
 }
 
+export interface RunSummary {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  userPreview: string;
+  messages: number;
+  toolCalls: number;
+}
+
+export interface RunStep {
+  type: 'user' | 'assistant' | 'tool_call';
+  at: string;
+  text?: string;
+  name?: string;
+  argsJson?: string;
+  result?: { ok: boolean; content: string; at: string };
+}
+
+export interface RunTimeline {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  steps: RunStep[];
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -133,6 +158,11 @@ export const api = {
   restore: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('POST', `/api/trash/restore/${kind}/${id}`),
   purgeTrash: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('DELETE', `/api/trash/${kind}/${id}`),
   search: (q: string) => request<SessionRow[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
+
+  // F-18 会话回放
+  listRuns: (sessionId: string) => request<RunSummary[]>('GET', `/api/sessions/${sessionId}/runs`),
+  getRunTimeline: (sessionId: string, index: number) =>
+    request<RunTimeline>('GET', `/api/sessions/${sessionId}/runs/${index}`),
 
   // memory（F-06a 记忆面板）
   listMemory: (scope?: string, kind?: string, status?: string) => {

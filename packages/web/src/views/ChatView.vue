@@ -58,6 +58,7 @@ async function submit() {
       <span class="title">{{ store.sessionMeta.title }}</span>
       <span v-if="modeBadge" class="mode">{{ modeBadge }}</span>
       <span class="muted">{{ store.sessionMeta.model || '默认模型' }}</span>
+      <router-link class="replay-link" :to="`/replay/${sessionId}`">🎬 回放</router-link>
     </div>
     <div ref="listRef" class="msgs">
       <template v-for="(m, i) in store.messages" :key="i">
@@ -173,6 +174,7 @@ async function submit() {
 .head .title { font-weight: 600; font-size: 14px; }
 .head .mode { background: #ddf4ff; color: #0969da; font-size: 12px; border-radius: 4px; padding: 1px 7px; }
 .head .muted { color: #8b949e; font-size: 12px; }
+.head .replay-link { margin-left: auto; font-size: 12px; color: #0969da; text-decoration: none; }
 .msgs { flex: 1; overflow-y: auto; padding: 8px 4px; }
 .msg { margin: 10px 0; }
 .msg.user { display: flex; justify-content: flex-end; }

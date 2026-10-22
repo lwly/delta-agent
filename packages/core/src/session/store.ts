@@ -328,6 +328,14 @@ export class SessionStore {
     return rows.map((r) => JSON.parse(r.content_json) as ChatMessage);
   }
 
+  /** F-18 会话回放：带落库时间戳的消息（按 seq 升序）。 */
+  getMessagesDetailed(sessionId: string): Array<{ message: ChatMessage; at: string }> {
+    const rows = this.db
+      .prepare('SELECT content_json, created_at FROM messages WHERE session_id = ? ORDER BY seq ASC')
+      .all(sessionId) as Array<{ content_json: string; created_at: string }>;
+    return rows.map((r) => ({ message: JSON.parse(r.content_json) as ChatMessage, at: r.created_at }));
+  }
+
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void {
     this.db
       .prepare('INSERT INTO compactions (session_id, before_tokens, after_tokens, summary_json, created_at) VALUES (?, ?, ?, ?, ?)')

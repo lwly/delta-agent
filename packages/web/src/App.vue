@@ -6,8 +6,7 @@ const nav = [
   { path: '/projects', label: '项目与对话' },
   { path: '/settings', label: '设置中心' },
   { path: '/memory', label: '记忆面板' },
-];
-</script>
+];</script>
 
 <template>
   <div class="app">

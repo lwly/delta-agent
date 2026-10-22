@@ -104,6 +104,96 @@ export class SessionService {
     return this.store.getMessages(sessionId);
   }
 
+  // ── F-18 会话回放（按 user 消息切分任务边界）─────────────────────────────
+
+  getMessagesDetailed(sessionId: string): Array<{ message: ChatMessage; at: string }> {
+    return this.store.getMessagesDetailed(sessionId);
+  }
+
+  /** 任务（run）摘要列表：每条 user 消息开启一次任务。 */
+  getRuns(sessionId: string): RunSummary[] {
+    const rows = this.getMessagesDetailed(sessionId);
+    const runs: RunSummary[] = [];
+    let current: RunSummary | undefined;
+    for (const { message: m, at } of rows) {
+      if (m.role === 'user') {
+        current = {
+          index: runs.length,
+          startedAt: at,
+          endedAt: at,
+          userPreview: m.content.slice(0, 80),
+          messages: 1,
+          toolCalls: 0,
+        };
+        runs.push(current);
+        continue;
+      }
+      if (!current) continue; // 无 user 开头的游离消息（不属任何任务）
+      current.endedAt = at;
+      current.messages++;
+      current.toolCalls += m.toolCalls?.length ?? 0;
+    }
+    return runs;
+  }
+
+  /** 单次任务的时间线（工具调用与其结果按 callId 配对）。 */
+  getRunTimeline(sessionId: string, runIndex: number): RunTimeline | undefined {
+    const rows = this.getMessagesDetailed(sessionId);
+    // 切分到目标 run 的消息区间
+    let idx = -1;
+    const spans: Array<Array<{ message: ChatMessage; at: string }>> = [];
+    for (const row of rows) {
+      if (row.message.role === 'user') {
+        idx++;
+        spans.push([]);
+      }
+      if (idx >= 0) spans[idx]!.push(row);
+    }
+    const span = spans[runIndex];
+    if (!span) return undefined;
+
+    const steps: RunTimeline['steps'] = [];
+    // 待配对的调用：callId → step 引用
+    const pendingCalls = new Map<string, Extract<RunTimeline['steps'][number], { type: 'tool_call' }>>();
+    for (const { message: m, at } of span) {
+      if (m.role === 'user') {
+        steps.push({ type: 'user', at, text: m.content });
+      } else if (m.role === 'assistant') {
+        if (m.content.trim()) steps.push({ type: 'assistant', at, text: m.content });
+        for (const c of m.toolCalls ?? []) {
+          const step = {
+            type: 'tool_call' as const,
+            at,
+            name: c.name,
+            argsJson: c.argsJson,
+          };
+          steps.push(step);
+          pendingCalls.set(c.id, step);
+        }
+      } else if (m.role === 'tool') {
+        const call = m.toolCallId ? pendingCalls.get(m.toolCallId) : undefined;
+        const payload = { ok: true, content: m.content, at };
+        if (call) {
+          try {
+            const parsed = JSON.parse(m.content) as { ok?: boolean };
+            payload.ok = parsed.ok !== false;
+          } catch {
+            /* 非 JSON 结果默认 ok */
+          }
+          call.result = payload;
+        } else {
+          steps.push({ type: 'tool_call', at, name: 'tool', argsJson: '', result: payload });
+        }
+      }
+    }
+    return {
+      index: runIndex,
+      startedAt: span[0]!.at,
+      endedAt: span[span.length - 1]!.at,
+      steps,
+    };
+  }
+
   recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number): void {
     this.store.recordUsage(sessionId, turn, input, output, costUsd);
   }
@@ -193,6 +283,36 @@ export class SessionService {
 }
 
 export type ProviderId = 'anthropic' | 'openai' | 'deepseek' | 'qwen';
+
+// ── F-18 会话回放类型 ─────────────────────────────────────────────────────
+
+export interface RunSummary {
+  /** 第几次任务（从 0 开始） */
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  /** 用户输入预览（前 80 字） */
+  userPreview: string;
+  messages: number;
+  toolCalls: number;
+}
+
+export interface RunTimeline {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  steps: Array<
+    | { type: 'user'; at: string; text: string }
+    | { type: 'assistant'; at: string; text: string }
+    | {
+        type: 'tool_call';
+        at: string;
+        name: string;
+        argsJson: string;
+        result?: { ok: boolean; content: string; at: string };
+      }
+  >;
+}
 
 /** env var holding the API key for each provider */
 const PROVIDER_ENV: Record<Exclude<ProviderId, 'anthropic'>, { key: string; base?: string }> = {
