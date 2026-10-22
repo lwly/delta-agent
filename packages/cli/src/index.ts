@@ -198,18 +198,24 @@ program
     });
 
     const providers = new ProviderManager(); // 设置中心共用同一存储（~/.y-zero/models.json）
-    const webDist = opts.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
+    // Vue 构建产物候选：--web-dist > 包内嵌 cli/dist/web（npm 安装形态）> 仓库 packages/web/dist（开发形态）
+    const distDir = path.dirname(fileURLToPath(import.meta.url));
+    const webDist = [
+      opts.webDist,
+      path.resolve(distDir, 'web'),
+      path.resolve(distDir, '../../web/dist'),
+    ].find((d) => d && fs.existsSync(path.join(d, 'index.html')));
     const port = Number(opts.port) || 7900;
     const server = createWebServer({
       service,
       hub,
       port,
-      webDistDir: fs.existsSync(webDist) ? webDist : undefined,
+      webDistDir: webDist,
       providers,
     });
     server.listen(port, '127.0.0.1', () => {
       console.log(`✔ yzero Web 控制台已启动：http://127.0.0.1:${port}`);
-      console.log(fs.existsSync(webDist) ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
+      console.log(webDist ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
       console.log('Ctrl+C 退出');
     });
     const shutdown = () => {

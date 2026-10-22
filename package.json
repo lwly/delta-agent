@@ -12,6 +12,8 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:web": "pnpm --filter @y-zero/web build && node scripts/smoke-web.mjs",
     "clean": "pnpm -r run clean"
   },
   "devDependencies": {

@@ -131,6 +131,8 @@ export class SessionHub {
 
     this.running.add(sessionId);
     this.publish(sessionId, { type: 'state', running: true });
+    // 用户消息立即落库（即使 Provider 解析失败也不丢输入）
+    this.deps.service.appendMessage(sessionId, { role: 'user', content: input });
 
     const service = this.deps.service;
     let assistantText = '';
@@ -152,7 +154,11 @@ export class SessionHub {
       service.registerRun(sessionId, ac);
 
       const budget = new BudgetManager();
-      const { staticText, dynamicText } = await this.buildPrompt(project.root_path, session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929', this.deps.registry.definitions());
+      const { staticText, dynamicText } = await this.buildPrompt(
+        project.root_path,
+        session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
+        this.deps.registry.definitions(),
+      );
       const askId = `ask_${sessionId}_${Date.now()}`;
 
       const ctx: RunContext = {
@@ -188,7 +194,6 @@ export class SessionHub {
         windowTokens: this.deps.windowTokens ?? 200_000,
       };
 
-      service.appendMessage(sessionId, { role: 'user', content: input });
       const history: ChatMessage[] = service.getHistory(sessionId);
 
       for await (const ev of runReAct(ctx, history.slice(0, -1), input)) {
