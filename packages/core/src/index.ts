@@ -85,6 +85,7 @@ export { OpenAICompatibleProvider } from './llm/providers/openai-compatible.js';
 export { OpenAIProvider } from './llm/providers/openai.js';
 export { DeepSeekProvider } from './llm/providers/deepseek.js';
 export { QwenProvider } from './llm/providers/qwen.js';
+export { ProviderManager, type ProviderView } from './llm/manager.js';
 export {
   encryptKey,
   decryptKey,
@@ -95,7 +96,6 @@ export {
   type StoredProvider,
   type ModelsFile,
 } from './llm/keychain.js';
-export { ProviderManager, type ProviderView } from './llm/manager.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';

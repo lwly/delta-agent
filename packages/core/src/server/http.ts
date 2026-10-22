@@ -11,6 +11,7 @@ import * as path from 'node:path';
 import type { ConfirmDecision } from '@y-zero/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
+import type { ProviderManager } from '../llm/manager.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -19,6 +20,8 @@ export interface ServeOptions {
   host?: string;
   /** Vue 构建产物目录（存在则托管，SPA fallback index.html） */
   webDistDir?: string;
+  /** 设置中心：Provider 管理（F-04a） */
+  providers?: ProviderManager;
 }
 
 const MIME: Record<string, string> = {
@@ -162,6 +165,53 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const body = await readBody(req);
           const ok = hub.answer(String(body.requestId ?? ''), String(body.answer ?? ''));
           return ok ? json(res, 200, { ok: true }) : err(res, 404, 'no pending ask');
+        }
+      }
+
+      // ── providers（设置中心，F-04a；Key 加密存储、接口不回显）──────────────
+      if (parts[0] === 'api' && parts[1] === 'providers' && opts.providers) {
+        const mgr = opts.providers;
+        const pid = parts[2];
+        if (method === 'GET' && !pid) return json(res, 200, mgr.list());
+        if (method === 'PUT' && pid) {
+          const body = await readBody(req);
+          try {
+            mgr.add({
+              id: pid,
+              apiKey: String(body.apiKey ?? ''),
+              baseUrl: body.baseUrl ? String(body.baseUrl) : undefined,
+              model: body.model ? String(body.model) : undefined,
+              setDefault: body.setDefault === true,
+            });
+            return json(res, 200, { ok: true });
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+        }
+        if (method === 'DELETE' && pid) {
+          return json(res, 200, { ok: mgr.remove(pid) });
+        }
+        if (method === 'POST' && pid && parts[3] === 'default') {
+          try {
+            mgr.setDefault(pid);
+            return json(res, 200, { ok: true });
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+        }
+        if (method === 'POST' && pid && parts[3] === 'enable') {
+          const body = await readBody(req);
+          mgr.setEnabled(pid, body.enabled === true);
+          return json(res, 200, { ok: true });
+        }
+        if (method === 'POST' && pid && parts[3] === 'move') {
+          const body = await readBody(req);
+          mgr.move(pid, body.dir === 'down' ? 'down' : 'up');
+          return json(res, 200, { ok: true });
+        }
+        if (method === 'POST' && pid && parts[3] === 'test') {
+          const r = await mgr.test(pid);
+          return json(res, 200, r);
         }
       }
 

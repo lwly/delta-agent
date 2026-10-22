@@ -197,7 +197,7 @@ program
       skills,
     });
 
-    // Vue 构建产物：包内嵌 packages/web/dist（或 --web-dist 指定）
+    const providers = new ProviderManager(); // 设置中心共用同一存储（~/.y-zero/models.json）
     const webDist = opts.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
     const port = Number(opts.port) || 7900;
     const server = createWebServer({
@@ -205,6 +205,7 @@ program
       hub,
       port,
       webDistDir: fs.existsSync(webDist) ? webDist : undefined,
+      providers,
     });
     server.listen(port, '127.0.0.1', () => {
       console.log(`✔ yzero Web 控制台已启动：http://127.0.0.1:${port}`);

@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import type { AgentEvent, ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall, ConfirmDecision } from '@y-zero/shared';
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
+import { ProviderManager } from '../src/llm/manager.js';
 import { SessionHub, createWebServer } from '../src/server/index.js';
 import type { SessionHubDeps } from '../src/server/hub.js';
 
@@ -60,7 +61,7 @@ beforeEach(async () => {
     resolveProvider: async () => provider,
   };
   const hub = new SessionHub(deps);
-  server = createWebServer({ service, hub, port: 0 });
+  server = createWebServer({ service, hub, port: 0, providers: new ProviderManager(path.join(tmp, 'models.json')) });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const addr = server.address();
   base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
@@ -231,5 +232,31 @@ describe('search 端点', () => {
     service.appendMessage(sessionId, { role: 'user', content: '关于 WebSocket 重连的讨论' });
     const r = await api('GET', `/api/search?q=WebSocket`);
     expect((r.json as Array<{ id: string }>).map((x) => x.id)).toContain(sessionId);
+  });
+});
+
+describe('providers 端点（设置中心）', () => {
+  it('CRUD + 启停/默认/排序；Key 不回显（仅掩码）', async () => {
+    const added = await api('PUT', '/api/providers/deepseek', { apiKey: 'sk-test-1234567890', model: 'deepseek-chat' });
+    expect(added.status).toBe(200);
+
+    const list = (await api('GET', '/api/providers')).json as Array<Record<string, unknown>>;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: 'deepseek', enabled: true, default: false });
+    expect(String(list[0]!.keyMasked)).not.toContain('sk-test-1234567890');
+
+    await api('POST', '/api/providers/deepseek/default');
+    expect(((await api('GET', '/api/providers')).json as Array<Record<string, unknown>>)[0]!.default).toBe(true);
+
+    await api('POST', '/api/providers/deepseek/enable', { enabled: false });
+    expect(((await api('GET', '/api/providers')).json as Array<Record<string, unknown>>)[0]!.enabled).toBe(false);
+
+    await api('DELETE', '/api/providers/deepseek');
+    expect(((await api('GET', '/api/providers')).json as unknown[])).toHaveLength(0);
+  });
+
+  it('空 apiKey 被拒绝', async () => {
+    const r = await api('PUT', '/api/providers/foo', { apiKey: '' });
+    expect(r.status).toBe(400);
   });
 });
