@@ -66,8 +66,7 @@ export interface AssembleResult extends SystemPrompt {
   warnings: AssembleWarning[];
 }
 
-/** Layer.build 的输入上下文 */
-export interface AssembleContext {
+/** Layer.build 的输入上下文 */export interface AssembleContext {
   /** L3：项目名 */
   projectName: string;
   /** L3：README 摘要 / 技术栈 / 目录结构（项目指令静态部分） */
@@ -78,7 +77,9 @@ export interface AssembleContext {
   tools: Array<{ name: string; description: string; schema: Record<string, unknown> }>;
   /** L5：Skill 索引（name + description + 触发词） */
   skillIndex: Array<{ name: string; description: string; triggers: string[] }>;
-  /** L6：记忆召回文本（MemoryProvider stub 产出，未接入时为空） */
+  /** L6：记忆召回结构化条目（MemoryProvider 产出，优先于 memoryRecall 文本） */
+  memoryEntries?: RecalledMemory[];
+  /** L6：记忆召回文本（简化接入，未提供 memoryEntries 时使用） */
   memoryRecall?: string;
   /** L7：会话动态信息 */
   session: {
@@ -89,8 +90,19 @@ export interface AssembleContext {
   };
 }
 
-/** 单个 PromptLayer：产出该层的基础内容值 */
-export interface PromptLayer {
+/** 记忆召回条目（memory-design.md §5 评分召回的输出单元） */
+export interface RecalledMemory {
+  id: string;
+  content: string;
+  /** 召回评分（越高越重要，裁剪时低分先弃） */
+  score: number;
+  /** 来源层级：L1 项目静态 / L2 动态 / L3 会话内 */
+  source: 'l1' | 'l2' | 'l3';
+  /** 去重标记：与静态项目指令重复（保留静态版，仍计访问） */
+  deduped?: boolean;
+}
+
+/** 单个 PromptLayer：产出该层的基础内容值 */export interface PromptLayer {
   readonly id: LayerId;
   readonly title: string;
   /** locked 层忽略覆盖请求并告警 */

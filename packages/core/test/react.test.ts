@@ -181,4 +181,49 @@ describe('runReAct', () => {
     }
     expect(events.some((e) => e.type === 'error')).toBe(true);
   });
+
+  it('injects per-turn dynamic prompt via dynamicProvider (M3)', async () => {
+    const seen: string[] = [];
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }] },
+      { text: '完成' },
+    ]);
+    const base = makeCtx(provider, { toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } });
+    const ctx: RunContext = {
+      ...base,
+      systemPromptParts: { staticText: '静态段', dynamicText: '第一轮动态' },
+      dynamicProvider: (turn) => `动态-t${turn}`,
+    };
+    // 捕获每轮 system 消息
+    const origChat = provider.chat.bind(provider);
+    (provider as unknown as { chat: (req: ChatRequest) => AsyncIterable<StreamEvent> }).chat =
+      async function* (req: ChatRequest) {
+        seen.push(req.messages[0]?.content ?? '');
+        yield* origChat(req);
+      };
+
+    const events = await collect(runReAct(ctx, [], 'hi'));
+    expect(events[events.length - 1]!.type).toBe('done');
+    expect(seen[0]).toBe('静态段\n\n动态-t1');
+    expect(seen[1]).toBe('静态段\n\n动态-t2');
+  });
+
+  it('composes static+dynamic from systemPromptParts without dynamicProvider', async () => {
+    const seen: string[] = [];
+    const provider = new MockProvider([{ text: '答案' }]);
+    const base = makeCtx(provider, { toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } });
+    const ctx: RunContext = {
+      ...base,
+      systemPromptParts: { staticText: '静态段', dynamicText: '动态段' },
+    };
+    const origChat = provider.chat.bind(provider);
+    (provider as unknown as { chat: (req: ChatRequest) => AsyncIterable<StreamEvent> }).chat =
+      async function* (req: ChatRequest) {
+        seen.push(req.messages[0]?.content ?? '');
+        yield* origChat(req);
+      };
+
+    await collect(runReAct(ctx, [], 'hi'));
+    expect(seen[0]).toBe('静态段\n\n动态段');
+  });
 });

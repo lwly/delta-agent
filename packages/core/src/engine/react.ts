@@ -22,6 +22,11 @@ export interface RunContext {
    * 引擎按 静态→动态→历史→本轮 恒定顺序拼装，保证 Provider 前缀缓存命中。
    */
   systemPromptParts?: { staticText: string; dynamicText: string };
+  /**
+   * M3：每轮动态段提供器（如刷新时间戳、记忆重召回）。
+   * 提供时优先于 systemPromptParts.dynamicText，静态段仍取 systemPromptParts.staticText。
+   */
+  dynamicProvider?: (turn: number) => string;
   maxTurns: number; // default 50
   signal: AbortSignal;
   provider: LLMProvider;
@@ -113,7 +118,7 @@ export async function* runReAct(
 
       // ── LLM round-trip (SSE, with retries, streaming deltas) ──
       let round: { text: string; toolCalls: ToolCall[]; usage: Usage } | undefined;
-      for await (const item of chatStream(ctx, messages)) {
+      for await (const item of chatStream(ctx, messages, turn)) {
         if (item.kind === 'delta') {
           if (item.ev.type === 'text_delta') yield { type: 'text_delta', text: item.ev.text };
           else if (item.ev.type === 'thinking_delta') yield { type: 'thinking_delta', text: item.ev.text };
@@ -210,8 +215,13 @@ function estimateTokensText(text: string): number {
   return cjk + Math.ceil((text.length - cjk) / 3);
 }
 
-/** 系统消息内容：分段（静态→动态）优先，回退单串 systemPrompt */
-function systemContent(ctx: RunContext): string {
+/** 系统消息内容：每轮动态注入 > 静态/动态分段 > 单串 systemPrompt */
+function systemContent(ctx: RunContext, turn: number): string {
+  if (ctx.dynamicProvider) {
+    return [ctx.systemPromptParts?.staticText ?? ctx.systemPrompt, ctx.dynamicProvider(turn)]
+      .filter((t) => t.length > 0)
+      .join('\n\n');
+  }
   if (ctx.systemPromptParts) {
     return [ctx.systemPromptParts.staticText, ctx.systemPromptParts.dynamicText]
       .filter((t) => t.length > 0)
@@ -228,6 +238,7 @@ type StreamItem =
 async function* chatStream(
   ctx: RunContext,
   messages: ChatMessage[],
+  turn: number,
 ): AsyncGenerator<StreamItem> {
   const { ToolCallAccumulator } = await import('../llm/accumulator.js');
   const maxRetries = ctx.maxRetries ?? 3;
@@ -246,7 +257,7 @@ async function* chatStream(
 
     try {
       for await (const ev of ctx.provider.chat({
-        messages: [{ role: 'system', content: systemContent(ctx) }, ...messages],
+        messages: [{ role: 'system', content: systemContent(ctx, turn) }, ...messages],
         tools: ctx.registry.definitions(),
         model: ctx.model,
         signal: ctx.signal,

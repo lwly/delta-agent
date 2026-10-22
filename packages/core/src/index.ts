@@ -38,6 +38,20 @@ export {
 } from './prompt/layers.js';
 export { applyOverrides, deepMerge, unionDedupe } from './prompt/merge.js';
 export {
+  NullMemoryProvider,
+  StaticMemoryProvider,
+  type MemoryProvider,
+  type RecallQuery,
+} from './prompt/memory-provider.js';
+export {
+  PromptBuilder,
+  DEFAULT_PROMPT_BUDGET,
+  type BuilderOptions,
+  type FinalPrompt,
+  type PromptBudget,
+  type TrimAction,
+} from './prompt/builder.js';
+export {
   SplitPromptAssembler,
   composeSystemPrompt,
   type AssembleSplitResult,

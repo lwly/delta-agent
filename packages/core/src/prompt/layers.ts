@@ -104,6 +104,14 @@ export class MemoryLayer implements PromptLayer {
   readonly kind = 'dynamic' as const;
 
   build(ctx: AssembleContext): LayerValue {
+    if (ctx.memoryEntries && ctx.memoryEntries.length > 0) {
+      return ctx.memoryEntries
+        .map((m) => {
+          const tag = m.deduped ? '（与项目指令重复，以静态版为准）' : '';
+          return `- [${m.source}] ${m.content}${tag}`;
+        })
+        .join('\n');
+    }
     return ctx.memoryRecall ?? '';
   }
 }
