@@ -115,6 +115,9 @@ export {
 
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
 
+export { SessionHub, createSkillRuntime, type HubEvent, type SessionHubDeps } from './server/hub.js';
+export { createWebServer, type ServeOptions } from './server/http.js';
+
 export {
   discoverSkills,
   defaultBuiltinSkillsDir,

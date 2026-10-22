@@ -3,6 +3,8 @@ import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   SessionService,
   resolveProviderFromEnv,
@@ -11,6 +13,9 @@ import {
   McpManager,
   loadMcpConfig,
   ProviderManager,
+  SessionHub,
+  createWebServer,
+  createSkillRuntime,
 } from '@y-zero/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
@@ -156,6 +161,65 @@ models
     const r = await mgr.test(target);
     console.log(`${r.ok ? '✔' : '✘'} ${target}：${r.detail}（${r.latencyMs}ms）`);
     if (!r.ok) process.exitCode = 1;
+  });
+
+// ── yzero serve：Web 控制台本地服务（M4）────────────────────────────────
+
+program
+  .command('serve')
+  .description('启动 Web 控制台本地服务（纯本地：默认 127.0.0.1:7900，仅监听回环地址）')
+  .option('--port <n>', '监听端口（默认 7900）', '7900')
+  .option('--web-dist <dir>', 'Vue 构建产物目录（缺省用包内嵌 packages/web/dist）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action(async (opts: { port: string; webDist?: string; db?: string }) => {
+    const service = new SessionService(opts.db);
+    const registry = new ToolRegistry();
+    const mcp = new McpManager();
+    const mcpConfig = loadMcpConfig(process.cwd());
+    for (const [name, cfg] of Object.entries(mcpConfig)) {
+      try {
+        await mcp.connect(name, cfg);
+        await mcp.registerInto(name, registry);
+        console.error(`✔ MCP ${name}：已接入`);
+      } catch (e) {
+        console.error(`✘ MCP ${name} 连接失败（已跳过）：${(e as Error).message}`);
+      }
+    }
+
+    const projectRoot = process.cwd();
+    service.ensureProject(projectRoot); // 注册当前目录为项目
+    const skills = await createSkillRuntime(projectRoot);
+
+    const hub = new SessionHub({
+      service,
+      registry,
+      resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
+      skills,
+    });
+
+    // Vue 构建产物：包内嵌 packages/web/dist（或 --web-dist 指定）
+    const webDist = opts.webDist ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
+    const port = Number(opts.port) || 7900;
+    const server = createWebServer({
+      service,
+      hub,
+      port,
+      webDistDir: fs.existsSync(webDist) ? webDist : undefined,
+    });
+    server.listen(port, '127.0.0.1', () => {
+      console.log(`✔ yzero Web 控制台已启动：http://127.0.0.1:${port}`);
+      console.log(fs.existsSync(webDist) ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
+      console.log('Ctrl+C 退出');
+    });
+    const shutdown = () => {
+      server.close();
+      void mcp.disconnectAll().finally(() => {
+        service.close();
+        process.exit(0);
+      });
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
   });
 
 async function start(opts: CliOpts): Promise<void> {

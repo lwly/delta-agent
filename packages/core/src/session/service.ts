@@ -144,6 +144,17 @@ export class SessionService {
     else this.store.restoreSession(id);
   }
 
+  /** 回收站内彻底清除（已软删除，跳过 confirmName 二次确认）。 */
+  purgeTrash(kind: 'project' | 'session', id: string): void {
+    if (kind === 'project') {
+      this.abortAllProjectRuns(id);
+      this.store.hardDeleteProject(id);
+    } else {
+      this.abortRun(id);
+      this.store.hardDeleteSession(id);
+    }
+  }
+
   listTrash(): TrashItem[] {
     return this.store.listTrash();
   }
