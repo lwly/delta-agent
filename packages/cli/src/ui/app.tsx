@@ -177,6 +177,20 @@ export function App(props: AppOptions) {
         budget: budgetRef.current,
         windowTokens: 200_000,
         tasks: props.service.tasks,
+        // F-14 计划确认流：CLI 简化为批准/跳过（节点编辑引导去 Web 控制台）
+        planApproval:
+          engineMode === 'plan-execute'
+            ? async (req) => {
+                const lines = req.plan.nodes
+                  .map((n) => `  ${n.id}${n.deps.length ? ` ←(${n.deps.join(',')})` : ''} ${n.goal}`)
+                  .join('\n');
+                const answer = await askUser(
+                  `📋 规划完成（${req.plan.nodes.length} 节点）：\n${lines}\n\n执行该计划？(y=执行 / n=跳过计划直接执行；编辑节点请到 Web 控制台)`,
+                  ['y', 'n'],
+                );
+                return /^(y|yes|是|好|ok|执行)/i.test(answer.trim()) ? { kind: 'approve' } : { kind: 'reject' };
+              }
+            : undefined,
       };
 
       const history: ChatMessage[] = props.service.getHistory(props.session.id);

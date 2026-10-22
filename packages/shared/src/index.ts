@@ -91,6 +91,18 @@ export interface ReviewVerdict {
   feedback?: string;
 }
 
+// ── 计划确认流（F-14：计划卡可编辑/删除节点/调整依赖后确认执行）────────────
+
+export interface PlanApprovalRequest {
+  id: string;
+  plan: Plan;
+}
+
+export type PlanDecision =
+  | { kind: 'approve' }
+  | { kind: 'edit'; plan: Plan }
+  | { kind: 'reject'; reason?: string };
+
 // ── Streaming (normalized across vendors) ─────────────────────────────────
 
 export type StreamEvent =
@@ -136,6 +148,7 @@ export type AgentEvent =
   | { type: 'budget_warning'; usedPct: number }
   | { type: 'budget_exhausted'; summary: string }
   | { type: 'confirm_request'; request: ConfirmRequest }
+  | { type: 'plan_approval_request'; request: PlanApprovalRequest }
   | { type: 'plan_created'; plan: Plan }
   | { type: 'plan_updated'; plan: Plan; reason: string }
   | { type: 'subtask_start'; nodeId: string; goal: string; workerId: string }

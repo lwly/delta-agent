@@ -10,6 +10,7 @@ import type {
   ConfirmDecision,
   ConfirmRequest,
   LLMProvider,
+  PlanDecision,
   ToolCall,
 } from '@y-zero/shared';
 import {
@@ -64,10 +65,14 @@ interface PendingAsk {
   kind: 'ask';
   resolve: (answer: string) => void;
 }
+interface PendingPlan {
+  kind: 'plan';
+  resolve: (d: PlanDecision) => void;
+}
 
 export class SessionHub {
   private readonly subs = new Map<string, Set<(ev: HubEvent) => void>>();
-  private readonly waiters = new Map<string, PendingConfirm | PendingAsk>();
+  private readonly waiters = new Map<string, PendingConfirm | PendingAsk | PendingPlan>();
   private running = new Set<string>();
 
   constructor(private readonly deps: SessionHubDeps) {}
@@ -118,6 +123,15 @@ export class SessionHub {
     if (!w || w.kind !== 'ask') return false;
     this.waiters.delete(requestId);
     w.resolve(answer);
+    return true;
+  }
+
+  /** HTTP 端点回填计划审批决策（approve / edit / reject）。 */
+  planDecision(requestId: string, decision: PlanDecision): boolean {
+    const w = this.waiters.get(requestId);
+    if (!w || w.kind !== 'plan') return false;
+    this.waiters.delete(requestId);
+    w.resolve(decision);
     return true;
   }
 
@@ -224,6 +238,16 @@ export class SessionHub {
         windowTokens: this.deps.windowTokens ?? 200_000,
         plan: this.deps.plan,
         tasks: service.tasks,
+        // F-14 计划确认流：Web 端回填决策（挂起等待，事件实时推送）
+        planApproval:
+          ctxMode === 'plan-execute'
+            ? (req) => {
+                this.publish(sessionId, { type: 'plan_approval_request', request: req });
+                return new Promise<PlanDecision>((resolve) => {
+                  this.waiters.set(req.id, { kind: 'plan', resolve });
+                });
+              }
+            : undefined,
       };
 
       const history: ChatMessage[] = service.getHistory(sessionId);

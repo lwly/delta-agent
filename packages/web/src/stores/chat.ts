@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { api, type ChatMessage, type ConfirmRequest } from '../api/client';
+import { api, type ChatMessage, type ConfirmRequest, type PlanPayload } from '../api/client';
 import { subscribeSession } from '../api/sse';
 
 /** 对话运行时状态：SSE 事件 → 渲染消息流 + 待确认/待回答卡片 */
@@ -11,6 +11,7 @@ export const useChatStore = defineStore('chat', {
     streamingText: '',
     running: false,
     pendingConfirm: null as ConfirmRequest | null,
+    pendingPlan: null as null | { requestId: string; plan: PlanPayload },
     pendingAsk: null as { requestId: string; question: string; options?: string[] } | null,
     notices: [] as Array<{ id: number; text: string }>,
     unsub: null as null | (() => void),
@@ -30,6 +31,7 @@ export const useChatStore = defineStore('chat', {
       this.streamingText = '';
       this.running = false;
       this.pendingConfirm = null;
+      this.pendingPlan = null;
       this.pendingAsk = null;
       this.unsub = subscribeSession(sessionId, (ev) => this.onEvent(ev));
     },
@@ -82,6 +84,15 @@ export const useChatStore = defineStore('chat', {
         case 'confirm_request':
           this.pendingConfirm = ev.request as ConfirmRequest;
           break;
+        // F-14 计划审批请求（引擎挂起等待决策）
+        case 'plan_approval_request': {
+          const req = ev.request as { id: string; plan: PlanPayload };
+          this.pendingPlan = {
+            requestId: String(req.id),
+            plan: JSON.parse(JSON.stringify(req.plan)) as PlanPayload,
+          };
+          break;
+        }
         case 'ask_user':
           this.pendingAsk = {
             requestId: String(ev.requestId),
@@ -165,6 +176,15 @@ export const useChatStore = defineStore('chat', {
       const req = this.pendingConfirm;
       this.pendingConfirm = null;
       await api.confirm(this.sessionId, req.id, decision);
+    },
+    /** F-14：提交计划审批决策（edit 时把编辑后的 plan 一并回传）。 */
+    async decidePlan(decision: { kind: 'approve' } | { kind: 'reject'; reason?: string } | { kind: 'edit' }) {
+      if (!this.pendingPlan) return;
+      const req = this.pendingPlan;
+      this.pendingPlan = null;
+      const payload =
+        decision.kind === 'edit' ? { kind: 'edit', plan: req.plan } : decision;
+      await api.approvePlan(this.sessionId, req.requestId, payload);
     },
     async answerAsk(answer: string) {
       if (!this.pendingAsk) return;

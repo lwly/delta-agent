@@ -3,10 +3,11 @@
  * 简单任务直达 ReAct；复杂任务 LLM 规划 → DAG → Worker Pool 并行执行 → 汇总。
  * 单节点失败：后继 skipped；critical 失败 → 整个 Plan 终止汇报。
  */
-import type { AgentEvent, Plan, Usage } from '@y-zero/shared';
+import type { AgentEvent, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@y-zero/shared';
 import { runReAct, type RunContext } from './react.js';
 import { buildPlan, detectSimpleTask } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
+import { validatePlan } from './plan.js';
 import { createEventPump } from './pump.js';
 
 const SUMMARIZE_SYSTEM = `你是编排汇总器。给定 DAG 各节点的执行结果，输出最终交付说明：
@@ -34,7 +35,40 @@ export async function* runPlanExecute(
   try {
     // ── 规划 ──
     if (ctx.signal.aborted) throw new Error('aborted by user');
-    const plan = await buildPlan(ctx.provider, ctx.model, userInput, { signal: ctx.signal });
+    let plan = await buildPlan(ctx.provider, ctx.model, userInput, { signal: ctx.signal });
+
+    // ── F-14 计划确认流：用户可批准 / 编辑（改节点、删节点、调依赖）/ 拒绝 ──
+    if (ctx.planApproval) {
+      const request: PlanApprovalRequest = { id: `plan_${ctx.sessionId}_${Date.now()}`, plan: snapshot(plan) };
+      let decision: PlanDecision;
+      try {
+        decision = await ctx.planApproval(request);
+      } catch {
+        decision = { kind: 'approve' }; // 确认流故障不阻塞（降级自动批准）
+      }
+      if (decision.kind === 'reject') {
+        // 拒绝规划 → 回退 ReAct 直达
+        yield { type: 'text_delta', text: `（已按你的要求跳过计划，直接执行）\n` };
+        for await (const ev of runReAct(ctx, history, userInput)) {
+          yield ev;
+        }
+        return;
+      }
+      if (decision.kind === 'edit') {
+        const edited = decision.plan;
+        const problems = validatePlan(edited);
+        if (problems.length > 0) {
+          // 编辑后 DAG 非法 → 保留原计划并提示
+          yield {
+            type: 'text_delta',
+            text: `（编辑后的计划无效，已回退原计划：${problems[0]}）\n`,
+          };
+        } else {
+          plan = { ...edited, revision: plan.revision + 1 };
+        }
+      }
+    }
+
     ctx.tasks?.createPlan(ctx.sessionId, plan);
     yield { type: 'plan_created', plan: snapshot(plan) };
 

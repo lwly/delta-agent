@@ -167,6 +167,19 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const ok = hub.answer(String(body.requestId ?? ''), String(body.answer ?? ''));
           return ok ? json(res, 200, { ok: true }) : err(res, 404, 'no pending ask');
         }
+        // F-14 计划审批回填：decision = {kind:'approve'|'reject'} | {kind:'edit', plan}
+        if (method === 'POST' && parts[3] === 'plan') {
+          const body = await readBody(req);
+          const d = body.decision as { kind?: string; plan?: unknown; reason?: string };
+          const decision =
+            d?.kind === 'edit'
+              ? { kind: 'edit' as const, plan: d.plan as never }
+              : d?.kind === 'reject'
+                ? { kind: 'reject' as const, reason: d.reason ? String(d.reason) : undefined }
+                : { kind: 'approve' as const };
+          const ok = hub.planDecision(String(body.requestId ?? ''), decision);
+          return ok ? json(res, 200, { ok: true }) : err(res, 404, 'no pending plan approval');
+        }
       }
 
       // ── providers（设置中心，F-04a；Key 加密存储、接口不回显）──────────────

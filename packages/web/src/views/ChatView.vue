@@ -111,6 +111,30 @@ async function submit() {
       </div>
     </div>
 
+    <!-- F-14 计划审批卡：可编辑 goal / 删除节点 / 调整依赖 -->
+    <div v-if="store.pendingPlan" class="card plan">
+      <div class="title">
+        📋 计划审批（rev {{ store.pendingPlan.plan.revision }} · {{ store.pendingPlan.plan.nodes.length }} 节点）
+      </div>
+      <div class="plan-goal">总目标：{{ store.pendingPlan.plan.goal }}</div>
+      <div v-for="(n, i) in store.pendingPlan.plan.nodes" :key="n.id" class="plan-node">
+        <code class="nid">{{ n.id }}</code>
+        <input class="goal" v-model="n.goal" placeholder="子任务目标" />
+        <input
+          class="deps"
+          :value="n.deps.join(',')"
+          placeholder="依赖（逗号分隔）"
+          @change="n.deps = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)"
+        />
+        <label class="crit"><input type="checkbox" v-model="n.critical" />critical</label>
+        <button class="danger sm" @click="store.pendingPlan?.plan.nodes.splice(i, 1)">删除</button>
+      </div>
+      <div class="actions">
+        <button class="primary" @click="store.decidePlan({ kind: 'edit' })">按此计划执行</button>
+        <button class="danger" @click="store.decidePlan({ kind: 'reject' })">跳过计划（直接执行）</button>
+      </div>
+    </div>
+
     <!-- 提问卡 -->
     <div v-if="store.pendingAsk" class="card ask">
       <div class="title">❓ {{ store.pendingAsk.question }}</div>
@@ -168,6 +192,14 @@ async function submit() {
 summary { cursor: pointer; }
 .card { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
 .card.ask { background: #ddf4ff; border-color: #0969da; }
+.card.plan { background: #f0fff4; border-color: #1a7f37; }
+.card.plan .plan-goal { font-size: 13px; color: #57606a; margin: 4px 0 8px; }
+.plan-node { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.plan-node .nid { background: #eaeef2; border-radius: 4px; padding: 2px 6px; font-size: 12px; min-width: 30px; }
+.plan-node .goal { flex: 1; min-width: 220px; border: 1px solid #d0d7de; border-radius: 6px; padding: 4px 8px; }
+.plan-node .deps { width: 150px; border: 1px solid #d0d7de; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+.plan-node .crit { font-size: 12px; color: #57606a; display: flex; align-items: center; gap: 3px; }
+.plan-node .sm { font-size: 12px; }
 .card .title { font-weight: 600; }
 .card .reason { font-size: 13px; color: #57606a; margin: 4px 0; }
 .card pre { font-size: 12px; background: #f6f8fa; padding: 6px; border-radius: 6px; max-height: 150px; overflow: auto; }

@@ -43,6 +43,11 @@ export interface RunContext {
   plan?: PlanOptions;
   /** M5: 任务持久化（状态落库 + 租约心跳 + 崩溃恢复）；缺省 = 仅内存编排 */
   tasks?: import('../session/tasks.js').TaskStore;
+  /**
+   * F-14 计划确认流：规划产出后等待用户决策（approve / edit / reject）。
+   * 缺省 = 自动批准（非交互环境 / 测试兼容）。
+   */
+  planApproval?: (req: import('@y-zero/shared').PlanApprovalRequest) => Promise<import('@y-zero/shared').PlanDecision>;
 }
 
 /** M5 编排参数 */

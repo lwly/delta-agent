@@ -84,6 +84,23 @@ export interface MemoryUsage {
   tokens: number;
 }
 
+export interface PlanNode {
+  id: string;
+  goal: string;
+  deps: string[];
+  suggestedTools: string[];
+  role?: string;
+  critical?: boolean;
+  status: string;
+  retries: number;
+}
+
+export interface PlanPayload {
+  goal: string;
+  revision: number;
+  nodes: PlanNode[];
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -107,6 +124,9 @@ export const api = {
     request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/confirm`, { requestId, decision }),
   answer: (sessionId: string, requestId: string, answer: string) =>
     request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/answer`, { requestId, answer }),
+  // F-14 计划审批
+  approvePlan: (sessionId: string, requestId: string, decision: Record<string, unknown>) =>
+    request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/plan`, { requestId, decision }),
 
   // trash / search
   listTrash: () => request<TrashItem[]>('GET', '/api/trash'),
