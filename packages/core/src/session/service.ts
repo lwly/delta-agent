@@ -5,6 +5,7 @@ import type { ChatMessage, LLMProvider } from '@y-zero/shared';
 import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
 import { TaskStore } from './tasks.js';
 import { MemoryStore } from './memory.js';
+import { FileChangeStore } from './changes.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
@@ -23,6 +24,8 @@ export class SessionService {
   readonly tasks: TaskStore;
   /** 记忆里程碑：L2 动态记忆（同库 memories 表：写入管线 + 评分召回） */
   readonly memory: MemoryStore;
+  /** F-24 文件变更管理（同库 file_changes 表：写快照 + diff 汇总 + 回滚） */
+  readonly changes: FileChangeStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
@@ -30,6 +33,7 @@ export class SessionService {
     this.store = new SessionStore(dbPath);
     this.tasks = new TaskStore(this.store.db);
     this.memory = new MemoryStore(this.store.db);
+    this.changes = new FileChangeStore(this.store.db);
   }
 
   /**

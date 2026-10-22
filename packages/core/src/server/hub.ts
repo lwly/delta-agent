@@ -225,6 +225,8 @@ export class SessionHub {
           sessionId,
           projectId: session.project_id,
           memory: service.memory,
+          // F-24 文件变更管理：写工具自动快照（diff 汇总/回滚走 HTTP 层读 service.changes）
+          changes: service.changes,
           // F-23 权限模式（每次运行新建：allow_session 记忆随运行结束重置）
           permissions: new PermissionState({
             mode: this.deps.permissionMode ?? 'default',

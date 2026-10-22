@@ -80,12 +80,25 @@ CREATE TABLE IF NOT EXISTS memories (
   created_at INTEGER NOT NULL,
   deleted_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS file_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  path TEXT NOT NULL,
+  before_content TEXT,
+  after_content TEXT,
+  before_oversized INTEGER NOT NULL DEFAULT 0,
+  after_oversized INTEGER NOT NULL DEFAULT 0,
+  rolled_back INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, status);
 CREATE INDEX IF NOT EXISTS idx_mem_scope ON memories(scope, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_mem_hash ON memories(content_hash);
+CREATE INDEX IF NOT EXISTS idx_changes_session ON file_changes(session_id, id);
 `;
 
 export interface SessionRow {

@@ -185,6 +185,17 @@ export {
   type TaskCheckpoint,
 } from './session/tasks.js';
 export {
+  FileChangeStore,
+  readSnapshot,
+  countLineDelta,
+  renderSummary,
+  MAX_SNAPSHOT_BYTES,
+  type FileChangeRow,
+  type RecordChangeInput,
+  type ChangeSummaryItem,
+  type RollbackResult,
+} from './session/changes.js';
+export {
   MemoryStore,
   memoryTokenize,
   estimateTokens as estimateMemoryTokens,

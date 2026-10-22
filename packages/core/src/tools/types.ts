@@ -1,5 +1,6 @@
 import type { ConfirmResponder, ToolResult } from '@y-zero/shared';
 import type { PermissionState } from './permissions.js';
+import type { FileChangeStore } from '../session/changes.js';
 
 export interface ToolContext {
   /** project root — hard sandbox boundary for all path parameters */
@@ -12,6 +13,11 @@ export interface ToolContext {
    * 缺省 = default 模式、无 allowlist（行为与历史版本一致：仅 danger:'confirm' 工具确认）。
    */
   permissions?: PermissionState;
+  /**
+   * F-24 文件变更管理：提供时 write_file/edit_file 执行前后自动快照，
+   * 支撑会话级 diff 汇总与一键回滚；缺省 = 不记录。
+   */
+  changes?: FileChangeStore;
   /** interactive ask_user callback */
   askUser: (question: string, options?: string[]) => Promise<string>;
   /** shared todo list state for todo_write */

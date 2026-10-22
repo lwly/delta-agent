@@ -13,6 +13,7 @@ import {
   PermissionState,
   SessionService,
   ToolRegistry,
+  renderSummary,
   runReAct,
   runPlanExecute,
   runMultiAgent,
@@ -195,6 +196,7 @@ export function App(props: AppOptions) {
           sessionId: props.session.id,
           projectId: props.session.project_id,
           memory: props.service.memory,
+          changes: props.service.changes,
           confirm,
           askUser,
           todos: todosRef.current,
@@ -388,6 +390,8 @@ export function App(props: AppOptions) {
               '  /new     新建会话（当前进程内重置上下文）',
               '  /todos   查看任务清单',
               '  /budget  查看 Token / 费用用量',
+              '  /changes 查看会话文件变更汇总（F-24）',
+              '  /rollback [id] 回滚变更（缺省全部；id = 回滚该变更之后）',
               '  /exit    退出',
               'Esc 中断当前任务运行。',
             ].join('\n'),
@@ -404,6 +408,41 @@ export function App(props: AppOptions) {
               : '（任务清单为空）',
           });
           return true;
+        case 'changes': {
+          // F-24 会话级 diff 汇总
+          const summary = props.service.changes.summary(props.session.id);
+          const total = props.service.changes.countAfter(props.session.id);
+          addItem({
+            kind: 'system',
+            text: [
+              `文件变更（共 ${total} 次）：`,
+              renderSummary(summary),
+            ].join('\n'),
+          });
+          return true;
+        }
+        case 'rollback': {
+          // F-24 一键回滚：/rollback [changeId]（缺省回滚会话内全部变更）
+          const arg = rest[0];
+          const beforeId = arg ? Number(arg) : undefined;
+          if (arg && (!Number.isInteger(beforeId) || beforeId! <= 0)) {
+            addItem({ kind: 'system', text: `用法：/rollback [changeId]（/changes 查看变更 id）` });
+            return true;
+          }
+          void props.service.changes
+            .rollbackTo(props.session.id, process.cwd(), beforeId)
+            .then((res) => {
+              const lines = [
+                `↩ 已回滚 ${res.reverted.length} 项，跳过 ${res.skipped.length} 项：`,
+                ...res.reverted.map((r) => `  #${r.id} ${r.action === 'deleted' ? '删除' : '恢复'} ${r.path}`),
+                ...res.skipped.map((s) => `  #${s.id} 跳过 ${s.path}（${s.reason}）`),
+              ];
+              addItem({ kind: 'system', text: lines.join('\n') });
+            })
+            .catch((e) => addItem({ kind: 'system', text: `回滚失败：${(e as Error).message}` }));
+          addItem({ kind: 'system', text: beforeId ? `回滚 #${beforeId} 之后的变更…` : '回滚会话内全部变更…' });
+          return true;
+        }
         case 'budget': {
           const b = budgetRef.current;
           addItem({

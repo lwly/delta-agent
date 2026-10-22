@@ -1,4 +1,6 @@
 import AjvPkg from 'ajv';
+import * as path from 'node:path';
+import { promises as fs } from 'node:fs';
 import type {
   ConfirmDecision,
   ConfirmRequest,
@@ -8,6 +10,8 @@ import type {
 } from '@y-zero/shared';
 import { AgentError } from '@y-zero/shared';
 import type { AgentTool, ToolContext } from './types.js';
+import { resolveInSandbox } from './sandbox.js';
+import { readSnapshot } from '../session/changes.js';
 import {
   readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
 } from './builtin/fs.js';
@@ -172,9 +176,54 @@ export class ToolRegistry {
     }
     if (call.name === 'write_file' || call.name === 'edit_file') {
       const key = String((call.args as Record<string, unknown>)?.path ?? '');
-      return this.runWithFileLock(key, () => tool.execute(call.args ?? {}, ctx));
+      return this.runWithFileLock(key, () => this.runWithSnapshot(call, tool, ctx));
     }
     return tool.execute(call.args ?? {}, ctx);
+  }
+
+  /**
+   * F-24：写工具执行前后自动快照，成功后记录变更（供 diff 汇总/回滚）。
+   * 快照失败不阻断执行（记录能力是尽力而为）。
+   */
+  private async runWithSnapshot(
+    call: ToolCall,
+    tool: AgentTool,
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
+    const args = call.args ?? {};
+    const changes = ctx.changes;
+    const rel = String(args['path'] ?? '');
+    if (!changes || !ctx.sessionId || !rel) return tool.execute(args, ctx);
+
+    let abs = '';
+    let before: Awaited<ReturnType<typeof readSnapshot>> = { content: null, oversized: false };
+    try {
+      abs = await resolveInSandbox(ctx.projectRoot, rel);
+      before = await readSnapshot(abs);
+    } catch {
+      return tool.execute(args, ctx); // 沙箱校验失败交给工具自身报错
+    }
+
+    const result = await tool.execute(args, ctx);
+    if (!result.ok) return result;
+
+    try {
+      const after = await readSnapshot(abs);
+      // 归一化用 realpath 基准（macOS /var → /private/var 符号链接），存相对路径
+      const base = await fs.realpath(ctx.projectRoot).catch(() => path.resolve(ctx.projectRoot));
+      const normalized = path.relative(base, abs);
+      changes.record(ctx.sessionId, {
+        tool: call.name,
+        path: normalized,
+        before: before.content,
+        after: after.content,
+        beforeOversized: before.oversized,
+        afterOversized: after.oversized,
+      });
+    } catch {
+      // 快照记录失败不影响执行结果
+    }
+    return result;
   }
 
   private async runWithFileLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
