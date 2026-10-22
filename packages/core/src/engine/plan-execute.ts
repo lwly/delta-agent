@@ -5,7 +5,7 @@
  */
 import type { AgentEvent, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@y-zero/shared';
 import { runReAct, type RunContext } from './react.js';
-import { buildPlan, detectSimpleTask } from './planner.js';
+import { buildPlan, resolveSimpleTask } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
 import { validatePlan } from './plan.js';
 import { createEventPump } from './pump.js';
@@ -24,8 +24,12 @@ export async function* runPlanExecute(
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   const force = ctx.plan?.force;
 
-  // ── 简单任务直达（用户未强制规划且启发式判简）──
-  if (force !== 'plan' && (force === 'direct' || detectSimpleTask(userInput))) {
+  // ── 简单任务直达（用户未强制规划；规则强判定 + LLM 兜底分类）──
+  if (
+    force !== 'plan' &&
+    (force === 'direct' ||
+      (await resolveSimpleTask(ctx.provider, ctx.model, userInput, { signal: ctx.signal })))
+  ) {
     for await (const ev of runReAct(ctx, history, userInput)) {
       yield ev;
     }

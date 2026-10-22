@@ -34,6 +34,23 @@ export function taskId(sessionId: string, nodeId: string): string {
 }
 
 /**
+ * 节点执行 checkpoint（agent-modes-design §6 幂等行）：
+ * 已完成步骤 + 已变更文件清单。重试/崩溃恢复时注入子任务，
+ * 让其跳过已完成步骤，避免重复副作用（幂等）。
+ */
+export interface TaskCheckpoint {
+  /** 已完成的步骤（按发生顺序，如 `write_file(src/a.ts)`） */
+  steps: string[];
+  /** 已成功写入/修改的文件路径 */
+  files: string[];
+  updatedAt: number;
+}
+
+export function emptyCheckpoint(): TaskCheckpoint {
+  return { steps: [], files: [], updatedAt: Date.now() };
+}
+
+/**
  * TaskStore：与 SessionStore 同库（复用其 SQLite 连接），原子状态迁移。
  */
 export class TaskStore {
@@ -56,6 +73,7 @@ export class TaskStore {
                lease_until = NULL,
                heartbeat_at = NULL,
                result = NULL,
+               checkpoint_json = NULL,
                updated_at = excluded.updated_at`,
           )
           .run(taskId(sessionId, node.id), sessionId, plan.revision, node.id, JSON.stringify(node), now);
@@ -104,6 +122,19 @@ export class TaskStore {
     this.db
       .prepare('UPDATE tasks SET checkpoint_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(checkpoint), Date.now(), taskId(sessionId, nodeId));
+  }
+
+  /** 读取 checkpoint（损坏/缺失返回 undefined，不阻断重试）。 */
+  getCheckpoint(sessionId: string, nodeId: string): TaskCheckpoint | undefined {
+    const row = this.get(sessionId, nodeId);
+    if (!row?.checkpoint_json) return undefined;
+    try {
+      const cp = JSON.parse(row.checkpoint_json) as TaskCheckpoint;
+      if (!Array.isArray(cp.steps) || !Array.isArray(cp.files)) return undefined;
+      return { steps: cp.steps, files: cp.files, updatedAt: Number(cp.updatedAt) || 0 };
+    } catch {
+      return undefined;
+    }
   }
 
   complete(sessionId: string, nodeId: string, result: string): void {

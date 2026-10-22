@@ -4,6 +4,7 @@
  * - 审查/执行失败自动重试：回队首（unshift）优先于新任务
  * - 状态变化以 subtask_start/done/failed 事件推送
  * - 任务落库（租约 + 心跳），崩溃后可恢复
+ * - checkpoint 幂等：文件变更清单执行期落库，重试/恢复时跳过已完成步骤
  */
 import type { AgentEvent, Plan, TaskNode } from '@y-zero/shared';
 import type { RunContext } from './react.js';
@@ -202,12 +203,16 @@ export async function workerLoop(
 
     let result;
     try {
+      // 幂等重试：装载上一轮 checkpoint（首次执行为空），执行期增量落库
+      const prevCheckpoint = ctx.tasks?.getCheckpoint(ctx.sessionId, node.id);
       result = await runSubTask(node, {
         parent: ctx,
         planGoal: plan.goal,
         upstream: upstreamOf(plan, node),
         maxTurns: ctx.plan?.maxSubTurns,
         onEvent: opts.onEvent,
+        checkpoint: prevCheckpoint,
+        onCheckpoint: (cp) => ctx.tasks?.checkpoint(ctx.sessionId, node.id, cp),
       });
     } finally {
       if (heartbeat) clearInterval(heartbeat);

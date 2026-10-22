@@ -119,6 +119,9 @@ export {
 } from './engine/plan.js';
 export {
   detectSimpleTask,
+  classifyByRules,
+  classifyComplexity,
+  resolveSimpleTask,
   buildPlan,
   extractJson,
   normalizeNodes,
@@ -143,7 +146,12 @@ export {
   type RegistryLike,
   type RoleTemplate,
 } from './engine/roles.js';
-export { runSubTask, type SubTaskResult } from './engine/subtask.js';
+export {
+  runSubTask,
+  recordToolResult,
+  resumeNote,
+  type SubTaskResult,
+} from './engine/subtask.js';
 export { createEventPump, type EventPump } from './engine/pump.js';
 export { modeSegment, type EngineMode } from './engine/mode-prompt.js';
 export { detectShell, cmdAdapter, runWithShell, type ShellAdapter } from './engine/shell.js';
@@ -163,8 +171,10 @@ export {
   taskId,
   LEASE_MS,
   HEARTBEAT_MS,
+  emptyCheckpoint,
   type TaskRow,
   type TaskStatus,
+  type TaskCheckpoint,
 } from './session/tasks.js';
 export {
   MemoryStore,

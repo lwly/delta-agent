@@ -20,20 +20,96 @@ const SIMPLE_PATTERNS = [
 ];
 
 /**
- * 简单任务检测（启发式第一层）。返回 true 时跳过规划直达 ReAct。
- * LLM 兜底分类与用户强制（/plan /direct）由调用方处理。
+ * 简单任务检测（启发式第一层，保持原语义：不确定时短输入偏简单）。
+ * 两层分类的完整入口见 resolveSimpleTask。
  */
 export function detectSimpleTask(input: string): boolean {
+  const v = classifyByRules(input);
+  if (v === 'strong-simple') return true;
+  if (v === 'strong-complex') return false;
+  return input.trim().length < 120;
+}
+
+/** 规则判定三值：强简单 / 强复杂 / 不确定（需 LLM 兜底）。 */
+export type RuleVerdict = 'strong-simple' | 'strong-complex' | 'ambiguous';
+export type ComplexityVerdict = 'simple' | 'complex';
+
+/** 规则层：关键词命中或多文件信号 → 强复杂；问答/查询前缀 → 强简单；其余不确定。 */
+export function classifyByRules(input: string): RuleVerdict {
   const text = input.trim();
-  if (!text) return true;
+  if (!text) return 'strong-simple';
   const lower = text.toLowerCase();
-  if (COMPLEX_KEYWORDS.some((k) => lower.includes(k))) return false;
+  if (COMPLEX_KEYWORDS.some((k) => lower.includes(k))) return 'strong-complex';
   // 多文件/多模块信号：≥2 个路径状 token 或代码引用
   const pathLike = text.match(/[\w./-]+\.(ts|tsx|js|jsx|py|go|rs|java|md|json)\b/g);
-  if (pathLike && pathLike.length >= 2) return false;
-  if (SIMPLE_PATTERNS.some((re) => re.test(text))) return true;
-  // 默认：短输入偏简单
-  return text.length < 120;
+  if (pathLike && pathLike.length >= 2) return 'strong-complex';
+  if (SIMPLE_PATTERNS.some((re) => re.test(text))) return 'strong-simple';
+  return 'ambiguous';
+}
+
+const CLASSIFIER_SYSTEM = `你是任务复杂度分类器。判断用户输入是「简单任务」还是「复杂任务」：
+- simple：问答/解释/信息查询、单文件小修改，无需多步协作
+- complex：多步骤/多文件/跨模块改动、重构、迁移、批量处理，或需要任务规划执行
+严格输出 JSON（不要 markdown 代码块、不要解释文字）：
+{"complexity":"simple|complex","reason":"一句话理由"}`;
+
+export interface ClassifyOptions {
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * LLM 兜底分类（agent-modes-design §3.1 第二层）：一次小调用返回 simple|complex。
+ * LLM 出错或输出解析不出 → 返回 undefined，由调用方回退规则默认。
+ */
+export async function classifyComplexity(
+  provider: LLMProvider,
+  model: string,
+  input: string,
+  opts: ClassifyOptions = {},
+): Promise<ComplexityVerdict | undefined> {
+  let text = '';
+  try {
+    for await (const ev of provider.chat({
+      messages: [
+        { role: 'system' as const, content: CLASSIFIER_SYSTEM },
+        { role: 'user' as const, content: input.trim() },
+      ],
+      tools: [],
+      model,
+      maxTokens: opts.maxTokens ?? 256,
+      signal: opts.signal,
+    })) {
+      if (ev.type === 'text_delta') text += ev.text;
+      if (ev.type === 'error') return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  try {
+    const obj = extractJson(text) as { complexity?: unknown };
+    if (obj?.complexity === 'complex') return 'complex';
+    if (obj?.complexity === 'simple') return 'simple';
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 两层分类入口：规则强判定直接用；不确定时 LLM 兜底一次；
+ * 兜底失败（undefined）回退规则默认（短输入偏简单）。
+ */
+export async function resolveSimpleTask(
+  provider: LLMProvider,
+  model: string,
+  input: string,
+  opts: ClassifyOptions = {},
+): Promise<boolean> {
+  const v = classifyByRules(input);
+  if (v !== 'ambiguous') return v === 'strong-simple';
+  const llm = await classifyComplexity(provider, model, input, opts);
+  return llm ? llm === 'simple' : detectSimpleTask(input);
 }
 
 const ROLES: TaskRole[] = ['worker', 'researcher', 'writer', 'tool-caller'];
