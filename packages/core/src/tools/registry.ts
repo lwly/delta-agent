@@ -14,6 +14,7 @@ import {
 import { runCommandTool, runTestsTool } from './builtin/exec.js';
 import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
 import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
+import { saveMemoryTool, recallMemoryTool } from './builtin/memory.js';
 
 /** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
 interface CompiledValidator {
@@ -47,6 +48,7 @@ export class ToolRegistry {
       readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
       runCommandTool, runTestsTool, webFetchTool, todoWriteTool, askUserTool,
       loadSkillTool, unloadSkillTool,
+      saveMemoryTool, recallMemoryTool,
     ]) {
       this.register(t);
     }

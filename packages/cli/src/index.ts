@@ -165,6 +165,68 @@ models
     if (!r.ok) process.exitCode = 1;
   });
 
+// ── yzero memory：L2 动态记忆管理（memory-design §8）────────────────────
+
+const memory = program.command('memory').description('管理 L2 长期动态记忆（memories 表）');
+
+memory
+  .command('list')
+  .description('列出记忆条目（默认全局 + 全部 scope 汇总）')
+  .option('--scope <scope>', '按 scope 过滤（global / project:<id> / session:<id>）')
+  .option('--kind <kind>', '按类型过滤（preference/fact/decision/pitfall/workflow）')
+  .option('--pending', '只看待确认队列')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action((opts: { scope?: string; kind?: string; pending?: boolean; database?: string }) => {
+    const service = new SessionService(opts.database);
+    const items = opts.pending
+      ? service.memory.listPending()
+      : service.memory.list({ scope: opts.scope, kind: opts.kind });
+    if (items.length === 0) {
+      console.log('（暂无记忆条目）');
+      return;
+    }
+    for (const m of items) {
+      const flag = m.status === 'pending' ? ' [待确认]' : m.superseded_by ? ' [已被新版本取代]' : '';
+      console.log(
+        `${m.id.slice(0, 8)}  ${m.scope.padEnd(20)} ${m.kind.padEnd(11)} imp=${m.importance.toFixed(2)} conf=${m.confidence.toFixed(2)} 召回=${m.access_count}${flag}\n            ${m.content}`,
+      );
+    }
+    const scope = opts.scope ?? 'global';
+    const u = service.memory.usage(scope);
+    console.error(`\n共 ${items.length} 条${opts.scope ? `；${scope} 用量 ${u.count}/512 条 ≈ ${u.tokens} tokens` : ''}`);
+    service.close();
+  });
+
+memory
+  .command('export')
+  .description('导出记忆为 JSON（可迁移/备份）')
+  .option('--scope <scope>', '按 scope 过滤')
+  .option('--out <file>', '输出文件（缺省打印到 stdout）')
+  .option('--database <path>', 'SQLite 数据库路径')
+  .action((opts: { scope?: string; out?: string; database?: string }) => {
+    const service = new SessionService(opts.database);
+    const json = JSON.stringify(service.memory.export(opts.scope), null, 2);
+    if (opts.out) {
+      fs.writeFileSync(opts.out, json, 'utf8');
+      console.log(`✔ 已导出到 ${opts.out}`);
+    } else {
+      console.log(json);
+    }
+    service.close();
+  });
+
+memory
+  .command('rm')
+  .description('停用（软删）或彻底删除一条记忆')
+  .argument('<id>')
+  .option('--hard', '物理删除（缺省软删进回收站）')
+  .option('--database <path>', 'SQLite 数据库路径')
+  .action((id: string, opts: { hard?: boolean; database?: string }) => {
+    const service = new SessionService(opts.database);
+    console.log(service.memory.remove(id, opts.hard) ? '✔ 已删除' : '✘ 未找到该记忆');
+    service.close();
+  });
+
 // ── yzero serve：Web 控制台本地服务（M4）────────────────────────────────
 
 program

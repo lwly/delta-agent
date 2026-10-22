@@ -107,7 +107,7 @@ y-zero-agent
 | F-04 | SSE 多模型接入层 | Provider 抽象 + **4 家实现**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付；统一 SSE 事件模型；断流重连 |
 | F-04a | 大模型配置管理 | Provider 配置增删改查：名称、类型（anthropic / openai-compatible / deepseek / qwen…）、Base URL、API Key、默认模型、参数（temperature / max_tokens / top_p）；Key 经系统钥匙串或本地加密文件存储、界面不回显；保存前连通性测试；支持配置启停与排序（决定下拉列表顺序）；CLI `agent models` 与 Web 设置页双入口 |
 | F-05 | ToolCall 分片累积解析 | 流式 delta 中 tool_call 分片按 index 累积拼接，结束时统一校验 JSON；兼容不同厂商分片格式差异 |
-| F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；记忆里程碑再加 save_memory / recall_memory 至 15 个 |
+| F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；✅ 记忆里程碑再加 save_memory / recall_memory 至 15 个（2026-10-22 交付） |
 | F-06a | 三层记忆系统 | L1 短期（会话消息列表）；L2 长期动态记忆（SQLite：SHA256 去重 → 配额检查 → FIFO+importance 淘汰的写入管线；词汇覆盖率 72%+重要性 12%+置信度 8%+时间衰减 6%+访问频率 2% 的召回评分）；L3 长期静态记忆（MEMORY.md/.y-zero/agent.md，团队共享、git 版本追踪）；工具再扩展 +2（save_memory / recall_memory，至 15 个）；自动提炼默认开启（可关闭），候选进"待确认"队列防记忆污染；Web 提供记忆管理面板（查看/编辑/停用/待确认）。详见 docs/memory-design.md |
 | F-07 | MCP 动态扩展 | stdio + SSE 两种 MCP transport；`agent mcp add/list/remove`；MCP 工具与内置工具统一注册 |
 | F-08 | 多工具并行执行 | 模型单轮返回多个 tool_call 时并行执行（Promise.allSettled），结果按序回填 |
@@ -239,6 +239,7 @@ Web 控制台
 | M2（3 周） | 接入层：4 家 Provider SSE（Anthropic / OpenAI 兼容 / DeepSeek / Qwen）+ ToolCall 分片解析 + MCP 扩展 + 并行工具 | 多模型 + MCP |
 | M3（3 周） | 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段按需加载/匹配评分（内置 commit-review / test-fix / project-summarize） | 提示词架构 ✅ 2026-10-22 交付（5 commits，141 tests） |
 | M4（4 周） | Web 控制台：多项目多对话 + 对话可视化 + 设置中心 + 记忆面板 | Vue 前端 ✅ 2026-10-22 交付（7 任务/7 commits，167 tests + Web 冒烟 7/7；记忆面板为空态，接记忆里程碑；Plan/Multi-Agent 模式 UI 已预留） |
+| 记忆里程碑 | 三层记忆系统（F-06a）：L2 动态记忆 + save/recall 工具 + 自动提炼 + Web 面板 | ✅ 2026-10-22 交付：memories 表写入管线（SHA256 去重 → 配额 512 条 → FIFO+importance 淘汰 → 冲突 superseded）、召回评分（覆盖率 0.72/重要性 0.12/置信度 0.08/时间衰减 0.06/频率 0.02，阈值 0.25，召回即反馈）、save_memory/recall_memory 工具（15 个内置）、小模型自动提炼 0-3 条进待确认队列、Top-K 注入动态 Prompt、Web 记忆面板（列表/编辑/停用/回收站/采纳/召回预览）、CLI `yzero memory list/export/rm`（207 tests + Web 冒烟全绿） |
 | M5（2 周） | Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务恢复 + 跨平台加固 | ✅ 2026-10-22 交付：Plan-and-Execute（简单任务检测 + Planner DAG + 拓扑分层并行）、Multi-Agent 闭环（Worker Pool 竞争领取 + Reviewer/Verifier 打回重试）、任务恢复（tasks 表 + 60s 租约 + 15s 心跳 + 孤儿扫描）、跨平台加固（ShellAdapter PS→cmd 降级 + CI matrix）；CLI `--mode` / Web 模式分发接通 |
 
 ---

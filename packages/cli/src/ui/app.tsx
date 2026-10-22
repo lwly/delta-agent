@@ -135,6 +135,10 @@ export function App(props: AppOptions) {
         }
       }
 
+      // 记忆里程碑：本轮输入的 L2 记忆召回块
+      const memoryScopes = ['global', `project:${props.session.project_id}`, `session:${props.session.id}`];
+      const memoryBlock = renderMemoryRecallBlock(props.service.memory, userInput, memoryScopes);
+
       // build run context
       const engineMode: EngineMode = props.engineMode ?? 'react';
       const ctx: RunContext = {
@@ -145,8 +149,14 @@ export function App(props: AppOptions) {
         systemPrompt: props.systemPrompt,
         systemPromptParts: {
           staticText: props.systemPromptParts?.staticText ?? props.systemPrompt,
-          // M5: 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
-          dynamicText: `${props.systemPromptParts?.dynamicText ?? ''}\n\n${modeSegment(engineMode)}`,
+          // M5 模式段 + 记忆召回块最后追加（prompt-design §5），切换模式不动缓存前缀
+          dynamicText: [
+            props.systemPromptParts?.dynamicText ?? '',
+            memoryBlock,
+            modeSegment(engineMode),
+          ]
+            .filter((t) => t.length > 0)
+            .join('\n\n'),
         },
         dynamicProvider: props.refreshDynamic,
         maxTurns: props.maxTurns,
@@ -156,6 +166,9 @@ export function App(props: AppOptions) {
         toolContext: {
           projectRoot: process.cwd(),
           signal: ac.signal,
+          sessionId: props.session.id,
+          projectId: props.session.project_id,
+          memory: props.service.memory,
           confirm,
           askUser,
           todos: todosRef.current,
@@ -458,5 +471,21 @@ function safeParseArgs(json: string): Record<string, unknown> {
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return {};
+  }
+}
+
+/** L2 记忆召回块（memory-design §7 动态段；空则隐藏）。 */
+function renderMemoryRecallBlock(
+  memory: import('@y-zero/core').MemoryStore | undefined,
+  input: string,
+  scopes: string[],
+): string {
+  if (!memory) return '';
+  try {
+    const hits = memory.recall(input, scopes, 5);
+    if (hits.length === 0) return '';
+    return `## 相关长期记忆（自动召回）\n${hits.map((h) => `- (${h.item.kind}) ${h.item.content}`).join('\n')}`;
+  } catch {
+    return '';
   }
 }

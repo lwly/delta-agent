@@ -14,6 +14,11 @@ export interface ToolContext {
   defaultTimeoutMs?: number;
   /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具依赖；未启用时工具报 skills_unavailable） */
   skills?: SkillRuntime;
+  /** 记忆里程碑：L2 动态记忆存储（save_memory/recall_memory 依赖；缺省时工具报 memory_unavailable） */
+  memory?: import('../session/memory.js').MemoryStore;
+  /** 记忆 scope / 审计归属 */
+  sessionId?: string;
+  projectId?: string;
 }
 
 /** Skill 加载运行时（engine/session 侧组装 SkillBuffer + 已发现 Skills 后注入） */

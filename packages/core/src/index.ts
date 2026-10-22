@@ -163,6 +163,26 @@ export {
   type TaskRow,
   type TaskStatus,
 } from './session/tasks.js';
+export {
+  MemoryStore,
+  memoryTokenize,
+  estimateTokens as estimateMemoryTokens,
+  coverageOf,
+  MEMORY_QUOTA,
+  MEMORY_DECAY_HALF_LIFE_DAYS,
+  RECALL_THRESHOLD,
+  type MemoryItem,
+  type MemoryHit,
+  type MemoryKind,
+  type MemoryStatus,
+  type SaveInput,
+  type SaveResult,
+} from './session/memory.js';
+export {
+  distillMemories,
+  createMemoryProvider,
+  type DistillResult,
+} from './session/distill.js';
 
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
 

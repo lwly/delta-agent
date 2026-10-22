@@ -216,6 +216,87 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
+      // ── memory（记忆里程碑：F-06a 记忆面板 + 工具共用同一存储）───────────────
+      if (parts[0] === 'api' && parts[1] === 'memory') {
+        const mem = service.memory;
+        const id = parts[2];
+        // GET /api/memory?scope=&kind=&status=
+        if (method === 'GET' && !id) {
+          const scope = url.searchParams.get('scope') ?? undefined;
+          const kind = url.searchParams.get('kind') ?? undefined;
+          const status = url.searchParams.get('status') ?? undefined;
+          const q = url.searchParams.get('q');
+          if (q) {
+            // 召回预览（score 预览，面板展示用；不落访问统计——用临时链路）
+            const hits = mem.recall(q, scope ? [scope] : ['global'], 10);
+            return json(res, 200, { hits: hits.map((h) => ({ ...h.item, score: h.score })) });
+          }
+          return json(res, 200, { items: mem.list({ scope, kind, status: status as never }), usage: scope ? mem.usage(scope) : undefined });
+        }
+        // GET /api/memory/export —— 导出 JSON
+        if (method === 'GET' && id === 'export') {
+          return json(res, 200, mem.export(url.searchParams.get('scope') ?? undefined));
+        }
+        // GET /api/memory/trash
+        if (method === 'GET' && id === 'trash') {
+          return json(res, 200, mem.listTrash());
+        }
+        // POST /api/memory —— 保存
+        if (method === 'POST' && !id) {
+          const body = await readBody(req);
+          const content = String(body.content ?? '').trim();
+          if (!content) return err(res, 400, 'content is required');
+          try {
+            const r = mem.save({
+              scope: String(body.scope ?? 'global'),
+              kind: String(body.kind ?? 'fact'),
+              content,
+              importance: body.importance === undefined ? undefined : Number(body.importance),
+              confidence: body.confidence === undefined ? undefined : Number(body.confidence),
+              keywords: body.keywords === undefined ? undefined : String(body.keywords),
+              source: 'user',
+            });
+            return json(res, 200, r);
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+        }
+        // POST /api/memory/recall —— 召回预览
+        if (method === 'POST' && id === 'recall') {
+          const body = await readBody(req);
+          const query = String(body.query ?? '');
+          const scopes = Array.isArray(body.scopes) ? (body.scopes as string[]) : ['global'];
+          const hits = mem.recall(query, scopes, Number(body.topK ?? 5));
+          return json(res, 200, hits.map((h) => ({ ...h.item, score: h.score })));
+        }
+        if (id) {
+          // POST /api/memory/:id/approve | reject | restore
+          if (method === 'POST' && parts[3]) {
+            const action = parts[3];
+            if (action === 'approve') return json(res, 200, { ok: mem.approve(id) });
+            if (action === 'reject') return json(res, 200, { ok: mem.reject(id) });
+            if (action === 'restore') return json(res, 200, { ok: mem.restore(id) });
+            return err(res, 404, 'not found');
+          }
+          // PATCH /api/memory/:id —— 编辑（content/importance/kind…）
+          if (method === 'PATCH') {
+            const body = await readBody(req);
+            mem.update(id, {
+              content: body.content === undefined ? undefined : String(body.content),
+              importance: body.importance === undefined ? undefined : Number(body.importance),
+              confidence: body.confidence === undefined ? undefined : Number(body.confidence),
+              kind: body.kind === undefined ? undefined : String(body.kind),
+              keywords: body.keywords === undefined ? undefined : String(body.keywords),
+            });
+            return json(res, 200, { ok: true });
+          }
+          // DELETE /api/memory/:id?hard=true —— 停用（软删）/彻底清除
+          if (method === 'DELETE') {
+            return json(res, 200, { ok: mem.remove(id, url.searchParams.get('hard') === 'true') });
+          }
+        }
+      }
+
       // ── trash / search ───────────────────────────────────────────────────
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'trash' && parts.length === 2) {
         return json(res, 200, service.listTrash());

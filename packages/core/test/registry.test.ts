@@ -31,13 +31,14 @@ beforeEach(async () => {
 });
 
 describe('ToolRegistry', () => {
-  it('registers the 13 builtin tools', () => {
+  it('registers the 15 builtin tools', () => {
     const reg = new ToolRegistry();
     expect(reg.names().sort()).toEqual(
       [
         'ask_user', 'edit_file', 'glob_search', 'grep_search', 'list_dir',
         'read_file', 'run_command', 'run_tests', 'todo_write', 'web_fetch', 'write_file',
         'load_skill', 'unload_skill',
+        'save_memory', 'recall_memory',
       ].sort(),
     );
   });

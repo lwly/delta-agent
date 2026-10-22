@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import type { ChatMessage, LLMProvider } from '@y-zero/shared';
 import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
 import { TaskStore } from './tasks.js';
+import { MemoryStore } from './memory.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
@@ -20,12 +21,15 @@ export class SessionService {
   readonly store: SessionStore;
   /** M5: 任务持久化（同库 tasks 表：租约心跳 + 崩溃恢复） */
   readonly tasks: TaskStore;
+  /** 记忆里程碑：L2 动态记忆（同库 memories 表：写入管线 + 评分召回） */
+  readonly memory: MemoryStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
   constructor(dbPath: string = defaultDbPath()) {
     this.store = new SessionStore(dbPath);
     this.tasks = new TaskStore(this.store.db);
+    this.memory = new MemoryStore(this.store.db);
   }
 
   /**

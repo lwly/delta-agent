@@ -63,10 +63,29 @@ CREATE TABLE IF NOT EXISTS tasks (
   result TEXT,
   updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  content TEXT NOT NULL,
+  keywords TEXT,
+  importance REAL NOT NULL DEFAULT 0.5,
+  confidence REAL NOT NULL DEFAULT 0.8,
+  access_count INTEGER NOT NULL DEFAULT 0,
+  last_access_at INTEGER,
+  content_hash TEXT NOT NULL,
+  source TEXT,
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  superseded_by TEXT,
+  created_at INTEGER NOT NULL,
+  deleted_at INTEGER
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, status);
+CREATE INDEX IF NOT EXISTS idx_mem_scope ON memories(scope, deleted_at);
+CREATE INDEX IF NOT EXISTS idx_mem_hash ON memories(content_hash);
 `;
 
 export interface SessionRow {
@@ -242,6 +261,7 @@ export class SessionStore {
       this.db.prepare('DELETE FROM compactions WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(id);
+      this.db.prepare("DELETE FROM memories WHERE scope = ?").run(`session:${id}`);
       this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
     });
     tx();
@@ -258,6 +278,7 @@ export class SessionStore {
         this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(sid);
         this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(sid);
       }
+      this.db.prepare("DELETE FROM memories WHERE scope = ?").run(`project:${id}`);
       this.db.prepare('DELETE FROM sessions WHERE project_id = ?').run(id);
       this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
     });

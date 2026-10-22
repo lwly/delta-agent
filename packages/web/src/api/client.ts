@@ -60,6 +60,30 @@ async function request<T>(method: string, p: string, body?: unknown): Promise<T>
   return json as T;
 }
 
+export interface MemoryItem {
+  id: string;
+  scope: string;
+  kind: string;
+  content: string;
+  keywords: string;
+  importance: number;
+  confidence: number;
+  access_count: number;
+  last_access_at: number | null;
+  source: string | null;
+  status: 'confirmed' | 'pending';
+  superseded_by: string | null;
+  created_at: number;
+  deleted_at: number | null;
+  /** 召回预览时附带 */
+  score?: number;
+}
+
+export interface MemoryUsage {
+  count: number;
+  tokens: number;
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -89,4 +113,25 @@ export const api = {
   restore: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('POST', `/api/trash/restore/${kind}/${id}`),
   purgeTrash: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('DELETE', `/api/trash/${kind}/${id}`),
   search: (q: string) => request<SessionRow[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
+
+  // memory（F-06a 记忆面板）
+  listMemory: (scope?: string, kind?: string, status?: string) => {
+    const q = new URLSearchParams();
+    if (scope) q.set('scope', scope);
+    if (kind) q.set('kind', kind);
+    if (status) q.set('status', status);
+    const qs = q.toString();
+    return request<{ items: MemoryItem[]; usage?: MemoryUsage }>('GET', `/api/memory${qs ? `?${qs}` : ''}`);
+  },
+  saveMemory: (input: { scope: string; kind: string; content: string; importance?: number; confidence?: number }) =>
+    request<{ ok: boolean; action: string; id: string }>('POST', '/api/memory', input),
+  updateMemory: (id: string, patch: { content?: string; importance?: number; kind?: string; confidence?: number }) =>
+    request<{ ok: boolean }>('PATCH', `/api/memory/${id}`, patch),
+  removeMemory: (id: string, hard = false) => request<{ ok: boolean }>('DELETE', `/api/memory/${id}?hard=${hard}`),
+  restoreMemory: (id: string) => request<{ ok: boolean }>('POST', `/api/memory/${id}/restore`),
+  listMemoryTrash: () => request<MemoryItem[]>('GET', '/api/memory/trash'),
+  approveMemory: (id: string) => request<{ ok: boolean }>('POST', `/api/memory/${id}/approve`),
+  rejectMemory: (id: string) => request<{ ok: boolean }>('POST', `/api/memory/${id}/reject`),
+  previewRecall: (query: string, scopes?: string[]) =>
+    request<MemoryItem[]>('POST', '/api/memory/recall', { query, scopes }),
 };

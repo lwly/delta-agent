@@ -26,6 +26,7 @@ import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js'
 import { runPlanExecute } from '../engine/plan-execute.js';
 import { runMultiAgent } from '../engine/orchestrator.js';
 import { modeSegment } from '../engine/mode-prompt.js';
+import { distillMemories } from '../session/distill.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -51,6 +52,8 @@ export interface SessionHubDeps {
   skills?: SkillRuntime;
   /** M5: Plan/Multi-Agent 编排参数（worker 数、重试上限、强制规划/直达） */
   plan?: PlanOptions;
+  /** 记忆里程碑：自动提炼开关（默认开启；每次任务结束后提炼 0-3 条待确认候选） */
+  autoDistill?: boolean;
 }
 
 interface PendingConfirm {
@@ -172,23 +175,25 @@ export class SessionHub {
       );
       const askId = `ask_${sessionId}_${Date.now()}`;
 
+      // 记忆里程碑：本轮输入的 L2 记忆召回（Top-K 注入动态段，最后追加不动缓存前缀）
+      const memoryScopes = ['global', `project:${session.project_id}`, `session:${sessionId}`];
+      const memoryBlock = this.renderMemoryRecall(input, memoryScopes);
+      const ctxMode = (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
+        ? session.mode
+        : 'react') as RunContext['mode'];
+
       const ctx: RunContext = {
         sessionId,
         projectId: session.project_id,
-        mode: (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
-          ? session.mode
-          : 'react') as RunContext['mode'],
+        mode: ctxMode,
         model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
         systemPrompt: staticText,
         systemPromptParts: {
           staticText,
-          // M5: 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
-          dynamicText: `${dynamicText}\n\n${modeSegment(
-            (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
-              ? session.mode
-              : 'react') as RunContext['mode'],
-            this.deps.plan,
-          )}`,
+          // 记忆召回块 + M5 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
+          dynamicText: [dynamicText, memoryBlock, modeSegment(ctxMode, this.deps.plan)]
+            .filter((t) => t.length > 0)
+            .join('\n\n'),
         },
         maxTurns: this.deps.maxTurns ?? 50,
         signal: ac.signal,
@@ -197,6 +202,9 @@ export class SessionHub {
         toolContext: {
           projectRoot: project.root_path,
           signal: ac.signal,
+          sessionId,
+          projectId: session.project_id,
+          memory: service.memory,
           confirm: async (req: ConfirmRequest) => {
             this.publish(sessionId, { type: 'confirm_request', request: req });
             return new Promise<ConfirmDecision>((resolve) => {
@@ -255,6 +263,18 @@ export class SessionHub {
             }
             assistantSaved = true;
             service.recordUsage(sessionId, 0, ev.usage.inputTokens, ev.usage.outputTokens, ev.usage.costUsd ?? 0);
+            // 记忆里程碑：任务结束自动提炼（0-3 条候选进待确认队列；默认开启）
+            if (this.deps.autoDistill !== false && !ac.signal.aborted) {
+              const transcript = service
+                .getHistory(sessionId)
+                .map((m) => `${m.role}: ${m.content}`)
+                .join('\n');
+              void distillMemories(service.memory, provider, ctx.model, {
+                scope: `project:${session.project_id}`,
+                transcript,
+                signal: ac.signal,
+              }).catch(() => undefined); // 提炼失败不阻塞交付
+            }
             break;
           }
           case 'compact_done':
@@ -273,6 +293,18 @@ export class SessionHub {
       this.running.delete(sessionId);
       this.deps.service.unregisterRun(sessionId);
       this.publish(sessionId, { type: 'state', running: false });
+    }
+  }
+
+  /** L2 记忆召回块（空则返回空串，动态段自动隐藏）。 */
+  private renderMemoryRecall(input: string, scopes: string[]): string {
+    try {
+      const hits = this.deps.service.memory.recall(input, scopes, 5);
+      if (hits.length === 0) return '';
+      const lines = hits.map((h) => `- (${h.item.kind}) ${h.item.content}`);
+      return `## 相关长期记忆（自动召回）\n${lines.join('\n')}`;
+    } catch {
+      return '';
     }
   }
 
