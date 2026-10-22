@@ -13,6 +13,10 @@ import {
   SessionService,
   ToolRegistry,
   runReAct,
+  runPlanExecute,
+  runMultiAgent,
+  modeSegment,
+  type EngineMode,
   type RunContext,
   type SessionRow,
   type SkillRuntime,
@@ -44,6 +48,8 @@ export interface AppOptions {
   yolo: boolean;
   debugPrompt: boolean;
   maxTurns: number;
+  /** M5: 执行模式（react / plan-execute / multi-agent），默认 react */
+  engineMode?: EngineMode;
 }
 
 let nextId = 1;
@@ -130,13 +136,18 @@ export function App(props: AppOptions) {
       }
 
       // build run context
+      const engineMode: EngineMode = props.engineMode ?? 'react';
       const ctx: RunContext = {
         sessionId: props.session.id,
         projectId: props.session.project_id,
-        mode: 'react',
+        mode: engineMode,
         model: props.session.model || 'claude-sonnet-4-5-20250929',
         systemPrompt: props.systemPrompt,
-        systemPromptParts: props.systemPromptParts,
+        systemPromptParts: {
+          staticText: props.systemPromptParts?.staticText ?? props.systemPrompt,
+          // M5: 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
+          dynamicText: `${props.systemPromptParts?.dynamicText ?? ''}\n\n${modeSegment(engineMode)}`,
+        },
         dynamicProvider: props.refreshDynamic,
         maxTurns: props.maxTurns,
         signal: ac.signal,
@@ -152,6 +163,7 @@ export function App(props: AppOptions) {
         },
         budget: budgetRef.current,
         windowTokens: 200_000,
+        tasks: props.service.tasks,
       };
 
       const history: ChatMessage[] = props.service.getHistory(props.session.id);
@@ -175,7 +187,14 @@ export function App(props: AppOptions) {
       };
 
       try {
-        for await (const ev of runReAct(ctx, history, userInput)) {
+        // M5: 按模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）
+        const engine =
+          engineMode === 'plan-execute'
+            ? runPlanExecute
+            : engineMode === 'multi-agent'
+              ? runMultiAgent
+              : runReAct;
+        for await (const ev of engine(ctx, history, userInput)) {
           const e = ev as AgentEvent;
           switch (e.type) {
             case 'turn_start':
@@ -232,6 +251,32 @@ export function App(props: AppOptions) {
               break;
             case 'budget_exhausted':
               addItem({ kind: 'system', text: e.summary });
+              break;
+            // ── M5: Plan DAG / Worker Pool / Reviewer 事件 ──
+            case 'plan_created': {
+              const lines = e.plan.nodes.map((n) => `  ${n.id} ${n.deps.length ? `←(${n.deps.join(',')})` : ''} ${n.goal}`).join('\n');
+              addItem({ kind: 'system', text: `📋 计划（rev ${e.plan.revision}，${e.plan.nodes.length} 节点）：\n${lines}` });
+              break;
+            }
+            case 'plan_updated':
+              addItem({ kind: 'system', text: `📋 计划更新（rev ${e.plan.revision}）：${e.reason}` });
+              break;
+            case 'subtask_start':
+              addItem({ kind: 'tool', text: `▶ [${e.workerId}] ${e.nodeId}: ${e.goal}`, pending: true });
+              break;
+            case 'subtask_done':
+              addItem({ kind: 'system', text: `✔ ${e.nodeId} 完成` });
+              break;
+            case 'subtask_failed':
+              addItem({ kind: 'system', text: `✘ ${e.nodeId} 失败（重试 ${e.retries}）：${e.error}` });
+              break;
+            case 'review_verdict':
+              addItem({
+                kind: 'system',
+                text: e.verdict.pass
+                  ? `🔍 质量审查通过（rev ${e.revision}）`
+                  : `🔍 质量审查不通过（rev ${e.revision}）：${e.verdict.failures.map((f) => `${f.nodeId} ${f.reason}`).join('; ')}`,
+              });
               break;
             case 'usage': {
               setUsage((u) => ({
@@ -364,7 +409,7 @@ export function App(props: AppOptions) {
       <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
         {items.length === 0 ? (
           <Text dimColor>
-            y-zero-agent v0.1 · ReAct 模式 · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
+            y-zero-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
             {props.yolo ? ' · YOLO' : ''}
             {'\n'}输入需求开始；/help 查看命令。
           </Text>

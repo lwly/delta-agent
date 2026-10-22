@@ -48,9 +48,25 @@ CREATE TABLE IF NOT EXISTS usage (
   output_tokens INTEGER NOT NULL,
   cost_usd REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  plan_revision INTEGER NOT NULL DEFAULT 1,
+  node_id TEXT NOT NULL,
+  node_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  worker_id TEXT,
+  lease_until INTEGER,
+  heartbeat_at INTEGER,
+  retries INTEGER NOT NULL DEFAULT 0,
+  checkpoint_json TEXT,
+  result TEXT,
+  updated_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage(session_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, status);
 `;
 
 export interface SessionRow {
@@ -225,6 +241,7 @@ export class SessionStore {
       this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM compactions WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(id);
+      this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(id);
       this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
     });
     tx();
@@ -239,6 +256,7 @@ export class SessionStore {
         this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(sid);
         this.db.prepare('DELETE FROM compactions WHERE session_id = ?').run(sid);
         this.db.prepare('DELETE FROM usage WHERE session_id = ?').run(sid);
+        this.db.prepare('DELETE FROM tasks WHERE session_id = ?').run(sid);
       }
       this.db.prepare('DELETE FROM sessions WHERE project_id = ?').run(id);
       this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);

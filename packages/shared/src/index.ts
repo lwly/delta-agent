@@ -44,6 +44,53 @@ export interface Usage {
   costUsd?: number;
 }
 
+// ── Plan DAG / Multi-Agent (M5, agent-modes-design §3-5) ──────────────────
+
+export type TaskNodeStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+/** 执行层角色（四层十角色的 MVP 核心 + 动态启用，agent-modes-design §4.1） */
+export type TaskRole = 'worker' | 'researcher' | 'writer' | 'tool-caller';
+
+export interface TaskNode {
+  id: string;
+  /** 可独立执行的自然语言子任务目标 */
+  goal: string;
+  /** 依赖的上游节点 id */
+  deps: string[];
+  /** 规划者建议的工具白名单（空 = 全量） */
+  suggestedTools: string[];
+  /** 执行角色模板（默认 worker） */
+  role?: TaskRole;
+  /** 失败是否终止整个 Plan */
+  critical?: boolean;
+  status: TaskNodeStatus;
+  retries: number;
+  /** 执行结果摘要（回传给下游节点） */
+  result?: string;
+  error?: string;
+}
+
+export interface Plan {
+  goal: string;
+  /** 序列化友好：数组形态（运行时可转 Map） */
+  nodes: TaskNode[];
+  /** Reviewer 打回 / Planner 调整时递增 */
+  revision: number;
+  createdAt: number;
+}
+
+export interface ReviewFailure {
+  nodeId: string;
+  reason: string;
+}
+
+/** 主观审查（Reviewer）+ 客观验证（Verifier）合并裁决 */
+export interface ReviewVerdict {
+  pass: boolean;
+  failures: ReviewFailure[];
+  feedback?: string;
+}
+
 // ── Streaming (normalized across vendors) ─────────────────────────────────
 
 export type StreamEvent =
@@ -89,6 +136,12 @@ export type AgentEvent =
   | { type: 'budget_warning'; usedPct: number }
   | { type: 'budget_exhausted'; summary: string }
   | { type: 'confirm_request'; request: ConfirmRequest }
+  | { type: 'plan_created'; plan: Plan }
+  | { type: 'plan_updated'; plan: Plan; reason: string }
+  | { type: 'subtask_start'; nodeId: string; goal: string; workerId: string }
+  | { type: 'subtask_done'; nodeId: string; summary: string; ms: number }
+  | { type: 'subtask_failed'; nodeId: string; error: string; retries: number }
+  | { type: 'review_verdict'; verdict: ReviewVerdict; revision: number }
   | { type: 'usage'; usage: Usage }
   | { type: 'done'; usage: Usage }
   | { type: 'error'; message: string; fatal: boolean };

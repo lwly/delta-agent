@@ -239,7 +239,7 @@ Web 控制台
 | M2（3 周） | 接入层：4 家 Provider SSE（Anthropic / OpenAI 兼容 / DeepSeek / Qwen）+ ToolCall 分片解析 + MCP 扩展 + 并行工具 | 多模型 + MCP |
 | M3（3 周） | 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段按需加载/匹配评分（内置 commit-review / test-fix / project-summarize） | 提示词架构 ✅ 2026-10-22 交付（5 commits，141 tests） |
 | M4（4 周） | Web 控制台：多项目多对话 + 对话可视化 + 设置中心 + 记忆面板 | Vue 前端 ✅ 2026-10-22 交付（7 任务/7 commits，167 tests + Web 冒烟 7/7；记忆面板为空态，接记忆里程碑；Plan/Multi-Agent 模式 UI 已预留） |
-| M5（2 周） | Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务恢复 + 跨平台加固 | v1.0 发布 |
+| M5（2 周） | Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务恢复 + 跨平台加固 | ✅ 2026-10-22 交付：Plan-and-Execute（简单任务检测 + Planner DAG + 拓扑分层并行）、Multi-Agent 闭环（Worker Pool 竞争领取 + Reviewer/Verifier 打回重试）、任务恢复（tasks 表 + 60s 租约 + 15s 心跳 + 孤儿扫描）、跨平台加固（ShellAdapter PS→cmd 降级 + CI matrix）；CLI `--mode` / Web 模式分发接通 |
 
 ---
 

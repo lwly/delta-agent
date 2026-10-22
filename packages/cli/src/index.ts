@@ -28,6 +28,7 @@ interface CliOpts {
   debugPrompt?: boolean;
   maxTurns: string;
   db?: string;
+  mode?: string;
 }
 
 const program = new Command();
@@ -42,6 +43,7 @@ program
   .option('--yolo', '跳过高危工具确认（危险）')
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
+  .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
   .action(async (opts: CliOpts) => {
     await start(opts);
@@ -270,10 +272,15 @@ async function start(opts: CliOpts): Promise<void> {
     session = service.createSession(project.id, {
       title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,
       model: opts.model ?? process.env.YZERO_MODEL ?? 'claude-sonnet-4-5-20250929',
+      mode: normalizeMode(opts.mode),
     });
   } else if (opts.model) {
     session = { ...session, model: opts.model };
   }
+
+  // M5: 启动时孤儿任务恢复（running 且租约过期 → queued，retries+1）
+  const recovered = service.recoverTasks(session.id);
+  if (recovered > 0) console.error(`♻ 已恢复 ${recovered} 个中断任务（重新排队）`);
 
   // ── M3 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段加载 ──
   const model = session.model || 'claude-sonnet-4-5-20250929';
@@ -302,6 +309,7 @@ async function start(opts: CliOpts): Promise<void> {
     yolo: Boolean(opts.yolo),
     debugPrompt: Boolean(opts.debugPrompt),
     maxTurns: Number(opts.maxTurns) || 50,
+    engineMode: normalizeMode(opts.mode),
   });
 
   const { waitUntilExit } = render(app, { exitOnCtrlC: true });
@@ -316,6 +324,20 @@ program.parseAsync(process.argv).catch((e) => {
   console.error(`✘ ${(e as Error).message}`);
   process.exit(1);
 });
+
+/** CLI --mode → 会话模式（存储值与引擎值对齐）。 */
+function normalizeMode(mode?: string): 'react' | 'plan-execute' | 'multi-agent' {
+  switch (mode) {
+    case 'plan':
+    case 'plan-execute':
+      return 'plan-execute';
+    case 'multi':
+    case 'multi-agent':
+      return 'multi-agent';
+    default:
+      return 'react';
+  }
+}
 
 // keep path import used (win compat helpers may grow here)
 void path;

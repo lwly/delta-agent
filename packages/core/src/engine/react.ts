@@ -10,6 +10,7 @@ import { BudgetManager } from '../context/budget.js';
 import { compact, shouldCompact, type CompressorDeps } from '../context/compressor.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
+import type { RegistryLike } from './roles.js';
 
 export interface RunContext {
   sessionId: string;
@@ -30,13 +31,30 @@ export interface RunContext {
   maxTurns: number; // default 50
   signal: AbortSignal;
   provider: LLMProvider;
-  registry: ToolRegistry;
+  /** M5: 允许受限视图（Worker Pool 角色白名单） */
+  registry: ToolRegistry | RegistryLike;
   toolContext: ToolContext;
   budget: BudgetManager;
   /** model context window in tokens (for compaction trigger) */
   windowTokens: number;
   /** retry limit for transient LLM failures */
   maxRetries?: number;
+  /** M5: Plan/Multi-Agent 编排参数（agent-modes-design §3/§5） */
+  plan?: PlanOptions;
+  /** M5: 任务持久化（状态落库 + 租约心跳 + 崩溃恢复）；缺省 = 仅内存编排 */
+  tasks?: import('../session/tasks.js').TaskStore;
+}
+
+/** M5 编排参数 */
+export interface PlanOptions {
+  /** Worker Pool 并发（默认 min(4, 并行度)，可配 1-8） */
+  workerCount?: number;
+  /** 子任务单次最大轮数（默认 15） */
+  maxSubTurns?: number;
+  /** Reviewer 打回重试上限（默认 2） */
+  maxReviewRetries?: number;
+  /** 用户强制：plan=强制规划，direct=强制直达（/plan /direct） */
+  force?: 'plan' | 'direct';
 }
 
 const COMPACT_SUMMARY_PROMPT = `你是对话压缩器。请把给定的历史对话与既有摘要合并为一份结构化滚动摘要，包含以下小节（无则省略）：

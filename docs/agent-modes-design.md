@@ -233,4 +233,8 @@ skill-name/
 ## 9. 里程碑归属
 
 - M3：Skill 三层加载 + 两阶段加载 + 匹配评分 + `load_skill` 工具 ✅ 2026-10-22 交付（含 unload_skill 与 suggestSkill 自动触发 TUI 询问）
-- M5：Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务状态机/租约/崩溃恢复（Multi-Agent 完整形态）
+- M5：Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务状态机/租约/崩溃恢复 ✅ 2026-10-22 交付
+  - §3：engine/plan.ts（拓扑分层/校验/skipDownstream）+ planner.ts（启发式检测 + LLM DAG 修复重试）+ plan-execute.ts（简单直达/复杂规划，事件泵实时推送）
+  - §4/§5：worker-pool.ts（TaskQueue 竞争领取/unshift 优先重试/critical 终止）+ roles.ts（角色=提示词模板+工具白名单，RestrictedRegistry 越权拒绝）+ reviewer.ts/orchestrator.ts（主观+客观合并裁决，requeueFailed 带反馈重排，重试上限 2）
+  - §6：session/tasks.ts（tasks 表 + 60s 租约 + 15s 心跳 + recoverOrphans + checkpoint 字段 + 会话删除级联 canceled），CLI/Web 启动扫描恢复
+  - §9 跨平台：engine/shell.ts ShellAdapter（win PowerShell→cmd 降级、darwin zsh）+ `.github/workflows/ci.yml` 双平台 matrix；模式提示词段（prompt-design §5）由 hub/CLI 最后追加

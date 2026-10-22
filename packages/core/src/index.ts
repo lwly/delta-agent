@@ -102,7 +102,50 @@ export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';
 export { ok as toolOk, fail as toolFail } from './tools/types.js';
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
 
-export { runReAct, type RunContext } from './engine/react.js';
+export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
+export {
+  runPlanExecute,
+  summarize,
+} from './engine/plan-execute.js';
+export { runMultiAgent, requeueFailed, DEFAULT_MAX_REVIEW_RETRIES } from './engine/orchestrator.js';
+export {
+  validatePlan,
+  topoLayers,
+  skipDownstream,
+  isReady,
+  maxParallelism,
+  PlanValidationError,
+} from './engine/plan.js';
+export {
+  detectSimpleTask,
+  buildPlan,
+  extractJson,
+  normalizeNodes,
+} from './engine/planner.js';
+export {
+  TaskQueue,
+  runPlanWithPool,
+  workerLoop,
+  upstreamOf,
+  EXEC_RETRY_CAP,
+} from './engine/worker-pool.js';
+export {
+  review,
+  verify,
+  mergeVerdicts,
+  REVIEWER_SYSTEM,
+} from './engine/reviewer.js';
+export {
+  ROLE_TEMPLATES,
+  roleSystemPrompt,
+  RestrictedRegistry,
+  type RegistryLike,
+  type RoleTemplate,
+} from './engine/roles.js';
+export { runSubTask, type SubTaskResult } from './engine/subtask.js';
+export { createEventPump, type EventPump } from './engine/pump.js';
+export { modeSegment, type EngineMode } from './engine/mode-prompt.js';
+export { detectShell, cmdAdapter, runWithShell, type ShellAdapter } from './engine/shell.js';
 
 export { SessionStore, type SessionRow, type ProjectRow, type TrashItem } from './session/store.js';
 export {
@@ -112,6 +155,14 @@ export {
   TRASH_RETENTION_DAYS,
   type ProviderId,
 } from './session/service.js';
+export {
+  TaskStore,
+  taskId,
+  LEASE_MS,
+  HEARTBEAT_MS,
+  type TaskRow,
+  type TaskStatus,
+} from './session/tasks.js';
 
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
 

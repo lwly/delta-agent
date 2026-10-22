@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ChatMessage, LLMProvider } from '@y-zero/shared';
 import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
+import { TaskStore } from './tasks.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
@@ -17,11 +18,22 @@ export const TRASH_RETENTION_DAYS = 30;
  */
 export class SessionService {
   readonly store: SessionStore;
+  /** M5: 任务持久化（同库 tasks 表：租约心跳 + 崩溃恢复） */
+  readonly tasks: TaskStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
   constructor(dbPath: string = defaultDbPath()) {
     this.store = new SessionStore(dbPath);
+    this.tasks = new TaskStore(this.store.db);
+  }
+
+  /**
+   * M5 启动恢复：扫描孤儿任务（running 且租约过期 → queued，retries+1）。
+   * CLI/Web 启动时调用；返回恢复条数。
+   */
+  recoverTasks(sessionId?: string): number {
+    return this.tasks.recoverOrphans(sessionId);
   }
 
   close(): void {
@@ -122,6 +134,7 @@ export class SessionService {
    */
   removeSession(id: string, opts?: { hard?: boolean }): void {
     this.abortRun(id);
+    this.tasks.cancelSession(id); // M5: 级联取消排队/运行中任务（§6 中断传播）
     if (opts?.hard) this.store.hardDeleteSession(id);
     else this.store.softDeleteSession(id);
   }
@@ -135,6 +148,7 @@ export class SessionService {
     if (!project) throw new Error('project not found');
     if (confirmName !== project.name) throw new Error('confirmName does not match project name');
     this.abortAllProjectRuns(id);
+    for (const s of this.store.listSessions(id)) this.tasks.cancelSession(s.id); // M5 级联取消
     if (opts?.hard) this.store.hardDeleteProject(id);
     else this.store.softDeleteProject(id);
   }
@@ -148,9 +162,11 @@ export class SessionService {
   purgeTrash(kind: 'project' | 'session', id: string): void {
     if (kind === 'project') {
       this.abortAllProjectRuns(id);
+      for (const s of this.store.listSessions(id)) this.tasks.cancelSession(s.id);
       this.store.hardDeleteProject(id);
     } else {
       this.abortRun(id);
+      this.tasks.cancelSession(id);
       this.store.hardDeleteSession(id);
     }
   }

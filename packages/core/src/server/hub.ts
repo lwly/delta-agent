@@ -22,7 +22,10 @@ import {
   discoverSkills,
   type SkillRuntime,
 } from '../index.js';
-import { runReAct, type RunContext } from '../engine/react.js';
+import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
+import { runPlanExecute } from '../engine/plan-execute.js';
+import { runMultiAgent } from '../engine/orchestrator.js';
+import { modeSegment } from '../engine/mode-prompt.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
@@ -46,6 +49,8 @@ export interface SessionHubDeps {
   maxTurns?: number;
   /** Skill 两阶段加载 runtime（注入每次运行的 ToolContext.skills） */
   skills?: SkillRuntime;
+  /** M5: Plan/Multi-Agent 编排参数（worker 数、重试上限、强制规划/直达） */
+  plan?: PlanOptions;
 }
 
 interface PendingConfirm {
@@ -131,6 +136,12 @@ export class SessionHub {
 
     this.running.add(sessionId);
     this.publish(sessionId, { type: 'state', running: true });
+    // M5: 崩溃恢复——本会话孤儿任务（租约过期的 running）先回 queued
+    try {
+      this.deps.service.recoverTasks(sessionId);
+    } catch {
+      // 恢复失败不阻塞本轮运行
+    }
     // 用户消息立即落库（即使 Provider 解析失败也不丢输入）
     this.deps.service.appendMessage(sessionId, { role: 'user', content: input });
 
@@ -169,7 +180,16 @@ export class SessionHub {
           : 'react') as RunContext['mode'],
         model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
         systemPrompt: staticText,
-        systemPromptParts: { staticText, dynamicText },
+        systemPromptParts: {
+          staticText,
+          // M5: 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
+          dynamicText: `${dynamicText}\n\n${modeSegment(
+            (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
+              ? session.mode
+              : 'react') as RunContext['mode'],
+            this.deps.plan,
+          )}`,
+        },
         maxTurns: this.deps.maxTurns ?? 50,
         signal: ac.signal,
         provider,
@@ -194,11 +214,20 @@ export class SessionHub {
         },
         budget,
         windowTokens: this.deps.windowTokens ?? 200_000,
+        plan: this.deps.plan,
+        tasks: service.tasks,
       };
 
       const history: ChatMessage[] = service.getHistory(sessionId);
 
-      for await (const ev of runReAct(ctx, history.slice(0, -1), input)) {
+      // M5: 按会话模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）
+      const engine =
+        ctx.mode === 'plan-execute'
+          ? runPlanExecute
+          : ctx.mode === 'multi-agent'
+            ? runMultiAgent
+            : runReAct;
+      for await (const ev of engine(ctx, history.slice(0, -1), input)) {
         this.publish(sessionId, ev);
         switch (ev.type) {
           case 'text_delta':

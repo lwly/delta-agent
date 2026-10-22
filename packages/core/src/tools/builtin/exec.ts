@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
 import { ok, fail, type AgentTool } from '../types.js';
 import { resolveInSandbox, isWhitelistedCommand } from '../sandbox.js';
+import { runWithShell } from '../../engine/shell.js';
 
 export const DEFAULT_CMD_TIMEOUT_MS = 120_000;
 export const MAX_CMD_OUTPUT = 20_000;
@@ -14,45 +14,14 @@ export interface ShellResult {
   timedOut: boolean;
 }
 
-/** Cross-platform shell spawn: PowerShell on win32, /bin/sh elsewhere. */
+/** Cross-platform shell spawn via ShellAdapter (M5: PS→cmd 降级, darwin zsh). */
 export function runShell(
   command: string,
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<ShellResult> {
-  return new Promise((resolve) => {
-    const isWin = process.platform === 'win32';
-    const bin = isWin ? 'powershell.exe' : '/bin/sh';
-    const args = isWin ? ['-NoProfile', '-Command', command] : ['-c', command];
-    const child = spawn(bin, args, { cwd, env: process.env, windowsHide: true });
-
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, timeoutMs);
-    const onAbort = () => {
-      timedOut = false;
-      child.kill('SIGKILL');
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-
-    child.stdout?.on('data', (d) => (stdout += String(d)));
-    child.stderr?.on('data', (d) => (stderr += String(d)));
-    child.on('error', (e) => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve({ code: -1, stdout, stderr: stderr + String(e.message), timedOut });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve({ code, stdout, stderr, timedOut });
-    });
-  });
+  return runWithShell(command, cwd, timeoutMs, signal);
 }
 
 export function trimOutput(r: ShellResult): string {

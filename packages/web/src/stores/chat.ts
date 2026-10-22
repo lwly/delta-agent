@@ -98,6 +98,34 @@ export const useChatStore = defineStore('chat', {
         case 'budget_exhausted':
           this.notice(`⚠ ${String(ev.summary ?? '预算耗尽')}`);
           break;
+        // ── M5: Plan DAG / Worker Pool / Reviewer 事件（notice 最小渲染）──
+        case 'plan_created': {
+          const plan = ev.plan as { revision: number; nodes: Array<{ id: string; goal: string; deps: string[] }> };
+          const lines = plan.nodes.map((n) => `  ${n.id}${n.deps.length ? ` ←(${n.deps.join(',')})` : ''} ${n.goal}`).join('\n');
+          this.notice(`📋 计划（rev ${plan.revision}，${plan.nodes.length} 节点）：\n${lines}`);
+          break;
+        }
+        case 'plan_updated':
+          this.notice(`📋 计划更新：${String(ev.reason ?? '')}`);
+          break;
+        case 'subtask_start':
+          this.notice(`▶ ${String(ev.nodeId)}：${String(ev.goal)}`);
+          break;
+        case 'subtask_done':
+          this.notice(`✔ ${String(ev.nodeId)} 完成`);
+          break;
+        case 'subtask_failed':
+          this.notice(`✘ ${String(ev.nodeId)} 失败：${String(ev.error ?? '')}`);
+          break;
+        case 'review_verdict': {
+          const verdict = ev.verdict as { pass: boolean; failures: Array<{ nodeId: string; reason: string }> };
+          this.notice(
+            verdict.pass
+              ? `🔍 质量审查通过（rev ${String(ev.revision)}）`
+              : `🔍 质量审查不通过：${verdict.failures.map((f) => `${f.nodeId} ${f.reason}`).join('; ')}`,
+          );
+          break;
+        }
         case 'error':
           this.notice(`✘ ${String(ev.message)}`);
           break;
