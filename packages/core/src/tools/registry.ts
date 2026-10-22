@@ -127,8 +127,22 @@ export class ToolRegistry {
       };
     }
 
-    // 2. confirmation for danger tools (decision #3: confirm every time)
-    if (tool.danger === 'confirm') {
+    // 2. F-23 权限判定（plan 拒写/执行；default 写需确认；yolo 放行），
+    //    再衔接 danger:'confirm' 确认流（allow_session 记入会话白名单）
+    const perms = ctx.permissions;
+    const verdict = perms?.check(call.name, call.args);
+    if (verdict?.action === 'deny') {
+      return {
+        callId: call.id, name: call.name, ok: false,
+        content: verdict.reason,
+        error: 'permission_denied',
+      };
+    }
+    const needsConfirm =
+      verdict?.action === 'confirm' ||
+      // 无 permissions 注入时保持历史行为：danger 工具每次确认
+      (!perms && tool.danger === 'confirm');
+    if (needsConfirm && tool.danger === 'confirm') {
       const req: ConfirmRequest = {
         id: call.id,
         tool: call.name,
@@ -145,6 +159,9 @@ export class ToolRegistry {
       }
       if (decision.kind === 'edit') {
         call.args = decision.args;
+      }
+      if (decision.kind === 'allow_session') {
+        perms?.allowSession(call.name); // "本会话不再询问"
       }
       // allow / allow_session → proceed
     }

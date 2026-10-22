@@ -163,9 +163,12 @@ export type AgentEvent =
 
 export type ConfirmDecision =
   | { kind: 'allow' }
-  | { kind: 'allow_session'; tool: string } // P2 (F-23), reserved
+  | { kind: 'allow_session'; tool: string } // F-23：本会话不再询问
   | { kind: 'reject'; reason?: string }
   | { kind: 'edit'; args: Record<string, unknown> };
+
+/** 权限模式（F-23）：plan=只读 / default=写需确认 / yolo=全放行（双重开启） */
+export type PermissionMode = 'plan' | 'default' | 'yolo';
 
 export interface ConfirmRequest {
   id: string;

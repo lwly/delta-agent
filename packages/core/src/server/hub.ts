@@ -20,8 +20,10 @@ import {
   SkillBuffer,
   SplitPromptAssembler,
   ToolRegistry,
+  PermissionState,
   discoverSkills,
   type SkillRuntime,
+  type PermissionMode,
 } from '../index.js';
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
@@ -55,6 +57,10 @@ export interface SessionHubDeps {
   plan?: PlanOptions;
   /** 记忆里程碑：自动提炼开关（默认开启；每次任务结束后提炼 0-3 条待确认候选） */
   autoDistill?: boolean;
+  /** F-23 权限模式（默认 default；Web 设置页/启动参数可配） */
+  permissionMode?: PermissionMode;
+  /** F-23 工具级 allowlist（default 模式下命中跳过确认） */
+  allowTools?: string[];
 }
 
 interface PendingConfirm {
@@ -219,6 +225,11 @@ export class SessionHub {
           sessionId,
           projectId: session.project_id,
           memory: service.memory,
+          // F-23 权限模式（每次运行新建：allow_session 记忆随运行结束重置）
+          permissions: new PermissionState({
+            mode: this.deps.permissionMode ?? 'default',
+            allowlist: this.deps.allowTools,
+          }),
           confirm: async (req: ConfirmRequest) => {
             this.publish(sessionId, { type: 'confirm_request', request: req });
             return new Promise<ConfirmDecision>((resolve) => {

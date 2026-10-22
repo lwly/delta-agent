@@ -10,6 +10,7 @@ import type {
 } from '@y-zero/shared';
 import {
   BudgetManager,
+  PermissionState,
   SessionService,
   ToolRegistry,
   runReAct,
@@ -17,6 +18,7 @@ import {
   runMultiAgent,
   modeSegment,
   type EngineMode,
+  type PermissionMode,
   type RunContext,
   type SessionRow,
   type SkillRuntime,
@@ -46,6 +48,10 @@ export interface AppOptions {
   /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具） */
   skillsRuntime?: SkillRuntime;
   yolo: boolean;
+  /** F-23 权限模式（plan/default/yolo；yolo 需与 yolo 标志双重开启，由 CLI 入口保证） */
+  permissionMode?: PermissionMode;
+  /** F-23 工具级 allowlist（default 模式下命中跳过确认） */
+  allowTools?: string[];
   debugPrompt: boolean;
   maxTurns: number;
   /** M5: 执行模式（react / plan-execute / multi-agent），默认 react */
@@ -53,6 +59,13 @@ export interface AppOptions {
 }
 
 let nextId = 1;
+
+/** 头部权限模式标签。 */
+function permissionLabel(mode: PermissionMode): string {
+  if (mode === 'plan') return ' · PLAN（只读）';
+  if (mode === 'yolo') return ' · YOLO';
+  return '';
+}
 
 export function App(props: AppOptions) {
   const { exit } = useApp();
@@ -64,6 +77,18 @@ export function App(props: AppOptions) {
   const registryRef = useRef<ToolRegistry>(props.registry ?? new ToolRegistry());
   const todosRef = useRef<Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>>([]);
   const budgetRef = useRef<BudgetManager>(new BudgetManager());
+  // F-23 权限模式（会话内固定；yolo 需 CLI 双重开启，再次防御）。
+  // PermissionState 持有 allow_session 记忆，整个会话复用同一实例。
+  const permsRef = useRef<PermissionState | null>(null);
+  if (!permsRef.current) {
+    const mode: PermissionMode =
+      props.permissionMode === 'yolo' && props.yolo
+        ? 'yolo'
+        : props.permissionMode === 'plan'
+          ? 'plan'
+          : 'default';
+    permsRef.current = new PermissionState({ mode, allowlist: props.allowTools });
+  }
 
   const addItem = useCallback((item: Omit<Item, 'id'>) => {
     const withId: Item = { ...item, id: nextId++ };
@@ -80,14 +105,15 @@ export function App(props: AppOptions) {
   }, []);
 
   // ── confirm flow ────────────────────────────────────────────────────────
+  // F-23：放行策略收敛到 PermissionState（registry 闸口），yolo 模式下
+  // check() 直接 allow，不会走到这里；此处只负责交互式确认卡。
   const confirm = useCallback(
     async (req: ConfirmRequest): Promise<ConfirmDecision> => {
-      if (props.yolo) return { kind: 'allow' };
       return new Promise<ConfirmDecision>((resolve) => {
         addItem({ kind: 'confirm', text: '', request: req, resolve });
       });
     },
-    [props.yolo, addItem],
+    [addItem],
   );
 
   const askUser = useCallback(
@@ -173,6 +199,7 @@ export function App(props: AppOptions) {
           askUser,
           todos: todosRef.current,
           skills: props.skillsRuntime,
+          permissions: permsRef.current ?? undefined,
         },
         budget: budgetRef.current,
         windowTokens: 200_000,
@@ -437,7 +464,7 @@ export function App(props: AppOptions) {
         {items.length === 0 ? (
           <Text dimColor>
             y-zero-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
-            {props.yolo ? ' · YOLO' : ''}
+            {permissionLabel(permsRef.current.policy.mode)}
             {'\n'}输入需求开始；/help 查看命令。
           </Text>
         ) : null}

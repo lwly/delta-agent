@@ -25,6 +25,8 @@ interface CliOpts {
   model?: string;
   provider?: string;
   yolo?: boolean;
+  permission?: string;
+  allow?: string;
   debugPrompt?: boolean;
   maxTurns: string;
   db?: string;
@@ -40,7 +42,9 @@ program
   .option('-r, --resume [sessionId]', '恢复指定会话（缺省恢复项目最近会话）')
   .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回各厂商默认）')
   .option('-p, --provider <name>', '模型厂商：anthropic | deepseek | qwen | openai（默认读 YZERO_PROVIDER，再按已配置 Key 自动探测）')
-  .option('--yolo', '跳过高危工具确认（危险）')
+  .option('--yolo', 'YOLO 第二重开关（须与 --permission yolo 同时使用；单独使用会降级为 default 并告警）')
+  .option('--permission <mode>', 'F-23 权限模式：plan（只读）| default（写需确认）| yolo（全放行，需 --yolo 双重开启）', 'default')
+  .option('--allow <tools>', '工具级 allowlist（逗号分隔，default 模式下命中跳过确认，如 write_file,edit_file）')
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
   .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
@@ -369,6 +373,8 @@ async function start(opts: CliOpts): Promise<void> {
     refreshDynamic: promptAssembly.refreshDynamic,
     skillsRuntime: promptAssembly.skills,
     yolo: Boolean(opts.yolo),
+    permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
+    allowTools: parseAllowTools(opts.allow),
     debugPrompt: Boolean(opts.debugPrompt),
     maxTurns: Number(opts.maxTurns) || 50,
     engineMode: normalizeMode(opts.mode),
@@ -399,6 +405,31 @@ function normalizeMode(mode?: string): 'react' | 'plan-execute' | 'multi-agent' 
     default:
       return 'react';
   }
+}
+
+/**
+ * F-23 权限模式解析（双重开启）：
+ * - `--permission yolo` 必须同时传 `--yolo`，否则告警降级 default
+ * - `--yolo` 单独使用（历史用法）同样告警降级 default
+ */
+function resolvePermissionMode(yoloFlag: boolean, permission?: string): 'plan' | 'default' | 'yolo' {
+  const requested = permission === 'plan' || permission === 'yolo' ? permission : 'default';
+  if (requested === 'yolo' && !yoloFlag) {
+    console.error('⚠ yolo 模式需双重开启：同时传入 --permission yolo 与 --yolo；本次降级为 default');
+    return 'default';
+  }
+  if (requested !== 'yolo' && yoloFlag) {
+    console.error('⚠ --yolo 需与 --permission yolo 同时使用（双重开启）；本次降级为 default');
+    return 'default';
+  }
+  return requested;
+}
+
+/** F-23 工具级 allowlist：逗号分隔 → 去空白去重。 */
+function parseAllowTools(raw?: string): string[] | undefined {
+  if (!raw?.trim()) return undefined;
+  const list = [...new Set(raw.split(',').map((t) => t.trim()).filter(Boolean))];
+  return list.length > 0 ? list : undefined;
 }
 
 // keep path import used (win compat helpers may grow here)

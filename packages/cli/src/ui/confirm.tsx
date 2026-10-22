@@ -27,6 +27,7 @@ export function ConfirmCard(props: {
 
   const options = [
     { label: '允许（执行一次）', value: 'allow' },
+    { label: '允许（本会话不再询问）', value: 'allow_session' },
     { label: '编辑参数后执行', value: 'edit' },
     { label: '拒绝', value: 'reject' },
   ];
@@ -40,6 +41,8 @@ export function ConfirmCard(props: {
         items={options}
         onSelect={(item) => {
           if (item.value === 'allow') props.onDecide({ kind: 'allow' });
+          else if (item.value === 'allow_session')
+            props.onDecide({ kind: 'allow_session', tool: props.request.tool });
           else if (item.value === 'reject') props.onDecide({ kind: 'reject' });
           else setEditing(true);
         }}

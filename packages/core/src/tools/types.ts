@@ -1,4 +1,5 @@
 import type { ConfirmResponder, ToolResult } from '@y-zero/shared';
+import type { PermissionState } from './permissions.js';
 
 export interface ToolContext {
   /** project root — hard sandbox boundary for all path parameters */
@@ -6,6 +7,11 @@ export interface ToolContext {
   signal: AbortSignal;
   /** confirmation callback for danger:'confirm' tools */
   confirm: ConfirmResponder;
+  /**
+   * F-23 权限模式状态（plan/default/yolo + allowlist + 会话记忆）。
+   * 缺省 = default 模式、无 allowlist（行为与历史版本一致：仅 danger:'confirm' 工具确认）。
+   */
+  permissions?: PermissionState;
   /** interactive ask_user callback */
   askUser: (question: string, options?: string[]) => Promise<string>;
   /** shared todo list state for todo_write */

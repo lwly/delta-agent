@@ -102,6 +102,14 @@ export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger } from './tools/types.js';
 export { ok as toolOk, fail as toolFail } from './tools/types.js';
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
+export {
+  PermissionState,
+  toolCapability,
+  type PermissionMode,
+  type PermissionPolicy,
+  type PermissionCheck,
+  type ToolCapability,
+} from './tools/permissions.js';
 
 export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
 export {
