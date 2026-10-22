@@ -15,6 +15,7 @@ import {
   runReAct,
   type RunContext,
   type SessionRow,
+  type SkillRuntime,
 } from '@y-zero/core';
 import { ConfirmCard } from './confirm.js';
 
@@ -34,6 +35,12 @@ export interface AppOptions {
   /** pre-built registry (with MCP tools attached by the CLI entry) */
   registry?: ToolRegistry;
   systemPrompt: string;
+  /** M3：静态/动态分段系统提示词（优先于 systemPrompt） */
+  systemPromptParts?: { staticText: string; dynamicText: string };
+  /** M3：每轮动态段刷新（时间戳等随轮次更新，静态缓存前缀不动） */
+  refreshDynamic?: () => string;
+  /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具） */
+  skillsRuntime?: SkillRuntime;
   yolo: boolean;
   debugPrompt: boolean;
   maxTurns: number;
@@ -106,6 +113,8 @@ export function App(props: AppOptions) {
         mode: 'react',
         model: props.session.model || 'claude-sonnet-4-5-20250929',
         systemPrompt: props.systemPrompt,
+        systemPromptParts: props.systemPromptParts,
+        dynamicProvider: props.refreshDynamic,
         maxTurns: props.maxTurns,
         signal: ac.signal,
         provider: props.provider,
@@ -116,6 +125,7 @@ export function App(props: AppOptions) {
           confirm,
           askUser,
           todos: todosRef.current,
+          skills: props.skillsRuntime,
         },
         budget: budgetRef.current,
         windowTokens: 200_000,

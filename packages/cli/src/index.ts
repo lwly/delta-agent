@@ -13,6 +13,7 @@ import {
   ProviderManager,
 } from '@y-zero/core';
 import { App } from './ui/app.js';
+import { assemblePrompt } from './prompt.js';
 
 interface CliOpts {
   resume?: string;
@@ -203,26 +204,19 @@ async function start(opts: CliOpts): Promise<void> {
     session = { ...session, model: opts.model };
   }
 
-  // minimal M1 system prompt (7-layer assembly lands in M3)
-  const env = [
-    `OS: ${process.platform} (${process.arch})`,
-    `Node: ${process.version}`,
-    `CWD: ${cwd}`,
-    `Time: ${new Date().toISOString()}`,
-  ].join('\n');
-
-  const systemPrompt = [
-    '你是 y-zero-agent，一个在终端中工作的 AI 编程助手。通过调用工具完成任务，遵循 ReAct 循环：先思考再行动，根据观察结果继续。',
-    '安全基线：所有文件路径必须位于项目根目录内；高危操作（写文件/编辑/执行命令）会先请求用户确认；不得尝试绕过沙箱；不得硬编码密钥。',
-    '工具使用规范：优先 read_file/glob_search/grep_search 收集上下文再动手；写代码前先看现有代码风格；测试用 run_tests；无法推进时用 ask_user 询问。',
-    `## 运行环境\n${env}`,
-  ].join('\n\n');
+  // ── M3 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段加载 ──
+  const model = session.model || 'claude-sonnet-4-5-20250929';
+  const promptAssembly = await assemblePrompt({
+    projectRoot: cwd,
+    model,
+    contextWindow: 200_000,
+    tools: registry.definitions(),
+  });
 
   if (opts.debugPrompt) {
     const history = service.getHistory(session.id);
-    console.error('[debug] system prompt tokens ≈', estimateMessagesTokens([{ role: 'system', content: systemPrompt }]));
+    console.error(promptAssembly.debugReport());
     console.error('[debug] history messages:', history.length, 'tokens ≈', estimateMessagesTokens(history));
-    console.error('[debug] system prompt:\n' + systemPrompt);
   }
 
   const app = React.createElement(App, {
@@ -230,7 +224,10 @@ async function start(opts: CliOpts): Promise<void> {
     session,
     provider,
     registry,
-    systemPrompt,
+    systemPrompt: promptAssembly.parts.staticText,
+    systemPromptParts: promptAssembly.parts,
+    refreshDynamic: promptAssembly.refreshDynamic,
+    skillsRuntime: promptAssembly.skills,
     yolo: Boolean(opts.yolo),
     debugPrompt: Boolean(opts.debugPrompt),
     maxTurns: Number(opts.maxTurns) || 50,

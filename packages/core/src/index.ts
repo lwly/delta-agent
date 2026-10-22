@@ -52,6 +52,14 @@ export {
   type TrimAction,
 } from './prompt/builder.js';
 export {
+  buildDebugReport,
+  formatDebugReport,
+  promptSectionsLog,
+  type DebugReportInput,
+  type PromptDebugReport,
+  type PromptSectionsLogEntry,
+} from './prompt/debug.js';
+export {
   SplitPromptAssembler,
   composeSystemPrompt,
   type AssembleSplitResult,
