@@ -118,6 +118,8 @@ export {
   type GitOutcome,
 } from './git/repo.js';
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
+// F-30 容器级沙箱：配置 / 探测 / 参数组装 / 执行器 / 降级编排（详见 docs/design-f30-container-sandbox.md）
+export * from './sandbox/index.js';
 export {
   PermissionState,
   toolCapability,
