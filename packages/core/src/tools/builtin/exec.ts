@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { ok, fail, type AgentTool } from '../types.js';
+import { ok, fail, type AgentTool, type ToolContext } from '../types.js';
 import { resolveInSandbox, isWhitelistedCommand } from '../sandbox.js';
 import { runWithShell } from '../../engine/shell.js';
+import type { SandboxMeta } from '../../sandbox/types.js';
 
 export const DEFAULT_CMD_TIMEOUT_MS = 120_000;
 export const MAX_CMD_OUTPUT = 20_000;
@@ -24,6 +25,7 @@ export function runShell(
   return runWithShell(command, cwd, timeoutMs, signal);
 }
 
+/** 输出截断与退出码尾巴（**历史口径，一字不改**：超时文本 / `[exit code: N]`）。 */
 export function trimOutput(r: ShellResult): string {
   const parts = [
     r.stdout.length > MAX_CMD_OUTPUT ? r.stdout.slice(0, MAX_CMD_OUTPUT) + '\n...[stdout truncated]' : r.stdout,
@@ -31,6 +33,66 @@ export function trimOutput(r: ShellResult): string {
   ].filter(Boolean);
   const tail = r.timedOut ? '\n[command timed out]' : `\n[exit code: ${r.code}]`;
   return parts.join('\n') + tail;
+}
+
+// ── F-30 执行后端抽象 ───────────────────────────────────────────────────────
+
+/** 后端执行的统一结果形态（local 与 sandbox 两种来源归一）。 */
+export interface Outcome {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  /** 策略层拒绝（沙箱不可用 / 工作区不安全），未执行任何命令 */
+  denied?: boolean;
+  /** denied 时的完整可诊断文案 */
+  diagnostic?: string;
+  /** 附加诊断（127/137/126、网络），追加在结果末尾 */
+  hints: string[];
+  /** 有值才写进 ToolResult.meta.sandbox */
+  meta?: SandboxMeta;
+}
+
+/**
+ * 唯一的执行后端入口：
+ *  - `ctx.sandbox === undefined` → 与历史**逐字节一致**的路径（runShell → trimOutput → ok/fail）
+ *  - 否则交给 `ctx.sandbox.run()`（LocalExecutor / DockerExecutor / SandboxRuntime 同接口）
+ */
+async function execViaBackend(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  ctx: ToolContext,
+): Promise<Outcome> {
+  if (!ctx.sandbox) {
+    const r = await runShell(command, cwd, timeoutMs, ctx.signal);
+    return { code: r.code, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut, hints: [] };
+  }
+  const r = await ctx.sandbox.run(command, { cwd, timeoutMs, signal: ctx.signal });
+  return {
+    code: r.code,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    timedOut: r.timedOut,
+    ...(r.denied ? { denied: true } : {}),
+    ...(r.diagnostic ? { diagnostic: r.diagnostic } : {}),
+    hints: r.hints ?? [],
+    ...(r.sandbox ? { meta: r.sandbox } : {}),
+  };
+}
+
+/** denied 直接回传 diagnostic（不走 trimOutput）；其余沿用 trimOutput + hints。 */
+function formatOutcome(o: Outcome): { text: string; ok: boolean } {
+  if (o.denied) return { text: o.diagnostic ?? '[sandbox] 命令未执行', ok: false };
+  const text =
+    trimOutput({ code: o.code, stdout: o.stdout, stderr: o.stderr, timedOut: o.timedOut }) +
+    (o.hints.length > 0 ? '\n' + o.hints.join('\n') : '');
+  return { text, ok: o.code === 0 && !o.timedOut };
+}
+
+/** Z1/Z3：只有显式启用或 docker 模式才有 meta.sandbox。 */
+function metaOf(o: Outcome): Record<string, unknown> | undefined {
+  return o.meta ? { sandbox: o.meta } : undefined;
 }
 
 // ── run_command ────────────────────────────────────────────────────────────
@@ -52,15 +114,25 @@ export const runCommandTool: AgentTool = {
   async execute(args, ctx) {
     const command = String(args.command ?? '');
     if (!command.trim()) return fail('command is empty');
+    // 路径沙箱是第一道闸（容器只挂 /workspace 是第二道），逃逸在此拒绝、不产生任何 docker 调用
     const cwd = await resolveInSandbox(ctx.projectRoot, String(args.cwd ?? '.'));
     const timeout = Math.min(600_000, Number(args.timeout ?? ctx.defaultTimeoutMs ?? DEFAULT_CMD_TIMEOUT_MS));
-    const result = await runShell(command, cwd, timeout, ctx.signal);
-    const text = trimOutput(result);
-    return result.code === 0 && !result.timedOut ? ok(text) : fail(text);
+    const outcome = await execViaBackend(command, cwd, timeout, ctx);
+    const f = formatOutcome(outcome);
+    return f.ok ? ok(f.text, metaOf(outcome)) : fail(f.text);
   },
 };
 
 // ── run_tests ──────────────────────────────────────────────────────────────
+
+/**
+ * `run_tests` 的 `ok` 判定**保持现状 `code === 0`**（历史口径，勿顺手统一）：
+ * 与 `run_command` 的 `code === 0 && !timedOut` 存在既存差异（F-30 设计 D11 / R9），
+ * 本特性承诺「口径完全沿用」，统一会改掉既有行为，超出范围。
+ */
+function testsOk(o: Outcome): boolean {
+  return o.code === 0;
+}
 
 export const runTestsTool: AgentTool = {
   name: 'run_tests',
@@ -83,9 +155,9 @@ export const runTestsTool: AgentTool = {
       if (pkg.scripts?.test) {
         const pm = pkg.packageManager?.startsWith('pnpm') ? 'pnpm' : 'npm';
         const cmd = filter ? `${pm} test -- ${filter}` : `${pm} test`;
-        const r = await runShell(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx.signal);
-        const text = trimOutput(r);
-        return r.code === 0 ? ok(text) : fail(text);
+        const outcome = await execViaBackend(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx);
+        const f = formatOutcome(outcome);
+        return testsOk(outcome) ? ok(f.text, metaOf(outcome)) : fail(f.text);
       }
     } catch {
       /* no package.json */
@@ -99,9 +171,9 @@ export const runTestsTool: AgentTool = {
         .catch(() => false)
     ) {
       const cmd = filter ? `python3 -m pytest ${filter}` : 'python3 -m pytest';
-      const r = await runShell(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx.signal);
-      const text = trimOutput(r);
-      return r.code === 0 ? ok(text) : fail(text);
+      const outcome = await execViaBackend(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx);
+      const f = formatOutcome(outcome);
+      return testsOk(outcome) ? ok(f.text, metaOf(outcome)) : fail(f.text);
     }
 
     // 3. cargo
@@ -112,9 +184,9 @@ export const runTestsTool: AgentTool = {
         .catch(() => false)
     ) {
       const cmd = filter ? `cargo test ${filter}` : 'cargo test';
-      const r = await runShell(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx.signal);
-      const text = trimOutput(r);
-      return r.code === 0 ? ok(text) : fail(text);
+      const outcome = await execViaBackend(cmd, root, DEFAULT_CMD_TIMEOUT_MS, ctx);
+      const f = formatOutcome(outcome);
+      return testsOk(outcome) ? ok(f.text, metaOf(outcome)) : fail(f.text);
     }
 
     return fail(

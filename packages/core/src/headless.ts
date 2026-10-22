@@ -44,6 +44,27 @@ export interface HeadlessToolCallSummary {
   ok: boolean;
 }
 
+/**
+ * F-30 沙箱段（`--json` 的 `sandbox` 键）。
+ * **只在沙箱显式启用时输出**（未配置沙箱的用户 JSON 报告不新增任何字段，AC-30-1）；
+ * 不含 cost/token —— 容器耗时与镜像不进 F-31 用量口径。
+ */
+export interface HeadlessSandboxRun {
+  command_head: string;
+  exit_code: number | null;
+  ms: number;
+  container?: string;
+}
+
+export interface HeadlessSandboxState {
+  mode: 'local' | 'docker';
+  image: string;
+  network: 'none' | 'bridge';
+  enforced: boolean;
+  degraded: boolean;
+  runs: HeadlessSandboxRun[];
+}
+
 export interface HeadlessOutcome {
   status: HeadlessStatus;
   /** 最终助手文本（最后一个工具调用之后的文本块；全程无工具调用则为全部文本） */
@@ -59,6 +80,8 @@ export interface HeadlessOutcome {
   askUserQuestions: string[];
   /** 自动批准的计划数 */
   planApprovals: number;
+  /** F-30：仅沙箱显式启用时存在（缺省 = 不输出、不新增字段） */
+  sandbox?: HeadlessSandboxState;
   error: string | null;
   durationMs: number;
   sessionId: string;
@@ -83,6 +106,11 @@ export interface HeadlessDeps {
   externalSignal?: AbortSignal;
   /** 事件旁路钩子（CLI 进度输出到 stderr；不影响主流程，钩子抛错被吞掉） */
   onEvent?: (ev: AgentEvent) => void;
+  /**
+   * F-30：沙箱状态读取器（入口在 runtime 显式启用时提供；缺省 = 报告不含 sandbox 段）。
+   * 支持函数形态：runs[] 在任务执行过程中累积，报告需要在结束时读取最终快照。
+   */
+  sandboxState?: HeadlessSandboxState | (() => HeadlessSandboxState | undefined);
 }
 
 // ── headless 非交互应答 ─────────────────────────────────────────────────────
@@ -262,6 +290,9 @@ export async function runHeadless(
   // 最终结果：最后一个工具轮次之后的文本；为空时回退到最后一个文本块
   const result = finalText || (blocks.length > 0 ? blocks[blocks.length - 1]! : '');
 
+  // F-30：只在入口显式提供时输出 sandbox 段（默认用户 JSON 不多任何字段）
+  const sandbox = resolveSandboxState(deps.sandboxState);
+
   return {
     status,
     result,
@@ -273,11 +304,27 @@ export async function runHeadless(
     deniedConfirmations,
     askUserQuestions,
     planApprovals,
+    ...(sandbox ? { sandbox } : {}),
     error: fatalMessage,
     durationMs: Date.now() - startedAt,
     sessionId: ctx.sessionId,
     projectId: ctx.projectId,
   };
+}
+
+/** 读取沙箱快照（函数形态在读失败时降级为「无 sandbox 段」，绝不影响报告生成）。 */
+function resolveSandboxState(
+  source: HeadlessSandboxState | (() => HeadlessSandboxState | undefined) | undefined,
+): HeadlessSandboxState | undefined {
+  if (!source) return undefined;
+  if (typeof source === 'function') {
+    try {
+      return source();
+    } catch {
+      return undefined;
+    }
+  }
+  return source;
 }
 
 // ── 退出码协议 ──────────────────────────────────────────────────────────────
@@ -323,6 +370,8 @@ export interface HeadlessJsonReport {
   denied_confirmations: HeadlessDeniedConfirmation[];
   ask_user_questions: string[];
   plan_approvals: number;
+  /** F-30：仅沙箱显式启用时输出（缺省字段不出现） */
+  sandbox?: HeadlessSandboxState;
   error: string | null;
 }
 
@@ -347,6 +396,8 @@ export function buildHeadlessReport(outcome: HeadlessOutcome): HeadlessJsonRepor
     denied_confirmations: outcome.deniedConfirmations,
     ask_user_questions: outcome.askUserQuestions,
     plan_approvals: outcome.planApprovals,
+    // F-30：沙箱未显式启用时该键完全不出现（AC-30-1 / AC-30-10 后半）
+    ...(outcome.sandbox ? { sandbox: outcome.sandbox } : {}),
     error: outcome.error,
   };
 }

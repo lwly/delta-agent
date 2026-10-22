@@ -64,6 +64,12 @@ export interface ToolContext {
    * SessionStart/Stop/SessionEnd 由运行入口负责触发；缺省 = 不挂钩。
    */
   hooks?: HookManager;
+  /**
+   * F-30 执行沙箱（容器 / 本地执行后端）。
+   * 缺省 = 历史行为：直接经 ShellAdapter 跑宿主 shell，不探测 Docker、不产出 meta（AC-30-1 零影响）。
+   * 内置工具是模块级单例，故注入点只能在 ToolContext（与 permissions/changes/hooks 同构）。
+   */
+  sandbox?: import('../sandbox/executor.js').SandboxExecutor;
 }
 
 /** Skill 加载运行时（engine/session 侧组装 SkillBuffer + 已发现 Skills 后注入） */
