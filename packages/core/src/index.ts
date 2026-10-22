@@ -89,6 +89,7 @@ export { ProviderManager, type ProviderView } from './llm/manager.js';
 export {
   encryptKey,
   decryptKey,
+  decryptKeyDetailed,
   maskKey,
   loadModelsFile,
   saveModelsFile,

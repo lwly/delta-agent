@@ -2,6 +2,7 @@ import type { LLMProvider } from '@y-zero/shared';
 import {
   encryptKey,
   decryptKey,
+  decryptKeyDetailed,
   loadModelsFile,
   saveModelsFile,
   modelsConfigPath,
@@ -154,8 +155,11 @@ export class ProviderManager {
   async createProvider(id: string): Promise<LLMProvider> {
     const stored = this.storedById(id);
     if (!stored) throw new Error(`未找到 provider: ${id}`);
-    const apiKey = decryptKey(stored.apiKey);
-    if (!apiKey) throw new Error(`provider ${id} 的 Key 无法解密（是否换了机器？请重新 add）`);
+    const d = decryptKeyDetailed(stored.apiKey);
+    if (!d.plain) throw new Error(`provider ${id} 的 Key 无法解密（是否换了机器？请重新 add）`);
+    // 旧 hostname 派生方案解密成功 → 透明升级为稳定平台号方案重加密（防 hostname 漂移复发）
+    if (d.scheme === 'legacy-hostname') this.upgradeKeyEncryption(stored.id, d.plain);
+    const apiKey = d.plain;
     if (stored.vendor === 'anthropic') {
       const { AnthropicProvider } = await import('./providers/anthropic.js');
       return new AnthropicProvider({ apiKey, baseUrl: stored.baseUrl, model: stored.model });
@@ -175,6 +179,19 @@ export class ProviderManager {
       baseUrl: stored.baseUrl,
       model: stored.model,
     });
+  }
+
+  /** 用稳定方案重加密某 provider 的 Key 并落盘（一次性升级）。 */
+  private upgradeKeyEncryption(id: string, plainKey: string): void {
+    try {
+      const data = this.load();
+      const p = data.providers.find((x) => x.id === id);
+      if (!p) return;
+      p.apiKey = encryptKey(plainKey);
+      this.save(data);
+    } catch {
+      // 升级失败不影响本次使用（下次仍走 legacy 回退）
+    }
   }
 
   /** Connectivity probe: minimal chat request, returns latency ms. */
