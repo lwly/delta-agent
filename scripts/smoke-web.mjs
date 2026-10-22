@@ -13,9 +13,14 @@ import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const webDistArg = process.argv.indexOf('--web-dist');
-const webDist = webDistArg > 0 ? process.argv[webDistArg + 1] : new URL('../packages/web/dist/', import.meta.url).pathname;
+// fileURLToPath 而非 URL.pathname：Windows 下 pathname 会得到 /C:/... 导致 existsSync 恒 false，
+// 使 webDistDir 退化为 undefined、SPA 断言全部误红（CI 的 windows-latest 会踩到）
+const webDist = webDistArg > 0
+  ? process.argv[webDistArg + 1]
+  : fileURLToPath(new URL('../packages/web/dist/', import.meta.url));
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'yz-smoke-web-'));
 const svc = new SessionService(path.join(tmp, 'db.sqlite'));

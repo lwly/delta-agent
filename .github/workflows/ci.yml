@@ -1,10 +1,19 @@
 # M5 跨平台加固：双平台跑同一套 typecheck + 单测 + 冒烟（technical-design §9）
+#
+# 分支说明：仓库主分支为 master（gitee 远端），此处同时监听 main / master，
+# 便于未来镜像到 GitHub 时零改动复用。
+# 注意：GitHub Actions 不会在 gitee 上运行，本地质量闸门由 pre-push 钩子兜底
+# （见 scripts/hooks/pre-push 与 package.json 的 prepare:hooks）。
 name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
+
+env:
+  # 冒烟要真实 Provider 密钥；未配置 secrets 时整体跳过冒烟步骤，避免 PR/fork 必然红灯
+  HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
 jobs:
   test:
@@ -38,5 +47,14 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # 真机冒烟：走 resolveProviderFromEnv（无硬编码密钥，密钥只来自 secrets/env）。
+      # 属于联调手段而非静态校验，缺密钥时跳过。
       - name: Smoke
+        if: env.HAS_DEEPSEEK_KEY == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: pnpm smoke
+
+      # Web 端冒烟不需要 Provider 密钥，始终执行（F-31 新增用量页已纳入覆盖）
+      - name: Smoke (web)
+        run: pnpm smoke:web
