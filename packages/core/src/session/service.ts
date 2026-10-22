@@ -2,20 +2,23 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import type { ChatMessage, LLMProvider } from '@y-zero/shared';
-import { SessionStore, type SessionRow } from './store.js';
+import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
   return path.join(os.homedir(), '.y-zero', 'agent.db');
 }
 
+export const TRASH_RETENTION_DAYS = 30;
+
 /**
- * M1 minimal SessionService: project auto-registration by cwd,
- * session create/append/history. Full service (trash, restore, search)
- * lands with the M4 Web console.
+ * SessionService：多项目 × 多对话（technical-design §8）。
+ * M4 补全：项目列表、软删除/回收站/恢复/过期清理、会话检索、运行中会话管理。
  */
 export class SessionService {
   readonly store: SessionStore;
+  /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
+  private activeRuns = new Map<string, AbortController>();
 
   constructor(dbPath: string = defaultDbPath()) {
     this.store = new SessionStore(dbPath);
@@ -23,6 +26,34 @@ export class SessionService {
 
   close(): void {
     this.store.close();
+  }
+
+  // ── 运行中会话管理 ────────────────────────────────────────────────────────
+
+  /** 引擎启动时注册；结束时务必 unregisterRun。 */
+  registerRun(sessionId: string, controller: AbortController): void {
+    this.activeRuns.set(sessionId, controller);
+  }
+
+  unregisterRun(sessionId: string): void {
+    this.activeRuns.delete(sessionId);
+  }
+
+  isRunning(sessionId: string): boolean {
+    return this.activeRuns.has(sessionId);
+  }
+
+  /** 中止运行中的会话主循环（删除前调用；等待由调用方完成工具退出）。 */
+  abortRun(sessionId: string): boolean {
+    const c = this.activeRuns.get(sessionId);
+    if (!c) return false;
+    c.abort();
+    this.activeRuns.delete(sessionId);
+    return true;
+  }
+
+  private abortAllProjectRuns(projectId: string): void {
+    for (const s of this.store.listSessions(projectId)) this.abortRun(s.id);
   }
 
   /** Register (or find) the project for a working directory. */
@@ -68,6 +99,65 @@ export class SessionService {
   /** Latest session for a project, to support `yzero` resume-on-start. */
   latestSession(projectId: string): SessionRow | undefined {
     return this.listSessions(projectId)[0];
+  }
+
+  // ── M4：项目/会话管理（§8.2 服务接口）────────────────────────────────────
+
+  listProjects(): ProjectRow[] {
+    return this.store.listProjects();
+  }
+
+  getProject(id: string): ProjectRow | undefined {
+    return this.store.getProject(id);
+  }
+
+  renameSession(id: string, title: string): void {
+    if (!this.store.getSession(id)) throw new Error('session not found');
+    this.store.touchSession(id, { title: title.trim() || undefined });
+  }
+
+  /**
+   * 删除会话：默认软删除（回收站 30 天）；运行中先中止。
+   * hard=true 物理清除（事务内）。
+   */
+  removeSession(id: string, opts?: { hard?: boolean }): void {
+    this.abortRun(id);
+    if (opts?.hard) this.store.hardDeleteSession(id);
+    else this.store.softDeleteSession(id);
+  }
+
+  /**
+   * 移除项目：confirmName 必须与项目名完全一致（双端校验）；
+   * 级联中止运行中会话并软/硬删除；仅解除注册，不触碰源码目录。
+   */
+  removeProject(id: string, confirmName: string, opts?: { hard?: boolean }): void {
+    const project = this.store.getProject(id);
+    if (!project) throw new Error('project not found');
+    if (confirmName !== project.name) throw new Error('confirmName does not match project name');
+    this.abortAllProjectRuns(id);
+    if (opts?.hard) this.store.hardDeleteProject(id);
+    else this.store.softDeleteProject(id);
+  }
+
+  restore(kind: 'project' | 'session', id: string): void {
+    if (kind === 'project') this.store.restoreProject(id);
+    else this.store.restoreSession(id);
+  }
+
+  listTrash(): TrashItem[] {
+    return this.store.listTrash();
+  }
+
+  /** 清理超期软删除（默认 30 天），返回清除条数。 */
+  purgeExpired(days: number = TRASH_RETENTION_DAYS): number {
+    return this.store.purgeExpired(days);
+  }
+
+  /** 会话检索：标题或消息内容（仅存活的会话）。 */
+  searchSessions(query: string, limit = 20): SessionRow[] {
+    const q = query.trim();
+    if (!q) return [];
+    return this.store.searchSessions(q, limit);
   }
 }
 

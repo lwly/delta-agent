@@ -104,8 +104,14 @@ export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './too
 
 export { runReAct, type RunContext } from './engine/react.js';
 
-export { SessionStore, type SessionRow } from './session/store.js';
-export { SessionService, defaultDbPath, resolveProviderFromEnv, type ProviderId } from './session/service.js';
+export { SessionStore, type SessionRow, type ProjectRow, type TrashItem } from './session/store.js';
+export {
+  SessionService,
+  defaultDbPath,
+  resolveProviderFromEnv,
+  TRASH_RETENTION_DAYS,
+  type ProviderId,
+} from './session/service.js';
 
 export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
 
