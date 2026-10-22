@@ -69,7 +69,7 @@ export interface HeadlessOutcome {
 export interface HeadlessService {
   appendMessage(sessionId: string, m: ChatMessage): void;
   getHistory(sessionId: string): ChatMessage[];
-  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number): void;
+  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model?: string): void;
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void;
 }
 
@@ -222,6 +222,7 @@ export async function runHeadless(
               ev.usage.inputTokens,
               ev.usage.outputTokens,
               ev.usage.costUsd ?? 0,
+              ev.model ?? ctx.model,
             );
           }
           break;

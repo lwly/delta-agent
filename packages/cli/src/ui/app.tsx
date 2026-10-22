@@ -337,10 +337,10 @@ export function App(props: AppOptions) {
               });
               props.service.recordCompaction(props.session.id, e.beforeTokens, e.afterTokens, '');
               break;
-            case 'budget_warning':
+            case 'budget_alert':
               addItem({
                 kind: 'system',
-                text: `⚠ 预算告警：已使用 ${(e.usedPct * 100).toFixed(0)}%（可用 /budget 查看，追加预算属 M2 能力）`,
+                text: `⚠ 预算告警（${(e.level * 100).toFixed(0)}%）：token ${(e.usedTokenPct * 100).toFixed(0)}% / 费用 ${(e.usedCostPct * 100).toFixed(0)}%`,
               });
               break;
             case 'budget_exhausted':
@@ -385,6 +385,7 @@ export function App(props: AppOptions) {
                   e.usage.inputTokens,
                   e.usage.outputTokens,
                   e.usage.costUsd ?? 0,
+                  e.model ?? props.session.model,
                 );
               }
               break;

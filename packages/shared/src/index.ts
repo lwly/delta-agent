@@ -155,7 +155,7 @@ export type AgentEvent =
   | { type: 'tool_result'; call: ToolCall; result: ToolResult; ms: number }
   | { type: 'compact_start' }
   | { type: 'compact_done'; beforeTokens: number; afterTokens: number }
-  | { type: 'budget_warning'; usedPct: number }
+  | { type: 'budget_alert'; level: 0.5 | 0.8 | 1.0; usedTokenPct: number; usedCostPct: number }
   | { type: 'budget_exhausted'; summary: string }
   | { type: 'confirm_request'; request: ConfirmRequest }
   | { type: 'plan_approval_request'; request: PlanApprovalRequest }
@@ -165,7 +165,8 @@ export type AgentEvent =
   | { type: 'subtask_done'; nodeId: string; summary: string; ms: number }
   | { type: 'subtask_failed'; nodeId: string; error: string; retries: number }
   | { type: 'review_verdict'; verdict: ReviewVerdict; revision: number }
-  | { type: 'usage'; usage: Usage }
+  /** F-31：usage 事件附带当轮模型（引擎填 ctx.model；老消费端可忽略） */
+  | { type: 'usage'; usage: Usage; model?: string }
   | { type: 'done'; usage: Usage }
   | { type: 'error'; message: string; fatal: boolean };
 

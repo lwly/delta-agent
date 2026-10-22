@@ -226,4 +226,48 @@ describe('runReAct', () => {
     await collect(runReAct(ctx, [], 'hi'));
     expect(seen[0]).toBe('静态段\n\n动态段');
   });
+
+  // ── F-31：usage 事件带 model + budget_alert 分级告警 ──
+
+  it('emits usage events carrying ctx.model (F-31)', async () => {
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }], usage: { input: 20, output: 8 } },
+      { text: '完成', usage: { input: 30, output: 12 } },
+    ]);
+    const events = await collect(
+      runReAct(makeCtx(provider, { toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } }), [], 'hi'),
+    );
+    const usages = events.filter((e): e is Extract<AgentEvent, { type: 'usage' }> => e.type === 'usage');
+    expect(usages).toHaveLength(2);
+    for (const u of usages) expect(u.model).toBe('mock-model');
+  });
+
+  it('emits exactly one budget_alert (level 0.8) when crossing two levels in one turn (F-31)', async () => {
+    const provider = new MockProvider([{ text: '一次性跨级告警', usage: { input: 900, output: 0 } }]);
+    const events = await collect(
+      runReAct(
+        makeCtx(provider, {
+          budget: new BudgetManager({ maxTokens: 1000, maxCostUsd: 1000 }),
+          toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot },
+        }),
+        [],
+        'hi',
+      ),
+    );
+    const alerts = events.filter((e): e is Extract<AgentEvent, { type: 'budget_alert' }> => e.type === 'budget_alert');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.level).toBe(0.8);
+    expect(alerts[0]!.usedTokenPct).toBeCloseTo(0.9);
+    // 告警在 usage 事件之后、同轮内发出
+    const types = events.map((e) => e.type);
+    expect(types.indexOf('budget_alert')).toBeGreaterThan(types.lastIndexOf('usage'));
+  });
+
+  it('emits no budget_alert below 50% (F-31)', async () => {
+    const provider = new MockProvider([{ text: '小额消耗', usage: { input: 100, output: 20 } }]);
+    const events = await collect(
+      runReAct(makeCtx(provider, { toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } }), [], 'hi'),
+    );
+    expect(events.some((e) => e.type === 'budget_alert')).toBe(false);
+  });
 });

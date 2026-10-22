@@ -185,6 +185,8 @@ export class SessionHub {
     let assistantText = '';
     const collectedCalls: ToolCall[] = [];
     let assistantSaved = false;
+    // F-31：usage 事件计数器（每轮 +1），逐轮落库（D5，替代 done 一次性 turn=0）
+    let usageTurn = 0;
     const saveAssistantWithCalls = () => {
       if (assistantSaved) return;
       service.appendMessage(sessionId, {
@@ -325,12 +327,24 @@ export class SessionHub {
             });
             break;
           }
+          case 'usage': {
+            // F-31：逐轮落库（每条 usage 事件一行；子代理用量事件同样计入，口径 = usage 行数）
+            usageTurn++;
+            service.recordUsage(
+              sessionId,
+              usageTurn,
+              ev.usage.inputTokens,
+              ev.usage.outputTokens,
+              ev.usage.costUsd ?? 0,
+              ev.model ?? ctx.model,
+            );
+            break;
+          }
           case 'done': {
             if (!assistantSaved && assistantText) {
               service.appendMessage(sessionId, { role: 'assistant', content: assistantText });
             }
             assistantSaved = true;
-            service.recordUsage(sessionId, 0, ev.usage.inputTokens, ev.usage.outputTokens, ev.usage.costUsd ?? 0);
             // 记忆里程碑：任务结束自动提炼（0-3 条候选进待确认队列；默认开启）
             if (this.deps.autoDistill !== false && !ac.signal.aborted) {
               const transcript = service

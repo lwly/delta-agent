@@ -98,14 +98,12 @@ export async function* runReAct(
       yield { type: 'turn_start', turn };
 
       // ── budget guard (before LLM call) ──
+      // F-31：分级告警改在 record 之后判定（D7），轮首仅保留 100% 硬停检查（行为不变）
       const guard = ctx.budget.guard();
       if (guard.exceeded) {
         const summary = ctx.budget.summarize();
         yield { type: 'budget_exhausted', summary };
         return;
-      }
-      if (ctx.budget.shouldWarn()) {
-        yield { type: 'budget_warning', usedPct: Math.max(guard.usedTokenPct, guard.usedCostPct) };
       }
 
       // ── auto compaction (80% trigger / 55% target) ──
@@ -156,10 +154,13 @@ export async function* runReAct(
       if (!round) throw new Error('llm stream produced no result');
       const { text, toolCalls, usage } = round;
       ctx.budget.record(usage);
+      // ── F-31：record 后立即判定分级告警（D7：覆盖最后一轮跨阈值的死角；100% 告警先于下一轮轮首的 budget_exhausted）──
+      const alert = ctx.budget.takeAlert();
       usageTotal.inputTokens += usage.inputTokens;
       usageTotal.outputTokens += usage.outputTokens;
       usageTotal.costUsd = (usageTotal.costUsd ?? 0) + (usage.costUsd ?? 0);
-      yield { type: 'usage', usage };
+      yield { type: 'usage', usage, model: ctx.model };
+      if (alert) yield { type: 'budget_alert', ...alert };
 
       if (toolCalls.length === 0) {
         // terminal answer

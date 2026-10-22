@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant E as 引擎 runReAct（第 N 轮）
+    participant B as BudgetManager
+    participant L as LLM Provider
+    participant C as 消费端 hub / TUI / headless
+    participant S as SessionService→Store
+    participant DB as SQLite（usage 表）
+    participant W as Web 前端（SSE）
+
+    E->>B: guard()（轮首硬停检查，≥100% → budget_exhausted → return，行为不变）
+    E->>L: chat(messages, tools) [SSE]
+    L-->>E: usage { input, output, cost }
+    E->>B: record(usage)
+    E->>B: takeAlert()（分级状态机：跨级只发最高级，每级一次）
+    B-->>E: BudgetAlert | null
+    E-->>C: AgentEvent { type:'usage', usage, model: ctx.model }
+    E-->>C: AgentEvent { type:'budget_alert', level, usedTokenPct, usedCostPct }（有则发）
+
+    C->>S: recordUsage(sessionId, turn, in, out, cost, model)
+    S->>DB: INSERT INTO usage(..., model, created_at)
+
+    alt Web（SessionHub）
+        C-->>W: SSE 转发 usage / budget_alert（HubEvent 透传，零改动）
+        W->>W: chat store → notice（toast + 事件卡片）
+    else TUI（ink）
+        C->>C: 系统行「⚠ 预算告警（xx%）」
+    else headless
+        C->>C: stderr NOTICE（--json 不污染 stdout）
+    end
+
+    Note over E,B: 下一轮轮首 guard：若达 100% → budget_exhausted（100% 告警已在 record 后先行发出）
+
+    Note over C,DB: 事后查询：GET /api/usage/summary（或 yzero usage / Web /usage 面板）
+    C->>S: usageStore.summary({ range, projectId })
+    S->>DB: 3 条聚合 SQL（totals / byProject / byModel）
+    DB-->>S: 聚合行（含软删除会话费用）
+    S-->>C: UsageReport（API / CLI --json 同构）

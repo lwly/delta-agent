@@ -25,6 +25,7 @@ import {
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
+import { usageCommand, type UsageCommandOptions } from './usage.js';
 import { evalsListCommand, evalsRunCommand, type EvalsOptions } from './evals.js';
 import {
   normalizeGitPolicy,
@@ -248,6 +249,19 @@ memory
     const service = new SessionService(opts.database);
     console.log(service.memory.remove(id, opts.hard) ? '✔ 已删除' : '✘ 未找到该记忆');
     service.close();
+  });
+
+// ── yzero usage：F-31 成本与用量报告 ────────────────────────────────────
+
+program
+  .command('usage')
+  .description('查看费用与 token 用量报告（按项目 / 模型 / 会话聚合；--json 与 /api/usage/summary 同构）')
+  .option('--range <range>', '时间范围：today | 7d | 30d | all（默认 all，非法值归一化为 all）', 'all')
+  .option('--project <id|name>', '按项目过滤（支持项目 id 或名称）')
+  .option('--json', 'stdout 输出结构化 JSON（与 GET /api/usage/summary 同构，可直接供 jq 消费）', false)
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action(async (opts: UsageCommandOptions) => {
+    await usageCommand(opts);
   });
 
 // ── yzero migrate：F-35 Schema 版本迁移 ─────────────────────────────────
@@ -558,7 +572,7 @@ program
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

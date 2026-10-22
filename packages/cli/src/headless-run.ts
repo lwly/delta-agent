@@ -222,8 +222,10 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       console.error(`⚙ ${ev.call.name}${brief.length > 160 ? ` ${brief.slice(0, 160)}…` : ` ${brief}`}`);
     } else if (ev.type === 'tool_result') {
       console.error(`${ev.result.ok ? '✔' : '✘'} ${ev.call.name}（${ev.ms}ms）`);
-    } else if (ev.type === 'budget_warning') {
-      console.error(`⚠ 预算告警：已使用 ${(ev.usedPct * 100).toFixed(0)}%`);
+    } else if (ev.type === 'budget_alert') {
+      console.error(
+        `⚠ 预算告警：${(ev.level * 100).toFixed(0)}%（token ${(ev.usedTokenPct * 100).toFixed(0)}% / 费用 ${(ev.usedCostPct * 100).toFixed(0)}%）`,
+      );
     } else if (ev.type === 'compact_done') {
       console.error(`🗜 上下文压缩：${ev.beforeTokens} → ${ev.afterTokens} tokens`);
     }

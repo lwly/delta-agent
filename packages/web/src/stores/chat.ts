@@ -103,9 +103,13 @@ export const useChatStore = defineStore('chat', {
         case 'compact_done':
           this.notice(`上下文已压缩：${ev.beforeTokens} → ${ev.afterTokens} tokens`);
           break;
-        case 'budget_warning':
-          this.notice(`⚠ 预算已用 ${Math.round(Number(ev.usedPct) * 100)}%`);
+        case 'budget_alert': {
+          const level = Math.round(Number(ev.level) * 100);
+          const tokenPct = Math.round(Number(ev.usedTokenPct) * 100);
+          const costPct = Math.round(Number(ev.usedCostPct) * 100);
+          this.notice(`⚠ 预算告警（${level}%）：token ${tokenPct}% / 费用 ${costPct}%`);
           break;
+        }
         case 'budget_exhausted':
           this.notice(`⚠ ${String(ev.summary ?? '预算耗尽')}`);
           break;

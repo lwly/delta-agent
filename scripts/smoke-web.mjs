@@ -103,6 +103,22 @@ const confirmMiss = await (await fetch(`${base}/api/sessions/${session.id}/confi
 })).json();
 check('confirm 端点连通（无待确认 → 404 语义）', confirmMiss.error === 'no pending confirm');
 
+// 5. F-31 usage 端点（汇总 + 逐会话；非法 range 归一化 all 并回显）
+const usageSummary = await (await fetch(`${base}/api/usage/summary?range=bogus`)).json();
+check(
+  'usage summary 端点连通 + 非法 range 回显 all',
+  usageSummary.range === 'all' &&
+    usageSummary.project === null &&
+    typeof usageSummary.totals?.cost_usd === 'number' &&
+    Array.isArray(usageSummary.by_project) &&
+    Array.isArray(usageSummary.by_model),
+);
+const usageSessions = await (await fetch(`${base}/api/usage/sessions`)).json();
+check(
+  'usage sessions 端点连通（空数据返回空列表）',
+  usageSessions.range === 'all' && Array.isArray(usageSessions.items) && usageSessions.items.length === 0,
+);
+
 server.close();
 svc.close();
 console.log(failed === 0 ? '\n✔ Web 冒烟全部通过' : `\n✘ ${failed} 项失败`);

@@ -266,9 +266,13 @@ export class SessionStore {
       .run(sessionId, before, after, JSON.stringify({ summary }), new Date().toISOString());
   }
 
-  recordUsage(sessionId: string, turn: number, inputTokens: number, outputTokens: number, costUsd: number): void {
+  /**
+   * F-31：逐轮用量落库。model 为可选尾参（缺省 ''，调用方从引擎 usage 事件透传）；
+   * created_at 由 store 内部生成（ISO 8601 UTC，对齐 projects/sessions 存法），调用方禁止自传。
+   */
+  recordUsage(sessionId: string, turn: number, inputTokens: number, outputTokens: number, costUsd: number, model = ''): void {
     this.db
-      .prepare('INSERT INTO usage (session_id, turn, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?)')
-      .run(sessionId, turn, inputTokens, outputTokens, costUsd);
+      .prepare('INSERT INTO usage (session_id, turn, input_tokens, output_tokens, cost_usd, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(sessionId, turn, inputTokens, outputTokens, costUsd, model, new Date().toISOString());
   }
 }

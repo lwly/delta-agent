@@ -133,9 +133,26 @@ CREATE TABLE IF NOT EXISTS message_embeddings (
 );
 `;
 
+/** v3：F-31 用量报告——usage 补 model / created_at 并回填（会话级近似，裁决 #1） */
+const MIGRATION_V3_F31_USAGE_REPORT = `
+ALTER TABLE usage ADD COLUMN model TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage ADD COLUMN created_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_usage_created_at ON usage(created_at);
+
+-- 回填（幂等：重跑结果相同）。usage.session_id 关联 sessions.id（无外键约束，
+-- 历史数据可能孤儿行，COALESCE 兜底不阻塞迁移）
+UPDATE usage SET created_at = COALESCE(created_at,
+  (SELECT s.created_at FROM sessions s WHERE s.id = usage.session_id));
+-- 列名必须全限定：子查询的 sessions 也有 model，裸 model 会报 ambiguous column name
+UPDATE usage SET model = CASE WHEN usage.model = ''
+  THEN COALESCE((SELECT s.model FROM sessions s WHERE s.id = usage.session_id), '')
+  ELSE usage.model END;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'baseline-core-tables', sql: MIGRATION_V1_BASELINE },
   { version: 2, name: 'f17-search-indexes', sql: MIGRATION_V2_F17_SEARCH },
+  { version: 3, name: 'f31-usage-report', sql: MIGRATION_V3_F31_USAGE_REPORT },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

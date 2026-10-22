@@ -13,6 +13,7 @@ import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
+import { normalizeRange, usageReportToJson } from '../session/usage.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -324,6 +325,21 @@ export function createWebServer(opts: ServeOptions): http.Server {
           if (method === 'DELETE') {
             return json(res, 200, { ok: mem.remove(id, url.searchParams.get('hard') === 'true') });
           }
+        }
+      }
+
+      // ── usage（F-31 成本与用量报告：聚合汇总 + 逐会话明细）────────────────
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'usage' && parts.length === 3) {
+        // 非法 range 归一化为 all 并在响应中回显实际生效范围
+        const range = normalizeRange(url.searchParams.get('range'));
+        const project = url.searchParams.get('project') ?? undefined;
+        if (parts[2] === 'summary') {
+          const report = service.usage.summary({ range, projectId: project });
+          return json(res, 200, usageReportToJson(report, project ?? null));
+        }
+        if (parts[2] === 'sessions') {
+          const items = service.usage.bySession({ range, projectId: project });
+          return json(res, 200, { range, project: project ?? null, items });
         }
       }
 

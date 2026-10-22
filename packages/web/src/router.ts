@@ -30,5 +30,10 @@ export const router = createRouter({
       name: 'memory',
       component: () => import('./views/MemoryView.vue'),
     },
+    {
+      path: '/usage',
+      name: 'usage',
+      component: () => import('./views/UsageView.vue'),
+    },
   ],
 });

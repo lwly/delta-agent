@@ -146,6 +146,48 @@ export interface MessageHit {
   via: 'fulltext' | 'semantic' | 'hybrid';
 }
 
+// ── F-31 成本与用量报告（snake_case，与 API/CLI --json 同构）──────────────
+
+export type UsageRange = 'today' | '7d' | '30d' | 'all';
+
+export interface UsageTotals {
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  turns: number;
+  sessions: number;
+}
+
+export interface UsageProjectRow extends UsageTotals {
+  project_id: string | null;
+  project_name: string;
+}
+
+export interface UsageModelRow extends UsageTotals {
+  model: string;
+}
+
+export interface UsageSessionRow extends UsageTotals {
+  session_id: string;
+  project_id: string;
+  title: string;
+  model: string;
+}
+
+export interface UsageSummary {
+  range: UsageRange;
+  project: string | null;
+  totals: UsageTotals;
+  by_project: UsageProjectRow[];
+  by_model: UsageModelRow[];
+}
+
+export interface UsageSessions {
+  range: UsageRange;
+  project: string | null;
+  items: UsageSessionRow[];
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -211,4 +253,20 @@ export const api = {
   rejectMemory: (id: string) => request<{ ok: boolean }>('POST', `/api/memory/${id}/reject`),
   previewRecall: (query: string, scopes?: string[]) =>
     request<MemoryItem[]>('POST', '/api/memory/recall', { query, scopes }),
+
+  // usage（F-31 成本与用量报告）
+  usageSummary: (range?: UsageRange, project?: string) => {
+    const q = new URLSearchParams();
+    if (range) q.set('range', range);
+    if (project) q.set('project', project);
+    const qs = q.toString();
+    return request<UsageSummary>('GET', `/api/usage/summary${qs ? `?${qs}` : ''}`);
+  },
+  usageSessions: (range?: UsageRange, project?: string) => {
+    const q = new URLSearchParams();
+    if (range) q.set('range', range);
+    if (project) q.set('project', project);
+    const qs = q.toString();
+    return request<UsageSessions>('GET', `/api/usage/sessions${qs ? `?${qs}` : ''}`);
+  },
 };

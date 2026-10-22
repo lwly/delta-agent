@@ -7,6 +7,7 @@ import { TaskStore } from './tasks.js';
 import { MemoryStore } from './memory.js';
 import { FileChangeStore } from './changes.js';
 import { SearchStore, type SearchOptions, type SearchHit } from './search.js';
+import { UsageStore } from './usage.js';
 import { resolveEmbedding } from '../llm/embeddings.js';
 
 /** Default DB location: ~/.y-zero/agent.db */
@@ -30,6 +31,8 @@ export class SessionService {
   readonly changes: FileChangeStore;
   /** F-17 对话检索（同库 messages_fts + message_embeddings：全文 + 语义混合） */
   readonly search: SearchStore;
+  /** F-31 成本与用量报告（同库 usage 表：只读聚合查询） */
+  readonly usage: UsageStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
@@ -39,6 +42,7 @@ export class SessionService {
     this.memory = new MemoryStore(this.store.db);
     this.changes = new FileChangeStore(this.store.db);
     this.search = new SearchStore(this.store.db, opts?.embedderFactory ?? resolveEmbedding);
+    this.usage = new UsageStore(this.store.db);
   }
 
   /**
@@ -204,8 +208,8 @@ export class SessionService {
     };
   }
 
-  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number): void {
-    this.store.recordUsage(sessionId, turn, input, output, costUsd);
+  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model = ''): void {
+    this.store.recordUsage(sessionId, turn, input, output, costUsd, model);
   }
 
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void {

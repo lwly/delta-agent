@@ -6,6 +6,7 @@ const nav = [
   { path: '/projects', label: '项目与对话' },
   { path: '/settings', label: '设置中心' },
   { path: '/memory', label: '记忆面板' },
+  { path: '/usage', label: '用量报告' },
 ];</script>
 
 <template>

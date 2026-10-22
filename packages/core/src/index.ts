@@ -4,7 +4,10 @@ export { estimateTextTokens, estimateMessagesTokens } from './context/tokens.js'
 export {
   BudgetManager,
   DEFAULT_SESSION_BUDGET,
+  BUDGET_ALERT_LEVELS,
   type BudgetGuardResult,
+  type BudgetAlert,
+  type BudgetAlertLevel,
 } from './context/budget.js';
 export {
   compact,
@@ -292,6 +295,20 @@ export {
   type SearchOptions,
   type SearchHit,
 } from './session/search.js';
+export {
+  UsageStore,
+  normalizeRange,
+  rangeCutoff,
+  usageReportToJson,
+  type UsageRange,
+  type UsageFilter,
+  type UsageTotals,
+  type UsageProjectRow,
+  type UsageModelRow,
+  type UsageSessionRow,
+  type UsageReport,
+  type UsageReportJson,
+} from './session/usage.js';
 export {
   EmbeddingClient,
   resolveEmbedding,
