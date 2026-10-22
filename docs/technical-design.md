@@ -302,7 +302,7 @@ interface ProviderRegistry {
 
 ## 5. 7 层系统提示词组装 + 三级覆盖
 
-> 静态/动态 Prompt 分工、缓存复用双层策略、Prompt Builder（组装/去重/裁剪/格式化）与模式提示词的完整设计见 `docs/prompt-design.md`。
+> 静态/动态 Prompt 分工、缓存复用双层策略、Prompt Builder（组装/去重/裁剪/格式化）与模式提示词的完整设计见 `docs/prompt-design.md`。**M3 已实现**（packages/core/src/prompt/：PromptAssembler/SplitPromptAssembler/PromptBuilder + 静态缓存 + 每轮动态注入）；Plan/Multi-Agent 模式提示词段位已预留，M5 落地。
 
 ```typescript
 interface PromptLayer {
@@ -378,7 +378,7 @@ class PromptAssembler {
 
 ## 7. Skills 系统（已升级为分层体系，详见 agent-modes-design.md §7）
 
-> 本节为 MVP 简化版；完整设计（三层覆盖 / SKILL.md+references+scripts 包结构 / 两阶段按需加载 / 匹配评分）以 `docs/agent-modes-design.md` §7 为准。
+> 本节为 MVP 简化版；完整设计（三层覆盖 / SKILL.md+references+scripts 包结构 / 两阶段按需加载 / 匹配评分）以 `docs/agent-modes-design.md` §7 为准。**M3 已按该节实现**（packages/core/src/skills/ + 内置 3 Skills + load_skill/unload_skill 工具）。
 
 ```yaml
 # .y-zero/skills/commit-review/skill.yaml

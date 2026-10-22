@@ -194,7 +194,7 @@ skill-name/
 
 ```
 ① Skill 索引进入当前 Prompt：仅注入 name + description + 触发词（轻量，常驻）
-② LLM 判断需要某技能 → 调用 load_skill("skill-name")   ← 新增内置工具（13 → 14）
+② LLM 判断需要某技能 → 调用 load_skill("skill-name")   ← M3 已落地（内置工具 11 → 13：+load_skill/unload_skill）
 ③ 引擎读取该 Skill 的 SKILL.md 主体 + references 索引
 ④ 内容写入「跨轮次缓冲区」（SkillBuffer）
 ⑤ 下一轮组装 Prompt 时：缓冲区内容注入 L5 Skills 层（标记"已加载的专家内容"）
@@ -216,7 +216,7 @@ skill-name/
      + 描述命中 ×2
 ```
 
-**滑动窗口中文分词**：对查询做窗口 2/3/4 的 n-gram 切分并去重（"数据库性能优化" → 数据库/性能/优化/数据库性能/性能优化/数据库性能优化…），解决中文无空格分词的召回问题；英文按词切分。
+**滑动窗口中文分词**：对查询做窗口 2/3/4 的 n-gram 切分并去重（"数据库性能优化" 切出 数据库/据库性/库性能/性能/优化/数据库性/据库性能/库性能优/性能优化 等，节选；窗口上限 4，不产生 5 字以上切片），解决中文无空格分词的召回问题；英文按词切分。
 
 - Top-1 且分数 ≥ 阈值（默认 5000）→ 提示用户"检测到可用技能，是否加载？"
 - 否则不主动打扰，仅靠模型看到索引自行调用 `load_skill`
@@ -226,11 +226,11 @@ skill-name/
 
 | 文档 | 修订 |
 |------|------|
-| PRD | F-14/F-15/F-16 细化指向本文档；F-06 工具数 13 → 14（+`load_skill`） |
+| PRD | F-14/F-15/F-16 细化指向本文档；F-06 工具数 11 → 13（+`load_skill`/`unload_skill`，记忆工具 save_memory/recall_memory 在记忆里程碑再加） |
 | technical-design.md | §2 Plan/Multi-Agent 桩指向本文档；§7 Skills 标注已被本文档 §7 取代 |
 | 里程碑 | M3 增加两阶段加载与评分匹配；M5 增加 Worker Pool + 任务恢复 |
 
 ## 9. 里程碑归属
 
-- M3：Skill 三层加载 + 两阶段加载 + 匹配评分 + `load_skill` 工具
+- M3：Skill 三层加载 + 两阶段加载 + 匹配评分 + `load_skill` 工具 ✅ 2026-10-22 交付（含 unload_skill 与 suggestSkill 自动触发 TUI 询问）
 - M5：Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务状态机/租约/崩溃恢复（Multi-Agent 完整形态）
