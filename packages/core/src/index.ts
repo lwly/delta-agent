@@ -137,6 +137,39 @@ export {
   type HeadlessDeniedConfirmation,
   type HeadlessToolCallSummary,
 } from './headless.js';
+// F-28 Evals 评测体系：基准集 + 确定性判分 + 运行器 + 报告/回归基线
+export {
+  evaluateChecks,
+  validateChecks,
+} from './evals/checks.js';
+export { runEvalSuite, validateSuite, type RunSuiteOptions } from './evals/runner.js';
+export {
+  BUILTIN_SUITE,
+  BUILTIN_SUITE_NAME,
+  loadEvalSuite,
+  filterCases,
+} from './evals/suites.js';
+export {
+  renderSuiteRun,
+  renderComparison,
+  renderComparisonText,
+  buildBaseline,
+  saveBaseline,
+  loadBaseline,
+  compareBaseline,
+  type BaselineFile,
+  type BaselineComparison,
+} from './evals/report.js';
+export type {
+  EvalCheck,
+  EvalCase,
+  EvalSuite,
+  CheckResult,
+  CaseResult,
+  SuiteSummary,
+  SuiteRun,
+  CaseRunner,
+} from './evals/types.js';
 export {
   runPlanExecute,
   summarize,

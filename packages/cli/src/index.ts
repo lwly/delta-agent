@@ -25,6 +25,7 @@ import {
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
+import { evalsListCommand, evalsRunCommand, type EvalsOptions } from './evals.js';
 import {
   normalizeGitPolicy,
   normalizeMode,
@@ -47,6 +48,10 @@ interface CliOpts {
 }
 
 const program = new Command();
+
+// F-28 evals 等子命令与根命令重复声明了 --model/--provider/--db：开启位置选项语义，
+// 使子命令位置参数之后的选项由子命令解析（否则父命令声明遮蔽子命令同名选项，值丢失）。
+program.enablePositionalOptions();
 
 program
   .name('yzero')
@@ -478,6 +483,48 @@ program
     }
   });
 
+// ── yzero evals：F-28 评测体系 ───────────────────────────────────────────
+
+program
+  .command('evals')
+  .description('F-28 Evals 评测体系：本地任务基准集 + 多 Provider 横向对比 + 回归基线保护')
+  .argument('[sub]', 'list | run | baseline（缺省 run）')
+  .addHelpText(
+    'after',
+    `
+子命令：
+  yzero evals list                                查看内置/项目基准集
+  yzero evals run [options]                       运行基准集（--provider a,b,c 横向对比）
+  yzero evals baseline --save [options]           保存当前结果为回归基线（.y-zero/evals/baseline.json）
+  yzero evals baseline --check [options]          重跑并对比基线，回归即退出码 1
+
+自定义套件：.y-zero/evals/suite.json（{"name","cases":[{id,title,task,checks}]}），--suite 指定任意路径。`,
+  )
+  .option('--suite <path>', '基准集 JSON 路径（缺省用内置 builtin-core）')
+  .option('--provider <ids>', 'Provider（逗号分隔可多个，横评对比；缺省自动探测）')
+  .option('-m, --model <model>', '指定模型名')
+  .option('--tag <tag>', '只跑指定标签的用例')
+  .option('--only <ids>', '只跑指定用例 id（逗号分隔）')
+  .option('--json', 'stdout 输出结构化 JSON（SuiteRun 数组）', false)
+  .option('--output <file>', 'Markdown 报告落文件')
+  .option('--save', 'baseline 模式：保存为基线', false)
+  .option('--check', 'baseline 模式：对比基线（回归 → 退出码 1）', false)
+  .option('--max-turns <n>', '单用例最大轮次', '30')
+  .option('--max-cost <usd>', '单用例费用预算（USD，默认 0.7）')
+  .option('--permission <mode>', 'F-23 权限模式：plan | default | yolo（写类用例需放行）', 'default')
+  .option('--yolo', 'YOLO 第二重开关（与 --permission yolo 同时使用）')
+  .option('--allow <tools>', '工具级 allowlist（逗号分隔）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .action(async (sub: string | undefined, opts: EvalsOptions) => {
+    if (sub && !['list', 'run', 'baseline'].includes(sub)) {
+      console.error('✘ 未知子命令，可用：list / run / baseline');
+      process.exitCode = 1;
+      return;
+    }
+    if (sub === 'list') await evalsListCommand(opts);
+    else await evalsRunCommand(opts);
+  });
+
 // ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
 
 /** F-25：--image 可重复参数收集。 */
@@ -511,7 +558,7 @@ program
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
