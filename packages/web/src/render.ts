@@ -1,7 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import DOMPurify from 'dompurify';
-import 'highlight.js/styles/github.css';
+import 'highlight.js/styles/github-dark.css'; // 深色主题，与工作台设计系统一致
 
 /** 输入端隐形 Markdown 支持（technical-design §3.5）：渲染端 markdown-it + highlight.js + DOMPurify */
 const md = new MarkdownIt({

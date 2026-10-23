@@ -121,34 +121,37 @@ onMounted(loadRuns);
 </template>
 
 <style scoped>
-.page { color: #1f2328; padding: 20px 28px; max-width: 1100px; margin: 0 auto; }
+/* 深色主题：与工作台（prototype/index.html 设计系统）一致 */
+.page { color: var(--text); padding: 20px 28px; max-width: 1100px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
 .head { display: flex; align-items: baseline; gap: 12px; }
 h2 { margin: 0; font-size: 18px; }
-.muted { color: #8b949e; font-size: 13px; }
-.back { margin-left: auto; font-size: 13px; color: #0969da; text-decoration: none; }
-.error { color: #cf222e; }
-.layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 14px; }
-.runs { border: 1px solid #d0d7de; border-radius: 8px; padding: 10px; max-height: 75vh; overflow-y: auto; }
+.muted { color: var(--text-faint); font-size: 13px; }
+.back { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
+.back:hover { text-decoration: underline; }
+.error { color: var(--red); }
+.layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 14px; flex: 1; min-height: 0; }
+.runs { border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow-y: auto; background: var(--bg-panel); }
 .runs h3 { margin: 0 0 8px; font-size: 14px; }
-.run { padding: 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
-.run:hover { background: #f6f8fa; }
-.run.active { background: #ddf4ff; border-color: #0969da; }
+.run { padding: 8px; border-radius: 7px; cursor: pointer; border: 1px solid transparent; }
+.run:hover { background: var(--bg-hover); }
+.run.active { background: var(--accent-soft); border-color: rgba(88, 166, 255, 0.4); }
 .run .preview { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run .meta { color: #8b949e; font-size: 12px; margin-top: 2px; }
-.timeline { border: 1px solid #d0d7de; border-radius: 8px; padding: 12px 16px; max-height: 75vh; overflow-y: auto; }
-.tl-head { color: #57606a; font-size: 13px; border-bottom: 1px solid #d0d7de; padding-bottom: 8px; }
+.run .meta { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
+.timeline { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; overflow-y: auto; background: var(--bg-panel); }
+.tl-head { color: var(--text-dim); font-size: 13px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .step { display: flex; gap: 10px; margin: 12px 0; }
 .icon { width: 28px; text-align: center; }
 .body { flex: 1; min-width: 0; }
-.when { color: #8b949e; font-size: 11px; }
-.text { border-radius: 8px; padding: 8px 12px; margin-top: 2px; white-space: pre-wrap; font-size: 13px; }
-.text.user { background: #1f883d; color: #fff; display: inline-block; }
-.text.assistant { background: #f6f8fa; border: 1px solid #d0d7de; }
-.toolcall { border: 1px solid #d0d7de; border-radius: 6px; padding: 8px 10px; font-size: 13px; background: #fff; }
+.when { color: var(--text-faint); font-size: 11px; }
+.text { border-radius: 10px; padding: 8px 12px; margin-top: 2px; white-space: pre-wrap; font-size: 13px; }
+.text.user { background: var(--accent-soft); border: 1px solid rgba(88, 166, 255, 0.25); display: inline-block; }
+.text.assistant { background: var(--bg-elevated); border: 1px solid var(--border); }
+.toolcall { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--bg-elevated); }
 .call-head { display: flex; gap: 10px; align-items: center; }
-.call-head .ok { color: #1a7f37; font-size: 12px; }
-.call-head .fail { color: #cf222e; font-size: 12px; }
-.args, .result { background: #f6f8fa; border-radius: 4px; padding: 6px 8px; font-size: 12px; overflow-x: auto; max-height: 200px; overflow-y: auto; margin: 6px 0 0; }
+.call-head code { font-family: var(--mono); color: var(--accent); }
+.call-head .ok { color: var(--green); font-size: 12px; }
+.call-head .fail { color: var(--red); font-size: 12px; }
+.args, .result { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: var(--mono); overflow-x: auto; max-height: 200px; overflow-y: auto; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); }
 .result { max-height: 300px; }
-.empty { color: #8b949e; text-align: center; padding: 30px; }
+.empty { color: var(--text-faint); text-align: center; padding: 30px; }
 </style>

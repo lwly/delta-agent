@@ -198,6 +198,18 @@ export interface UsageSessions {
   items: UsageSessionRow[];
 }
 
+// ── F-04a Provider 管理视图（工作台模型配置弹窗与模型下拉共用）──────────────
+
+export interface ProviderView {
+  id: string;
+  vendor: string;
+  baseUrl?: string;
+  model?: string;
+  enabled: boolean;
+  default: boolean;
+  keyMasked: string;
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),

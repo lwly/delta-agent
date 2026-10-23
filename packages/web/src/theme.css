@@ -1,0 +1,85 @@
+/* 全局主题：与 prototype/index.html 高保真原型同一套设计系统（GitHub Dark 色系） */
+:root {
+  --bg: #0d1117;
+  --bg-panel: #161b22;
+  --bg-elevated: #1c2128;
+  --bg-hover: #22272e;
+  --border: #2d333b;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --text-faint: #6e7681;
+  --accent: #58a6ff;
+  --accent-soft: rgba(88, 166, 255, 0.12);
+  --green: #3fb950;
+  --green-soft: rgba(63, 185, 80, 0.12);
+  --orange: #d29922;
+  --orange-soft: rgba(210, 153, 34, 0.12);
+  --red: #f85149;
+  --red-soft: rgba(248, 81, 73, 0.12);
+  --purple: #bc8cff;
+  --purple-soft: rgba(188, 140, 255, 0.12);
+  --mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --sans: -apple-system, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { height: 100%; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 通用暗色表单控件（弹窗内复用） */
+input, textarea, select, button { font-family: inherit; }
+input, textarea, select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 11px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+input:focus, textarea:focus, select:focus { border-color: rgba(88, 166, 255, 0.5); }
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+
+/* 通用按钮 */
+.btn {
+  padding: 7px 14px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  color: var(--text); font-size: 12.5px; cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover { background: var(--bg-hover); border-color: #444c56; }
+.btn.primary {
+  background: linear-gradient(135deg, #58a6ff, #4c8dff);
+  border: none; color: #fff; font-weight: 600;
+}
+.btn.primary:hover { opacity: 0.88; }
+.btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.danger { color: var(--red); }
+.btn.danger:hover { border-color: rgba(248, 81, 73, 0.5); background: var(--red-soft); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 会话模式徽标（react / plan / multi 三色） */
+.mode-tag { font-size: 9.5px; padding: 1px 5px; border-radius: 4px; font-family: var(--mono); }
+.mode-tag.react { background: var(--green-soft); color: var(--green); }
+.mode-tag.plan { background: var(--orange-soft); color: var(--orange); }
+.mode-tag.multi { background: var(--purple-soft); color: var(--purple); }
+
+/* 记忆类型徽标配色 */
+.mem-kind { font-size: 9.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
+.mem-kind.preference { background: var(--purple-soft); color: var(--purple); }
+.mem-kind.fact { background: var(--accent-soft); color: var(--accent); }
+.mem-kind.decision { background: var(--green-soft); color: var(--green); }
+.mem-kind.pitfall { background: var(--red-soft); color: var(--red); }
+.mem-kind.workflow { background: var(--orange-soft); color: var(--orange); }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
