@@ -2,7 +2,7 @@
 // 工作台主页（对齐 prototype/index.html 高保真原型）：
 // 左侧「项目 × 会话」树形侧边栏 + 主区对话流（工具卡片/事件卡/审批卡）+ 底部输入区
 // 记忆 / 模型配置 / 用量 / 回收站 / 检索均为弹窗；回放走独立路由 /replay/:sessionId
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
 import { api, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
@@ -96,6 +96,30 @@ onMounted(async () => {
   void refreshProviders();
   void refreshMemoryBadge();
 });
+
+// ── PASI-9：会话运行态（执行中支持暂停 / 禁止删除）──────────
+// 轮询运行中会话 id：侧栏据此切换 ⏸（暂停）/ ✕（删除）按钮；暂停态来自会话行 status
+const RUN_POLL_MS = 5000;
+let runPollTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  void ws.refreshRunning();
+  runPollTimer = setInterval(() => void ws.refreshRunning(), RUN_POLL_MS);
+});
+onUnmounted(() => {
+  if (runPollTimer) clearInterval(runPollTimer);
+});
+function isSessionRunning(id: string): boolean {
+  return ws.runningIds.includes(id);
+}
+/** 暂停侧栏会话：中止本轮执行并落库 paused（发消息即恢复） */
+async function pauseSession(id: string) {
+  error.value = '';
+  try {
+    await ws.pauseSession(id);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
 
 async function refreshProviders() {
   try {
@@ -579,8 +603,12 @@ watch(showMemory, (open) => {
             >
               <span class="session-icon">💬</span>
               <span class="session-title" :title="s.title">{{ s.title }}</span>
+              <span v-if="isSessionRunning(s.id)" class="mode-tag running" title="执行中">运行中</span>
+              <span v-else-if="s.status === 'paused'" class="mode-tag paused" title="已暂停，打开会话发送消息即恢复">已暂停</span>
               <span class="mode-tag" :class="modeCls(s.mode)">{{ modeShort(s.mode) }}</span>
-              <button class="item-del" title="删除会话（软删除）" @click.stop="askRemoveSession(s)">✕</button>
+              <!-- PASI-9：执行中显示暂停入口，非执行中才允许删除 -->
+              <button v-if="isSessionRunning(s.id)" class="item-del" title="暂停执行（发送消息可恢复）" @click.stop="pauseSession(s.id)">⏸</button>
+              <button v-else class="item-del" title="删除会话（软删除）" @click.stop="askRemoveSession(s)">✕</button>
             </div>
             <div v-if="ws.sessions.length === 0" class="session-empty">（暂无会话，点「＋ 新对话」开始）</div>
           </div>
@@ -812,7 +840,7 @@ watch(showMemory, (open) => {
               ref="composerEl"
               v-model="input"
               :disabled="chat.running"
-              :placeholder="chat.running ? 'Agent 运行中…' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill，可直接粘贴图片（Enter 发送，Shift+Enter 换行）'"
+              :placeholder="chat.running ? 'Agent 运行中…' : chat.paused ? '已暂停——发送消息将继续执行' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill，可直接粘贴图片（Enter 发送，Shift+Enter 换行）'"
               @input="onComposerInput"
               @blur="ac = null"
               @keydown.enter.exact="onEnterKey"
@@ -853,6 +881,7 @@ watch(showMemory, (open) => {
               >
                 <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
               </select>
+              <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
               <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
               <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
                 发送 <span class="kbd">↵</span>
@@ -1225,6 +1254,9 @@ watch(showMemory, (open) => {
   border-radius: 8px; background: var(--red-soft); color: var(--red);
   font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px;
 }
+/* PASI-9：暂停按钮（与停止并排，主间距由停止的 margin-left:auto 提供） */
+.stop-btn.pause { margin-left: auto; border-color: var(--orange); background: var(--orange-soft); color: var(--orange); }
+.stop-btn.pause + .stop-btn { margin-left: 0; }
 .kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text-faint); }
 .pending-imgs { display: flex; gap: 8px; margin-bottom: 8px; }
 .thumb { position: relative; display: inline-block; }

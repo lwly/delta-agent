@@ -137,7 +137,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
           'cache-control': 'no-cache',
           connection: 'keep-alive',
         });
-        res.write(`data: ${JSON.stringify({ type: 'state', running: hub.isRunning(sessionId) })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'state', running: hub.isRunning(sessionId), paused: hub.isPaused(sessionId) })}\n\n`);
         const unsub = hub.subscribe(sessionId, (ev) => {
           res.write(`data: ${JSON.stringify(ev)}\n\n`);
         });
@@ -152,6 +152,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
       // ── projects ──────────────────────────────────────────────────────────
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         return json(res, 200, service.listProjects());
+      }
+      // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁的数据源）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'running-sessions' && parts.length === 2) {
+        return json(res, 200, { ids: hub.runningSessionIds() });
       }
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         const body = await readBody(req);
@@ -227,10 +231,14 @@ export function createWebServer(opts: ServeOptions): http.Server {
           }
         }
         if (method === 'DELETE' && parts.length === 3) {
+          // PASI-9：执行中的会话禁止删除（hub.running 覆盖「引擎收尾中」窗口，比 service.activeRuns 更严格）
+          if (hub.isRunning(sessionId)) return err(res, 409, '会话执行中，请先暂停或停止后再删除');
           try {
             service.removeSession(sessionId, { hard: url.searchParams.get('hard') === 'true' });
             return json(res, 200, { ok: true });
-          } catch {
+          } catch (e) {
+            const msg = (e as Error).message;
+            if (msg.includes('执行中')) return err(res, 409, msg);
             return err(res, 404, 'session not found');
           }
         }
@@ -261,6 +269,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
         if (method === 'POST' && parts[3] === 'abort') {
           return json(res, 200, { ok: hub.abort(sessionId) });
+        }
+        // PASI-9：暂停执行中的会话（中止本轮 + 状态落库 paused；发消息即恢复）
+        if (method === 'POST' && parts[3] === 'pause') {
+          const ok = hub.pause(sessionId);
+          return ok ? json(res, 200, { ok: true }) : err(res, 409, '会话未在执行中，无需暂停');
         }
         if (method === 'POST' && parts[3] === 'confirm') {
           const body = await readBody(req);

@@ -10,6 +10,8 @@ export const useChatStore = defineStore('chat', {
     messages: [] as ChatMessage[],
     streamingText: '',
     running: false,
+    /** PASI-9：会话处于暂停态（上一轮执行被暂停；发送消息即恢复） */
+    paused: false,
     pendingConfirm: null as ConfirmRequest | null,
     pendingPlan: null as null | { requestId: string; plan: PlanPayload },
     pendingAsk: null as { requestId: string; question: string; options?: string[] } | null,
@@ -30,6 +32,8 @@ export const useChatStore = defineStore('chat', {
       this.messages = detail.messages;
       this.streamingText = '';
       this.running = false;
+      // PASI-9：打开会话时同步暂停态（status 落库值）
+      this.paused = detail.session.status === 'paused';
       this.pendingConfirm = null;
       this.pendingPlan = null;
       this.pendingAsk = null;
@@ -51,6 +55,8 @@ export const useChatStore = defineStore('chat', {
       switch (ev.type) {
         case 'state':
           this.running = ev.running === true;
+          // PASI-9：paused 仅在事件携带时更新（运行开始/暂停时服务端都会显式给出）
+          if ('paused' in ev) this.paused = ev.paused === true;
           if (!this.running && this.streamingText) {
             // 流结束兜底：把未落库的流式文本并回消息（done 落库后 detail 拉取为准）
             this.streamingText = '';
@@ -178,6 +184,7 @@ export const useChatStore = defineStore('chat', {
       if (images?.length) userMessage.images = images; // F-25 多模态
       this.messages.push(userMessage);
       this.streamingText = '';
+      this.paused = false; // PASI-9：发送即恢复（服务端 hub.send 同步清除 paused 落库）
       try {
         await api.send(this.sessionId, input, images);
       } catch (e) {
@@ -208,6 +215,14 @@ export const useChatStore = defineStore('chat', {
     },
     async abort() {
       await api.abort(this.sessionId);
+    },
+    /** PASI-9：暂停当前会话执行（状态经 SSE state 事件回推 paused:true） */
+    async pause() {
+      try {
+        await api.pause(this.sessionId);
+      } catch (e) {
+        this.notice(`✘ ${(e as Error).message}`);
+      }
     },
   },
 });

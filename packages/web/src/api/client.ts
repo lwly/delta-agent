@@ -282,6 +282,10 @@ export const api = {
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
   removeSession: (id: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/sessions/${id}?hard=${hard}`),
+  // PASI-9：暂停执行中的会话（中止本轮 + 状态落库 paused；发消息即恢复）
+  pause: (sessionId: string) => request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/pause`),
+  // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁）
+  runningSessions: () => request<{ ids: string[] }>('GET', '/api/running-sessions'),
 
   // 运行（images = F-25 多模态图片附件，base64 不含 data: 前缀）
   send: (sessionId: string, input: string, images?: MessageImage[]) =>
