@@ -1,0 +1,23 @@
+%% F-33 桌面通知：三端触发 → DesktopNotifier → 系统后端（旁路 sink，引擎零改动）
+sequenceDiagram
+    participant U as 用户
+    participant E as 入口端（TUI App / SessionHub / headless-run）
+    participant N as DesktopNotifier（core/notify）
+    participant OS as 系统后端（osascript / PowerShell / notify-send）
+
+    Note over E: 任务运行中（长任务 ≥ minDurationMs）
+
+    alt 确认卡出现（confirm_request）
+        E->>N: notifyConfirm({tool, reason})
+        N->>N: enabled && onConfirm ？（否则静默返回）
+        N->>OS: spawn(detached, 10s 超时) —— 转义后命令
+        OS-->>U: 系统通知：y-zero-agent 需要确认
+        U->>E: 回填决策（ConfirmCard / HTTP 端点）
+    else 任务结束（run / send / runHeadless 返回）
+        E->>N: notifyDone({status, durationMs, summary})
+        N->>N: enabled && onDone && durationMs ≥ minDurationMs ？（否则静默返回）
+        N->>OS: spawn(detached, 10s 超时) —— 转义后命令
+        OS-->>U: 系统通知：任务结束（状态 + 耗时）
+    end
+
+    Note over N,OS: 发送 fire-and-forget：失败/超时静默吞掉，绝不影响主流程
