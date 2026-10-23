@@ -57,7 +57,8 @@ export interface HeadlessSandboxRun {
 }
 
 export interface HeadlessSandboxState {
-  mode: 'local' | 'docker';
+  /** 'seatbelt' = macOS 原生 sandbox-exec（方案 C 默认隔离后端） */
+  mode: 'local' | 'seatbelt' | 'docker';
   image: string;
   network: 'none' | 'bridge';
   enforced: boolean;

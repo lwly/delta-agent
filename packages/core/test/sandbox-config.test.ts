@@ -294,7 +294,8 @@ describe('enforce：会话覆盖只能更严', () => {
     const v = checkEnforce({ enforce: true, mode: 'docker' }, { mode: 'local' });
     expect(v).toHaveLength(1);
     expect(v[0]!.field).toBe('mode');
-    expect(v[0]!.message).toContain('项目策略已强制容器执行');
+    // §19：文案随项目模式区分（docker=容器 / seatbelt=沙箱），公共前缀「项目策略已强制」
+    expect(v[0]!.message).toContain('项目策略已强制');
   });
 
   it('local → docker 允许', () => {

@@ -195,7 +195,7 @@ export type PermissionMode = 'plan' | 'default' | 'yolo';
  * 而 shared 不能反向依赖 core，故两处各声明一份纯结构类型。
  */
 export interface SandboxBadge {
-  mode: 'local' | 'docker';
+  mode: 'local' | 'seatbelt' | 'docker';
   image?: string;
   network?: 'none' | 'bridge';
   /** 缓存中的探测结论（undefined = 未知；false 时卡片加一行「当前不可用，将按 fallback 处理」） */

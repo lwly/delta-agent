@@ -24,6 +24,11 @@ export interface DockerInvokeOptions {
   signal?: AbortSignal;
   /** 子进程 env；缺省 = `localDockerEnv(process.env)`（显式拒绝远端 DOCKER_HOST，PRD §2.3） */
   env?: NodeJS.ProcessEnv;
+  /**
+   * 子进程工作目录。docker 后端不需要（容器内 cwd 由 `-w workdir` 决定）；
+   * seatbelt 后端必须透传（§19：sandbox-exec 直接在宿主跑，cwd 即命令工作目录）。
+   */
+  cwd?: string;
   /** stderr 逐行回调（拉取进度旁路到用户侧，不进模型上下文） */
   onStderrLine?: (line: string) => void;
 }

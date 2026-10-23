@@ -22,9 +22,9 @@ export interface ResolvePlanInput {
 }
 
 /**
- * 决策链（与 PRD §5.2 / 设计 §7.2 表逐格对齐）：
+ * 决策链（与 PRD §5.2 / 设计 §7.2 表逐格对齐；§19 补充 seatbelt 后端）：
  *   mode=local                        → {local, mode_local}
- *   可用                              → {docker, docker_ready}
+ *   可用                              → {<配置的后端>, <backend>_ready}（seatbelt | docker）
  *   enforce 且不可用                   → {deny, enforced_deny}
  *   fallback=deny                     → {deny, fallback_deny}
  *   fallback=ask + 已获准              → {local, degrade_approved}
@@ -38,8 +38,12 @@ export function resolveExecutionPlan(input: ResolvePlanInput): ExecutionPlan {
   // 1) 配置 local：不探测、零开销（probe 传 null 是常态）
   if (config.mode === 'local') return { action: 'local', reason: 'mode_local' };
 
-  // 2) Docker 可用
-  if (probe?.available === true) return { action: 'docker', reason: 'docker_ready' };
+  // 2) 配置的隔离后端可用（mode ∈ seatbelt | docker，步骤 1 已排除 local）
+  if (probe?.available === true) {
+    return config.mode === 'docker'
+      ? { action: 'docker', reason: 'docker_ready' }
+      : { action: 'seatbelt', reason: 'seatbelt_ready' };
+  }
 
   // 3) enforce：容器是项目强制的隔离承诺，只允许 deny（双保险，配置阶段已强制 fallback=deny）
   if (config.enforce) return { action: 'deny', reason: 'enforced_deny' };
@@ -63,10 +67,16 @@ export interface UnavailableMessageInput {
   image: string;
   enforced: boolean;
   interactive: boolean;
+  /** 当前后端（§19）：影响文案指向；缺省 docker 保持既有测试与文案不变 */
+  backend?: 'docker' | 'seatbelt';
 }
 
 /** reason → 第一行动作（全部是可照做的具体指令）。 */
-function firstAction(reason: SandboxProbeReason, image: string): string {
+function firstAction(reason: SandboxProbeReason, image: string, backend: 'docker' | 'seatbelt'): string {
+  if (backend === 'seatbelt') {
+    // seatbelt 的失败面比 docker 小得多：平台不符 / 二进制缺失（macOS 自带，几乎不发生）
+    return 'Seatbelt 仅 macOS 可用：Linux/Windows 请改用 docker 后端（.y-zero/sandbox.json → {"mode":"docker"}），或在 macOS 上重试';
+  }
   switch (reason) {
     case 'cli_missing':
       return '安装 Docker Desktop（或 docker CLI）并确认 `docker version` 在 PATH 中可执行';
@@ -91,14 +101,16 @@ function firstAction(reason: SandboxProbeReason, image: string): string {
  */
 export function buildUnavailableMessage(input: UnavailableMessageInput): string {
   const { reason, detail, fallback, image, enforced, interactive } = input;
-  const head = `[sandbox] Docker 不可用：${detail}`;
+  const backend = input.backend ?? 'docker';
+  const backendLabel = backend === 'seatbelt' ? 'Seatbelt 沙箱' : 'Docker';
+  const head = `[sandbox] ${backendLabel} 不可用：${detail}`;
 
   const consequence =
     fallback === 'ask' && !interactive
-      ? '  命令未执行——非交互（headless）下 fallback=ask 等价于 deny，容器隔离在本次不可用。'
-      : `  命令未执行——容器隔离在本次不可用，已按 fallback=${fallback} 拒绝。`;
+      ? `  命令未执行——非交互（headless）下 fallback=ask 等价于 deny，${backendLabel}隔离在本次不可用。`
+      : `  命令未执行——${backendLabel}隔离在本次不可用，已按 fallback=${fallback} 拒绝。`;
 
-  const actions: string[] = [firstAction(reason, image)];
+  const actions: string[] = [firstAction(reason, image, backend)];
   if (enforced) {
     actions.push('联系项目维护者调整 .y-zero/sandbox.json（enforce:true 下会话无法降级）');
     actions.push('在维护者调整前，直接在宿主 shell 执行该命令（不经过 yzero）');
