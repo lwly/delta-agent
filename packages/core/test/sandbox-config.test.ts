@@ -14,6 +14,7 @@ import {
   loadSandboxConfig,
   mergeSandboxLayers,
   normalizeSandboxLayer,
+  updateUserSandboxMode,
   DEFAULT_SANDBOX_CONFIG,
   DEFAULT_SANDBOX_IMAGE,
   SandboxPathError,
@@ -377,5 +378,59 @@ describe('assertSafeWorkspaceRoot（任何 docker 调用之前）', () => {
 
   it('普通项目目录通过（tmp 的子目录不受影响）', () => {
     expect(() => assertSafeWorkspaceRoot(project)).not.toThrow();
+  });
+});
+
+// ── updateUserSandboxMode（enable/disable 写路径）──────────────────────────
+
+describe('updateUserSandboxMode：只改 mode、写前读、原子写', () => {
+  const { mkdtempSync, writeFileSync, readFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+
+  function tempHome(): string {
+    return mkdtempSync(join(tmpdir(), 'yzero-cfg-home-'));
+  }
+
+  it('文件不存在 → 创建 {"mode":"seatbelt"}，previous=local', () => {
+    const home = tempHome();
+    const r = updateUserSandboxMode('seatbelt', { homeDir: home });
+    expect(r.previous).toBe('local');
+    expect(JSON.parse(readFileSync(r.path, 'utf8'))).toEqual({ mode: 'seatbelt' });
+  });
+
+  it('既有文件的其它字段原样保留，只改 mode', () => {
+    const home = tempHome();
+    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
+    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '{"mode":"docker","network":"bridge","memoryMb":1024}');
+    updateUserSandboxMode('seatbelt', { homeDir: home });
+    expect(JSON.parse(readFileSync(join(home, '.y-zero', 'sandbox.json'), 'utf8'))).toEqual({
+      mode: 'seatbelt',
+      network: 'bridge',
+      memoryMb: 1024,
+    });
+  });
+
+  it('坏 JSON → 拒绝写入并抛错（不覆盖用户文件）', () => {
+    const home = tempHome();
+    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
+    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '{broken');
+    expect(() => updateUserSandboxMode('local', { homeDir: home })).toThrow(/无法解析/);
+    expect(readFileSync(join(home, '.y-zero', 'sandbox.json'), 'utf8')).toBe('{broken');
+  });
+
+  it('非对象 JSON（数组）→ 拒绝写入', () => {
+    const home = tempHome();
+    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
+    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '[]');
+    expect(() => updateUserSandboxMode('local', { homeDir: home })).toThrow(/无法解析/);
+  });
+
+  it('写入后不留 .tmp 中间文件（原子 rename）', () => {
+    const home = tempHome();
+    updateUserSandboxMode('docker', { homeDir: home });
+    const { readdirSync } = require('node:fs') as typeof import('node:fs');
+    expect(readdirSync(join(home, '.y-zero')).filter((f: string) => f.includes('.tmp-'))).toHaveLength(0);
+    expect(existsSync(join(home, '.y-zero', 'sandbox.json'))).toBe(true);
   });
 });

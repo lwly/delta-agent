@@ -134,6 +134,10 @@ async function submit() {
             <summary>
               <span class="tag">工具</span>
               <code>call {{ (m.toolCallId ?? '').slice(0, 8) }}</code>
+              <!-- F-30 沙箱徽标（R8）：实时流式期间展示，历史回看不显示 -->
+              <span v-if="m.sandboxMeta" class="sandbox-badge" :title="`沙箱后端 ${m.sandboxMeta.mode}${m.sandboxMeta.degraded ? '（已降级）' : ''}`">
+                🛡 {{ m.sandboxMeta.mode }}{{ m.sandboxMeta.network ? ` · net=${m.sandboxMeta.network}` : '' }}{{ m.sandboxMeta.ms != null ? ` · ${m.sandboxMeta.ms}ms` : '' }}
+              </span>
               <span class="muted">{{ m.content.length }} 字符</span>
             </summary>
             <pre class="result">{{ m.content }}</pre>
@@ -259,6 +263,7 @@ async function submit() {
 .toolcall, .msg.tool { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; margin-top: 6px; padding: 8px 10px; font-size: 13px; }
 .toolcall pre, pre.result { background: #f6f8fa; padding: 8px; border-radius: 6px; max-height: 220px; overflow: auto; margin: 6px 0 0; white-space: pre-wrap; }
 .tag { background: #ddf4ff; color: #0969da; border-radius: 4px; padding: 1px 6px; font-size: 12px; margin-right: 6px; }
+.sandbox-badge { background: #f0fff4; color: #1a7f37; border: 1px solid #b7dfc2; border-radius: 4px; padding: 1px 6px; font-size: 12px; margin-right: 6px; }
 .muted { color: #8b949e; font-size: 12px; margin-left: 8px; }
 summary { cursor: pointer; }
 .card { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 8px; padding: 10px 14px; margin: 8px 0; }

@@ -13,8 +13,10 @@ export {
   assertSafeWorkspaceRoot,
   userSandboxConfigPath,
   projectSandboxConfigPath,
+  updateUserSandboxMode,
   type LoadSandboxConfigOptions,
   type EnforceViolation,
+  type UpdateUserSandboxModeResult,
 } from './config.js';
 export {
   realDockerCli,

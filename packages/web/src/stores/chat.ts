@@ -73,11 +73,19 @@ export const useChatStore = defineStore('chat', {
           break;
         }
         case 'tool_result': {
-          const result = ev.result as { callId: string; name: string; ok: boolean; content: string };
+          const result = ev.result as {
+            callId: string;
+            name: string;
+            ok: boolean;
+            content: string;
+            meta?: { sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean } };
+          };
           this.messages.push({
             role: 'tool',
             content: result.content,
             toolCallId: result.callId,
+            // F-30 沙箱徽标（R8）：只在显式启用沙箱时存在，随实时 SSE 展示
+            ...(result.meta?.sandbox ? { sandboxMeta: result.meta.sandbox } : {}),
           });
           break;
         }

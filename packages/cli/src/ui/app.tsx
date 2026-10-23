@@ -311,11 +311,17 @@ export function App(props: AppOptions) {
             }
             case 'tool_result': {
               saveAssistantWithCalls();
-              const header = `⚙ ${e.call.name}`;
+              // F-30 沙箱徽标（R4）：显式启用沙箱时 100% 带执行环境标识（缺省用户无感知）
+              const sb = (e.result.meta as { sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean } } | undefined)?.sandbox;
+              const badge = sb
+                ? ` 🛡[${sb.mode}${sb.network ? ` net=${sb.network}` : ''}${sb.ms != null ? ` ${sb.ms}ms` : ''}${sb.degraded ? ' 已降级' : ''}]`
+                : '';
+              const header = `⚙ ${e.call.name}${badge}`;
+              const headerPrefix = `⚙ ${e.call.name}`; // pending 项文本带参数、无徽标，按名前缀匹配
               const resultText = (e.result.ok ? '✔' : '✘') + ' ' + e.result.content.slice(0, 2000);
               setItems((prev) =>
                 prev.map((it) =>
-                  it.kind === 'tool' && it.pending && it.text.startsWith(header)
+                  it.kind === 'tool' && it.pending && it.text.startsWith(headerPrefix)
                     ? { ...it, pending: false, text: `${header}\n${resultText}` }
                     : it,
                 ),

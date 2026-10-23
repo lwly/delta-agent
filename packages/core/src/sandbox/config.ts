@@ -20,6 +20,7 @@ import {
   type SandboxConfigLayer,
   type SandboxConfigProvenance,
   type SandboxConfigSource,
+  type SandboxMode,
   type SandboxConfigWarning,
   type SandboxMergeField,
   type SandboxNetwork,
@@ -537,4 +538,48 @@ function samePathBase(p: string): string {
 
 function samePath(a: string, b: string): boolean {
   return samePathBase(a) === samePathBase(b);
+}
+
+// ── enable/disable 写路径（设计 §11 T05 / AC「只改 mode、写前读、tmp+rename 原子写」）──
+
+export interface UpdateUserSandboxModeResult {
+  path: string;
+  /** 写入前的 mode（文件不存在视为 local） */
+  previous: SandboxMode;
+}
+
+/**
+ * 修改**全局**沙箱模式（`yzero sandbox enable/disable` 唯一写入口）。
+ * 约束：
+ *  - 只改 `mode` 一个字段，文件内其它字段**原样保留**（写前读）；
+ *  - tmp + rename 原子写（进程中断不会留下半个 JSON）；
+ *  - 既有文件坏 JSON 时**拒绝写入**并抛错（覆盖用户文件属于破坏性动作，宁可失败）。
+ */
+export function updateUserSandboxMode(
+  mode: SandboxMode,
+  opts: { homeDir?: string } = {},
+): UpdateUserSandboxModeResult {
+  const file = userSandboxConfigPath(opts.homeDir);
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+
+  let raw: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`不是 JSON 对象`);
+      }
+      raw = parsed as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(`全局沙箱配置 ${file} 无法解析（${(e as Error).message}），请手工修复后再试`);
+    }
+  }
+  const previous = raw.mode === 'seatbelt' || raw.mode === 'docker' ? raw.mode : 'local';
+  raw.mode = mode;
+
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+  fs.renameSync(tmp, file);
+  return { path: file, previous };
 }

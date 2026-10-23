@@ -34,6 +34,16 @@ export interface ChatMessage {
   toolCallId?: string;
   /** F-25 多模态：user 消息的图片附件 */
   images?: MessageImage[];
+  /**
+   * F-30 沙箱徽标（R8）：来自 tool_result 事件的 result.meta.sandbox，
+   * 只在实时流式期间展示；历史回看（落库不含 meta）不显示。
+   */
+  sandboxMeta?: {
+    mode: string;
+    network?: string;
+    ms?: number;
+    degraded?: boolean;
+  };
 }
 
 export interface TrashItem {
