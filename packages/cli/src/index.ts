@@ -41,7 +41,13 @@ import {
   notifyStatusCommand,
   notifyTestCommand,
 } from './notify.js';
-import { createDesktopNotifier } from '@y-zero/core';
+import {
+  onboardingStatusCommand,
+  onboardingRunCommand,
+  onboardingConfirmCommand,
+  onboardingSkipCommand,
+} from './onboarding.js';
+import { createDesktopNotifier, autoOnboardProject } from '@y-zero/core';
 import {
   normalizeGitPolicy,
   normalizeMode,
@@ -441,7 +447,25 @@ program
     }
 
     const projectRoot = process.cwd();
-    service.ensureProject(projectRoot); // 注册当前目录为项目
+    const project = service.ensureProject(projectRoot); // 注册当前目录为项目
+    // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案（fire-and-forget，失败不影响服务）
+    if (project.created) {
+      void (async () => {
+        try {
+          const onboardingProvider = await resolveProviderFromEnv(undefined);
+          const r = await autoOnboardProject({
+            projectRoot,
+            provider: onboardingProvider,
+            model: process.env.YZERO_MODEL || 'claude-sonnet-4-5-20250929',
+          });
+          if (r && !r.skipped) {
+            console.log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`yzero onboarding confirm\` 采纳）`);
+          }
+        } catch {
+          console.error('⚠ onboarding 扫描失败（可稍后手动运行 `yzero onboarding run`）');
+        }
+      })();
+    }
     const skills = await createSkillRuntime(projectRoot);
     // F-27 Hook 系统：加载用户级 + 项目级 hooks.json（工具钩子 + 生命周期）
     const hooks = HookManager.load(projectRoot, undefined, (o) => {
@@ -543,6 +567,17 @@ async function start(opts: CliOpts): Promise<void> {
   // M5: 启动时孤儿任务恢复（running 且租约过期 → queued，retries+1）
   const recovered = service.recoverTasks(session.id);
   if (recovered > 0) console.error(`♻ 已恢复 ${recovered} 个中断任务（重新排队）`);
+
+  // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案
+  // （fire-and-forget 不阻塞 TUI 启动；完成情况看 `.y-zero/onboarding.json` 或 `yzero onboarding status`）
+  if (project.created) {
+    console.error('✨ 新项目已注册：onboarding 扫描已在后台启动（完成后用 `yzero onboarding confirm` 采纳）');
+    void autoOnboardProject({
+      projectRoot: cwd,
+      provider,
+      model: session.model || 'claude-sonnet-4-5-20250929',
+    }).catch(() => undefined); // 失败静默：状态留在 pending，下次启动重试
+  };
 
   // ── M3 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段加载 ──
   const model = session.model || 'claude-sonnet-4-5-20250929';
@@ -713,6 +748,35 @@ notify
     void notifyTestCommand();
   });
 
+// ── yzero onboarding：F-34 项目 onboarding（status / run / confirm / skip）────
+
+const onboarding = program
+  .command('onboarding')
+  .description('F-34 项目 onboarding：新项目首次启动自动扫描，生成项目摘要与初始静态记忆草案，引导确认');
+
+onboarding
+  .command('status')
+  .description('查看 onboarding 状态、草案与目标文件情况')
+  .action(() => onboardingStatusCommand());
+
+onboarding
+  .command('run')
+  .description('扫描项目并生成静态记忆草案（需要已配置模型 provider）')
+  .option('--force', '忽略已有状态强制重新生成（覆盖草案）', false)
+  .action((opts: { force?: boolean }) => {
+    void onboardingRunCommand(opts);
+  });
+
+onboarding
+  .command('confirm')
+  .description('采纳草案（改名到位为 .y-zero/agent.md 与 MEMORY.md；目标已存在时不覆盖）')
+  .action(() => onboardingConfirmCommand());
+
+onboarding
+  .command('skip')
+  .description('跳过 onboarding（新项目首次注册不再自动扫描）')
+  .action(() => onboardingSkipCommand());
+
 // ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
 
 /** F-25：--image 可重复参数收集。 */
@@ -746,7 +810,7 @@ program
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'onboarding', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

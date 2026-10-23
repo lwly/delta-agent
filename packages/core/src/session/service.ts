@@ -85,15 +85,18 @@ export class SessionService {
     for (const s of this.store.listSessions(projectId)) this.abortRun(s.id);
   }
 
-  /** Register (or find) the project for a working directory. */
-  ensureProject(rootPath: string): { id: string; name: string } {
+  /**
+   * Register (or find) the project for a working directory.
+   * F-34：返回值多带 `created`，标记本次是否为新注册（首次启动 onboarding 的判定依据）。
+   */
+  ensureProject(rootPath: string): { id: string; name: string; created: boolean } {
     const root = path.resolve(rootPath);
     const existing = this.store.findProjectByRoot(root);
-    if (existing) return { id: existing.id, name: existing.name };
+    if (existing) return { id: existing.id, name: existing.name, created: false };
     const id = randomUUID();
     const name = path.basename(root) || root;
     this.store.createProject(id, name, root);
-    return { id, name };
+    return { id, name, created: true };
   }
 
   createSession(projectId: string, opts?: { title?: string; model?: string; mode?: string }): SessionRow {

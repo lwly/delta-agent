@@ -416,3 +416,29 @@ export {
   describeImage,
   type PreparedImage,
 } from './media/images.js';
+
+// F-34 项目 onboarding：自动扫描生成项目摘要与静态记忆草案
+export {
+  scanProjectLayout,
+  SCAN_SKIP_DIRS,
+  autoOnboardProject,
+  runOnboardingScan,
+  confirmOnboarding,
+  skipOnboarding,
+  loadOnboardingState,
+  saveOnboardingState,
+  shouldAutoOnboard,
+  onboardingStatePath,
+  agentMdDraftPath,
+  memoryMdDraftPath,
+  agentMdTargetPath,
+  memoryMdTargetPath,
+  type OnboardingState,
+  type OnboardingStatus,
+  type ProjectScan,
+  type ScanOptions,
+  type RunOnboardingOptions,
+  type RunOnboardingResult,
+  type ConfirmOnboardingResult,
+  type AutoOnboardOptions,
+} from './onboarding/index.js';
