@@ -36,6 +36,13 @@ import {
 } from './sandbox.js';
 import { evalsListCommand, evalsRunCommand, type EvalsOptions } from './evals.js';
 import {
+  notifyDisableCommand,
+  notifyEnableCommand,
+  notifyStatusCommand,
+  notifyTestCommand,
+} from './notify.js';
+import { createDesktopNotifier } from '@y-zero/core';
+import {
   normalizeGitPolicy,
   normalizeMode,
   parseAllowTools,
@@ -450,6 +457,8 @@ program
       resolveProviderById: (id) => resolveProviderFromEnv(id),
       skills,
       hooks,
+      // F-33 桌面通知：任务结束 / 确认卡出现时系统级通知（旁路 fire-and-forget）
+      notify: createDesktopNotifier({ projectRoot }),
     });
 
     const providers = new ProviderManager(); // 设置中心共用同一存储（~/.y-zero/models.json）
@@ -563,6 +572,8 @@ async function start(opts: CliOpts): Promise<void> {
     hooks: HookManager.load(cwd, undefined, (o) => {
       if (!o.ok) console.error(`⚠ hook ${o.hook.event}(${o.hook.command}) 异常：${o.reason ?? o.stderr.trim().slice(0, 200)}`);
     }),
+    // F-33 桌面通知：任务结束 / 确认卡出现时系统级通知（旁路 fire-and-forget）
+    notify: createDesktopNotifier({ projectRoot: cwd }),
     yolo: Boolean(opts.yolo),
     permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
     allowTools: parseAllowTools(opts.allow),
@@ -676,6 +687,32 @@ sandbox
   .description('清理 yzero 残留容器（上次运行未正常退出时的兜底）')
   .action(() => sandboxGcCommand());
 
+// ── yzero notify：F-33 桌面通知（status / enable / disable / test）────────
+
+const notify = program.command('notify').description('F-33 桌面通知：长任务结束 / 需人工确认时系统级通知（macOS 通知中心 / Windows 通知）');
+
+notify
+  .command('status')
+  .description('查看生效配置、配置来源与平台通知后端（不发送通知）')
+  .action(() => notifyStatusCommand());
+
+notify
+  .command('enable')
+  .description('全局启用桌面通知（写 ~/.y-zero/notify.json 的 enabled=true，其它字段保留）')
+  .action(() => notifyEnableCommand());
+
+notify
+  .command('disable')
+  .description('全局关闭桌面通知（enabled=false，其它字段保留）')
+  .action(() => notifyDisableCommand());
+
+notify
+  .command('test')
+  .description('发送一条样例通知（人工验证端到端链路）')
+  .action(() => {
+    void notifyTestCommand();
+  });
+
 // ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
 
 /** F-25：--image 可重复参数收集。 */
@@ -709,7 +746,7 @@ program
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

@@ -30,6 +30,7 @@ import {
   runPlanExecute,
   runReAct,
   modeSegment,
+  createDesktopNotifier,
   type AgentEvent,
   type ChatMessage,
   type EngineMode,
@@ -249,6 +250,18 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     task,
     images,
   );
+
+  // F-33 桌面通知：长任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定；
+  // detached spawn 使本进程退出后子进程仍可完成弹窗，CI 无桌面环境时发送失败静默）
+  try {
+    createDesktopNotifier({ projectRoot: cwd }).notifyDone({
+      status: outcome.status,
+      durationMs: outcome.durationMs,
+      summary: outcome.result,
+    });
+  } catch {
+    // 通知失败不影响结果输出
+  }
 
   // F-24 git auto：任务成功结束后提交本会话记录在案的文件变更
   if (normalizeGitPolicy(opts.git) === 'auto' && outcome.status === 'completed') {

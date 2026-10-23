@@ -57,6 +57,8 @@ export interface AppOptions {
   skillsRuntime?: SkillRuntime;
   /** F-27 Hook 系统（SessionStart/Stop/SessionEnd 生命周期 + 工具挂钩） */
   hooks?: import('@y-zero/core').HookManager;
+  /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
+  notify?: import('@y-zero/core').Notifier;
   yolo: boolean;
   /** F-23 权限模式（plan/default/yolo；yolo 需与 yolo 标志双重开启，由 CLI 入口保证） */
   permissionMode?: PermissionMode;
@@ -128,6 +130,12 @@ export function App(props: AppOptions) {
   // check() 直接 allow，不会走到这里；此处只负责交互式确认卡。
   const confirm = useCallback(
     async (req: ConfirmRequest): Promise<ConfirmDecision> => {
+      // F-33 桌面通知：确认卡出现（等人事件；旁路 fire-and-forget，失败不影响确认流）
+      try {
+        props.notify?.notifyConfirm({ tool: req.tool, reason: req.reason });
+      } catch {
+        // 通知失败不影响确认流
+      }
       return new Promise<ConfirmDecision>((resolve) => {
         addItem({ kind: 'confirm', text: '', request: req, resolve });
       });
@@ -156,6 +164,8 @@ export function App(props: AppOptions) {
       const ac = new AbortController();
       abortRef.current = ac;
       setRunning(true);
+      const startedAt = Date.now(); // F-33：任务时长门槛判定基准
+      let runError: string | null = null;
 
       // M3：Skill 自动触发——Top-1 评分 ≥ 阈值时询问用户是否加载
       if (props.skillsRuntime?.suggest) {
@@ -422,8 +432,20 @@ export function App(props: AppOptions) {
           }
         }
       } catch (err) {
+        runError = (err as Error).message;
         addItem({ kind: 'system', text: `✘ 运行异常：${(err as Error).message}` });
       } finally {
+        // F-33 桌面通知：任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定）
+        // 注意要在 assistantText 清空之前取摘要
+        try {
+          props.notify?.notifyDone({
+            status: abortRef.current?.signal.aborted ? 'aborted' : runError ? 'failed' : 'completed',
+            durationMs: Date.now() - startedAt,
+            summary: runError ?? assistantText,
+          });
+        } catch {
+          // 通知失败不影响运行收尾
+        }
         assistantItemId = null;
         assistantText = '';
         assistantSaved = false;

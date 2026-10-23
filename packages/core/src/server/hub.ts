@@ -27,6 +27,7 @@ import {
   type SkillRuntime,
   type PermissionMode,
   type GitPolicy,
+  type Notifier,
 } from '../index.js';
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
@@ -75,6 +76,8 @@ export interface SessionHubDeps {
   modelRouter?: ModelRouter;
   /** F-32 按 provider id 构建 LLM 实例（路由规则指定 provider 时使用；缺省复用 resolveProvider） */
   resolveProviderById?: (id: string) => Promise<LLMProvider>;
+  /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
+  notify?: Notifier;
 }
 
 interface PendingConfirm {
@@ -204,9 +207,12 @@ export class SessionHub {
     this.deps.service.appendMessage(sessionId, userMessage);
 
     const service = this.deps.service;
+    const startedAt = Date.now(); // F-33：任务时长门槛判定基准
     let assistantText = '';
     const collectedCalls: ToolCall[] = [];
     let assistantSaved = false;
+    let acRef: AbortController | null = null; // F-33：finally 判定 aborted / failed 状态用
+    let runError: string | null = null;
     // F-31：usage 事件计数器（每轮 +1），逐轮落库（D5，替代 done 一次性 turn=0）
     let usageTurn = 0;
     const saveAssistantWithCalls = () => {
@@ -222,6 +228,7 @@ export class SessionHub {
     try {
       const provider = await this.deps.resolveProvider();
       const ac = new AbortController();
+      acRef = ac;
       service.registerRun(sessionId, ac);
 
       // F-27 SessionStart 钩子：每会话首次运行触发一次（旁路触发）
@@ -276,6 +283,12 @@ export class SessionHub {
             allowlist: this.deps.allowTools,
           }),
           confirm: async (req: ConfirmRequest) => {
+            // F-33 桌面通知：确认卡出现（等人事件，旁路 fire-and-forget，不受时长门槛约束）
+            try {
+              this.deps.notify?.notifyConfirm({ tool: req.tool, reason: req.reason });
+            } catch {
+              // 通知失败不影响确认流
+            }
             this.publish(sessionId, { type: 'confirm_request', request: req });
             return new Promise<ConfirmDecision>((resolve) => {
               this.waiters.set(req.id, { kind: 'confirm', resolve });
@@ -405,6 +418,7 @@ export class SessionHub {
         }
       }
     } catch (e) {
+      runError = (e as Error).message;
       this.publish(sessionId, { type: 'run_error', message: (e as Error).message });
       if (assistantText && !assistantSaved) {
         this.deps.service.appendMessage(sessionId, { role: 'assistant', content: assistantText });
@@ -413,6 +427,16 @@ export class SessionHub {
       this.running.delete(sessionId);
       this.deps.service.unregisterRun(sessionId);
       this.publish(sessionId, { type: 'state', running: false });
+      // F-33 桌面通知：任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定）
+      try {
+        this.deps.notify?.notifyDone({
+          status: runError ? 'failed' : acRef?.signal.aborted ? 'aborted' : 'completed',
+          durationMs: Date.now() - startedAt,
+          summary: runError ?? assistantText,
+        });
+      } catch {
+        // 通知失败不影响运行收尾
+      }
       // F-27 Stop 钩子：单次任务结束（旁路触发，不影响结果）
       void this.deps.hooks?.emit('Stop', { sessionId, projectId: session.project_id });
     }
