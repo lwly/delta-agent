@@ -152,7 +152,7 @@ y-zero-agent
 | F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知）——✅ 2026-10-23 交付：DesktopNotifier（macOS osascript / Windows PowerShell BalloonTip / Linux notify-send，其它平台 no-op）+ 两级配置（~/.y-zero/notify.json < .y-zero/notify.json：enabled/onDone/onConfirm/minDurationMs 默认 30s 防噪）+ 三端接线（TUI App / Web SessionHub / Headless run）+ `yzero notify status/enable/disable/test`；旁路 fire-and-forget（detached spawn、10s 超时强杀、失败静默），引擎零改动；详见 docs/design-f33-desktop-notify.md |
 | F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认——✅ 2026-10-23 交付：ensureProject 带 `created` 标记三端自动触发（TUI/serve 后台、headless 同步）+ scanProjectLayout 只读扫描（限深限条、跳过噪声目录）+ 一次 LLM 调用生成草案（.y-zero/agent.md.draft / MEMORY.md.draft + 状态 .y-zero/onboarding.json）+ `yzero onboarding status/run/confirm/skip`（confirm 目标存在绝不覆盖，提示手工合并）；失败静默状态留 pending 可重试，`auto:false` 可关；详见 docs/design-f34-project-onboarding.md |
 | F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理）——✅ 2026-10-22 交付：`session/migrations.ts` 迁移列表（version/name/sql），版本号存 `PRAGMA user_version`，每迁移独立事务原子生效，SQL 强制幂等使空库与历史库收敛到最新；打开数据库自动执行，版本高于程序支持时拒绝打开防降级写坏；`yzero migrate` 核对版本与迁移历史；v1 baseline 核心表 + v2 F-17 检索索引 |
-| F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配 |
+| F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配——✅ 2026-10-23 交付：行级 diff 生成（core diffLines LCS + compactDiff 上下文折叠/截断，超大文件降级占位，单测 8 例）+ DiffView 彩色渲染（edit/write 工具结果自动附 diff，取 FileChangeStore 快照；edit_file 确认卡新旧内容彩色对照）+ 运行状态行动态化（盲文 spinner + 当前轮次 + 有限 maxTurns 进度条 + tokens/费用）+ todo_write 后即时 N/M 进度 + 流式光标（assistant/thinking 尾部 ▋，运行结束收起）+ thinking_delta 可见（暗色流式块，不入库）+ 主题集中（ui/theme.ts 语义色 token + 图标常量，NO_COLOR 全色降级，零新增依赖）；详见 docs/design-f36-cli-tui.md |
 
 > 注：F-23~F-26 虽列 P2，但其中权限模式（F-23）与文件变更管理（F-24）对日常使用影响较大，若评审认为必要可提前至 P1。
 

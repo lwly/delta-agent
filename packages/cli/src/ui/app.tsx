@@ -14,6 +14,8 @@ import {
   PermissionState,
   SessionService,
   ToolRegistry,
+  compactDiff,
+  diffLines,
   formatSearchHits,
   prepareImages,
   describeImage,
@@ -23,6 +25,7 @@ import {
   runPlanExecute,
   runMultiAgent,
   modeSegment,
+  type DiffLine,
   type EngineMode,
   type GitPolicyMode,
   type PermissionMode,
@@ -32,14 +35,34 @@ import {
   type SkillRuntime,
 } from '@y-zero/core';
 import { ConfirmCard } from './confirm.js';
+import { theme, icons } from './theme.js';
+import { DiffView } from './diff-view.js';
 
 interface Item {
   id: number;
-  kind: 'user' | 'assistant' | 'tool' | 'system' | 'confirm';
+  kind: 'user' | 'assistant' | 'tool' | 'system' | 'confirm' | 'thinking';
   text: string;
   pending?: boolean;
+  /** F-36 工具结果成败（tool 着色用，替代脆弱的前缀判断） */
+  ok?: boolean;
+  /** F-36 edit/write 工具结果的行级 diff（彩色渲染） */
+  diff?: DiffLine[];
   request?: ConfirmRequest;
   resolve?: (d: ConfirmDecision) => void;
+}
+
+/** F-36 运行状态行 spinner 的盲文字符帧（80ms/帧） */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/** F-36 运行状态行动画帧（active 时启动 interval，停止即静止）。 */
+function useSpinnerFrame(active: boolean): string {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    return () => clearInterval(id);
+  }, [active]);
+  return SPINNER_FRAMES[frame]!;
 }
 
 export interface AppOptions {
@@ -87,6 +110,9 @@ export function App(props: AppOptions) {
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [usage, setUsage] = useState({ input: 0, output: 0, cost: 0 });
+  // F-36 状态行：当前轮次（turn_start 更新）
+  const [turn, setTurn] = useState(0);
+  const spinnerFrame = useSpinnerFrame(running);
   const abortRef = useRef<AbortController | null>(null);
   const registryRef = useRef<ToolRegistry>(props.registry ?? new ToolRegistry());
   const todosRef = useRef<Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>>([]);
@@ -276,6 +302,7 @@ export function App(props: AppOptions) {
       // stream state
       let assistantText = '';
       let assistantItemId: number | null = null;
+      let thinkingItemId: number | null = null; // F-36 思考过程流（thinking_delta 渲染，不入库）
       let assistantSaved = false;
       const collectedCalls: ToolCall[] = [];
       let turnCount = 0;
@@ -303,39 +330,68 @@ export function App(props: AppOptions) {
           switch (e.type) {
             case 'turn_start':
               turnCount = e.turn;
+              setTurn(e.turn); // F-36 状态行轮次
               break;
             case 'text_delta':
+              // F-36：思考流被打断（开始正式输出）
+              if (thinkingItemId !== null) {
+                updateItem(thinkingItemId, { pending: false });
+                thinkingItemId = null;
+              }
               if (assistantItemId === null) {
-                const it = addItem({ kind: 'assistant', text: '' });
+                const it = addItem({ kind: 'assistant', text: '', pending: true }); // pending = 流式光标
                 assistantItemId = it.id;
               }
               assistantText += e.text;
               appendToItem(assistantItemId, e.text);
               break;
+            case 'thinking_delta':
+              // F-36：思考过程可见（暗色流式块；不写入会话历史）
+              if (thinkingItemId === null) {
+                const it = addItem({ kind: 'thinking', text: '', pending: true });
+                thinkingItemId = it.id;
+              }
+              appendToItem(thinkingItemId, e.text);
+              break;
             case 'tool_call_start': {
+              // F-36：思考流被打断（进入工具执行）
+              if (thinkingItemId !== null) {
+                updateItem(thinkingItemId, { pending: false });
+                thinkingItemId = null;
+              }
               collectedCalls.push(e.call);
               const argsStr = JSON.stringify(e.call.args ?? safeParseArgs(e.call.argsJson));
               const shown = argsStr.length > 160 ? argsStr.slice(0, 160) + '…' : argsStr;
-              addItem({ kind: 'tool', text: `⚙ ${e.call.name}(${shown})`, pending: true });
+              addItem({ kind: 'tool', text: `${icons.tool} ${e.call.name}(${shown})`, pending: true });
               break;
             }
             case 'tool_result': {
               saveAssistantWithCalls();
+              // F-36：edit/write 工具结果附行级 diff（取 FileChangeStore 最新快照生成）
+              const diff = f36DiffForTool(e.call, props.session.id, props.service);
               // F-30 沙箱徽标（R4）：显式启用沙箱时 100% 带执行环境标识（缺省用户无感知）
               const sb = (e.result.meta as { sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean } } | undefined)?.sandbox;
               const badge = sb
-                ? ` 🛡[${sb.mode}${sb.network ? ` net=${sb.network}` : ''}${sb.ms != null ? ` ${sb.ms}ms` : ''}${sb.degraded ? ' 已降级' : ''}]`
+                ? ` ${icons.sandbox}[${sb.mode}${sb.network ? ` net=${sb.network}` : ''}${sb.ms != null ? ` ${sb.ms}ms` : ''}${sb.degraded ? ' 已降级' : ''}]`
                 : '';
-              const header = `⚙ ${e.call.name}${badge}`;
-              const headerPrefix = `⚙ ${e.call.name}`; // pending 项文本带参数、无徽标，按名前缀匹配
-              const resultText = (e.result.ok ? '✔' : '✘') + ' ' + e.result.content.slice(0, 2000);
+              const header = `${icons.tool} ${e.call.name}${badge}`;
+              const headerPrefix = `${icons.tool} ${e.call.name}`; // pending 项文本带参数、无徽标，按名前缀匹配
+              const resultText = (e.result.ok ? icons.ok : icons.fail) + ' ' + e.result.content.slice(0, 2000);
               setItems((prev) =>
                 prev.map((it) =>
                   it.kind === 'tool' && it.pending && it.text.startsWith(headerPrefix)
-                    ? { ...it, pending: false, text: `${header}\n${resultText}` }
+                    ? { ...it, pending: false, ok: e.result.ok, text: `${header}\n${resultText}`, diff }
                     : it,
                 ),
               );
+              // F-36：todo 进度可视（todo_write 后立即显示完成度，不必手动 /todos）
+              if (e.call.name === 'todo_write' && e.result.ok && todosRef.current.length > 0) {
+                const done = todosRef.current.filter((t) => t.status === 'done').length;
+                addItem({
+                  kind: 'system',
+                  text: `${icons.plan} 任务清单 ${done}/${todosRef.current.length} 完成（/todos 查看明细）`,
+                });
+              }
               props.service.appendMessage(props.session.id, {
                 role: 'tool',
                 content: e.result.content,
@@ -447,9 +503,14 @@ export function App(props: AppOptions) {
           // 通知失败不影响运行收尾
         }
         assistantItemId = null;
+        thinkingItemId = null;
         assistantText = '';
         assistantSaved = false;
         collectedCalls.length = 0;
+        // F-36：收起流式光标与思考流
+        setItems((prev) =>
+          prev.map((it) => (it.kind === 'assistant' || it.kind === 'thinking') ? { ...it, pending: false } : it),
+        );
         setRunning(false);
         abortRef.current = null;
         // F-27 Stop 钩子：单次任务结束（旁路触发）
@@ -643,7 +704,7 @@ export function App(props: AppOptions) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box borderStyle="round" borderColor="gray" paddingX={1} flexDirection="column">
+      <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
         {items.length === 0 ? (
           <Text dimColor>
             y-zero-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
@@ -666,28 +727,70 @@ export function App(props: AppOptions) {
           }
           return (
             <Box key={it.id} flexDirection="column" marginY={0}>
-              {it.kind === 'user' && <Text color="cyan">› {it.text}</Text>}
-              {it.kind === 'assistant' && <Text>{it.text}</Text>}
+              {it.kind === 'user' && <Text color={theme.user}>{icons.user} {it.text}</Text>}
+              {it.kind === 'assistant' && (
+                <Text>
+                  {it.text}
+                  {it.pending ? <Text color={theme.cursor}>▋</Text> : null}
+                </Text>
+              )}
+              {it.kind === 'thinking' && (
+                <Text dimColor color={theme.thinking}>
+                  {it.text}
+                  {it.pending ? <Text color={theme.cursor}>▋</Text> : null}
+                </Text>
+              )}
               {it.kind === 'tool' && (
-                <Text color={it.pending ? 'yellow' : it.text.startsWith('⚙') && !it.pending ? 'green' : 'red'}>
+                <Text color={it.pending ? theme.toolPending : it.ok === false ? theme.toolFail : theme.toolOk}>
                   {it.text}
                 </Text>
               )}
               {it.kind === 'system' && <Text dimColor>{it.text}</Text>}
+              {it.kind === 'tool' && it.diff ? <DiffView lines={it.diff} /> : null}
             </Box>
           );
         })}
       </Box>
       <Box marginTop={0}>
-        <Text color="green">{running ? ' … ' : '› '}</Text>
         {running ? (
-          <Text dimColor>任务运行中…（Esc 中断）</Text>
+          <>
+            <Text color={theme.prompt}>{spinnerFrame} </Text>
+            <Text dimColor>
+              第 {turn} 轮{f36TurnBar(turn, props.maxTurns)} · tokens {(usage.input + usage.output).toLocaleString()} · ${usage.cost.toFixed(4)}（Esc 中断）
+            </Text>
+          </>
         ) : (
-          <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="描述你的任务…" />
+          <>
+            <Text color={theme.prompt}>{icons.user} </Text>
+            <TextInput value={input} onChange={setInput} onSubmit={onSubmit} placeholder="描述你的任务…" />
+          </>
         )}
       </Box>
     </Box>
   );
+}
+
+/** F-36：轮次进度条（仅显式设置有限 maxTurns 时展示，如 3/20）。 */
+function f36TurnBar(turn: number, maxTurns: number): string {
+  if (!Number.isFinite(maxTurns) || maxTurns <= 0 || maxTurns > 1000) return '';
+  const filled = Math.min(10, Math.max(0, Math.ceil((turn / maxTurns) * 10)));
+  return ` [${'█'.repeat(filled)}${'░'.repeat(10 - filled)}]`;
+}
+
+/** F-36：edit/write 工具结果 → 行级 diff（取该工具最近一次快照；无快照/超大/不匹配返回 undefined）。 */
+function f36DiffForTool(call: ToolCall, sessionId: string, service: SessionService): DiffLine[] | undefined {
+  if (call.name !== 'edit_file' && call.name !== 'write_file') return undefined;
+  const args = (call.args ?? safeParseArgs(call.argsJson)) as { path?: unknown };
+  const path = typeof args.path === 'string' ? args.path : '';
+  if (!path) return undefined;
+  try {
+    const rows = service.changes.list(sessionId, 10); // 最新在前
+    const row = rows.find((r) => r.tool === call.name && r.path === path && !r.rolled_back);
+    if (!row || row.before_oversized || row.after_oversized) return undefined;
+    return compactDiff(diffLines(row.before_content ?? '', row.after_content ?? ''));
+  } catch {
+    return undefined; // diff 是锦上添花，任何失败都不影响主流程
+  }
 }
 
 function safeParseArgs(json: string): Record<string, unknown> {
