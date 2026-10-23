@@ -835,9 +835,9 @@ watch(showMemory, (open) => {
                   </div>
                   <div class="msg-text">{{ m.content }}</div>
                   <div class="msg-ops">
-                    <button class="uop" title="复制原文" @click="copyText(m.content)">复制</button>
-                    <button class="uop" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">编辑</button>
-                    <button class="uop" title="原样重发" :disabled="chat.running" @click="resend(m)">重发</button>
+                    <button class="uop ico" title="复制原文" @click="copyText(m.content)">📋</button>
+                    <button class="uop ico" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">✏️</button>
+                    <button class="uop ico" title="原样重发" :disabled="chat.running" @click="resend(m)">🔁</button>
                   </div>
                 </div>
               </div>
@@ -850,7 +850,7 @@ watch(showMemory, (open) => {
                   <div v-if="m.content" class="bubble msg-text md" v-html="md(m.content)" />
                   <!-- 快捷操作：悬停显示，与用户消息一致 -->
                   <div v-if="m.content" class="msg-ops">
-                    <button class="uop" title="复制回复" @click="copyText(m.content)">复制</button>
+                    <button class="uop ico" title="复制回复" @click="copyText(m.content)">📋</button>
                   </div>
                   <div v-for="(c, ci) in m.toolCalls ?? []" :key="ci" class="tool-card">
                     <div class="tool-head">
@@ -1309,6 +1309,8 @@ watch(showMemory, (open) => {
 }
 .uop:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
 .uop:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 图标形态的消息操作（📋 ✏️ 🔁）：无文字，稍大字号 + 紧凑内边距 */
+.uop.ico { font-size: 13px; padding: 2px 8px; line-height: 1.2; }
 .uop.primary { color: var(--accent); border-color: rgba(88, 166, 255, 0.45); }
 .edit-box { min-width: 420px; }
 .edit-input {
@@ -1488,6 +1490,8 @@ watch(showMemory, (open) => {
 .stop-btn.pause { margin-left: auto; border-color: var(--orange); background: var(--orange-soft); color: var(--orange); }
 .stop-btn.pause + .stop-btn { margin-left: 0; }
 .kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text-faint); }
+/* 发送按钮内的快捷键块：蓝底上用纯白，避免暗色块看起来像渲染异常 */
+.send-btn .kbd { color: #fff; border-color: rgba(255, 255, 255, 0.6); font-size: 10px; }
 .pending-imgs { display: flex; gap: 8px; margin-bottom: 8px; }
 .thumb { position: relative; display: inline-block; }
 .thumb img { width: 52px; height: 52px; object-fit: cover; border-radius: 7px; border: 1px solid var(--border); display: block; }
