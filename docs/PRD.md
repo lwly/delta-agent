@@ -149,7 +149,7 @@ y-zero-agent
 | F-30 | 容器级沙箱 | `run_command` 可选沙箱执行模式，隔离高危命令（现有白名单+确认之外的增强）——**方案 C（2026-10-23 裁定）**：macOS 原生 Seatbelt（sandbox-exec）为主隔离后端，Docker 保留为可选后端；配置 `{"mode":"seatbelt"}` 即启用。已交付：内核（配置/探测/参数组装/执行器/降级编排 + SeatbeltExecutor）、headless sandbox 上报段、工具接线测试（Z1 golden 逐字符一致 + AC-30-4 逃逸零调用 + run_tests 历史口径锁定）、`yzero sandbox status/enable/disable/pull/gc` 子命令组（enable/disable 原子写只改 mode）、三端徽标（CLI 工具卡片 🛡 / Web 实时 SSE 徽标（历史回看不显示，R8）/ headless JSON sandbox 段）；挂起：Docker 集成测试（等有 Docker daemon 环境再补，单测已用 Fake 端口全覆盖） |
 | F-31 | 成本与用量报告 | 按项目/会话/模型的费用统计面板；预算分级告警（现有 session 级预算之上） |
 | F-32 | 模型路由 | 按任务难度自动选模型：分类/提炼/摘要用小模型，规划与执行用大模型；可配路由规则 |
-| F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知） |
+| F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知）——✅ 2026-10-23 交付：DesktopNotifier（macOS osascript / Windows PowerShell BalloonTip / Linux notify-send，其它平台 no-op）+ 两级配置（~/.y-zero/notify.json < .y-zero/notify.json：enabled/onDone/onConfirm/minDurationMs 默认 30s 防噪）+ 三端接线（TUI App / Web SessionHub / Headless run）+ `yzero notify status/enable/disable/test`；旁路 fire-and-forget（detached spawn、10s 超时强杀、失败静默），引擎零改动；详见 docs/design-f33-desktop-notify.md |
 | F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认 |
 | F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理）——✅ 2026-10-22 交付：`session/migrations.ts` 迁移列表（version/name/sql），版本号存 `PRAGMA user_version`，每迁移独立事务原子生效，SQL 强制幂等使空库与历史库收敛到最新；打开数据库自动执行，版本高于程序支持时拒绝打开防降级写坏；`yzero migrate` 核对版本与迁移历史；v1 baseline 核心表 + v2 F-17 检索索引 |
 | F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配 |

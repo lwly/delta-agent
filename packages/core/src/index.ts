@@ -128,6 +128,41 @@ export {
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
 // F-30 容器级沙箱：配置 / 探测 / 参数组装 / 执行器 / 降级编排（详见 docs/design-f30-container-sandbox.md）
 export * from './sandbox/index.js';
+// 与 '@y-zero/shared' 的 star 导出在 SandboxBadge 上歧义（两处为结构完全一致的同名接口，
+// shared 注释亦说明）：显式 re-export 消除 TS2308，消费端按结构类型兼容
+export type { SandboxBadge } from './sandbox/index.js';
+// F-33 桌面通知：配置（两级文件）+ DesktopNotifier（macOS/Windows/Linux 后端，fire-and-forget）
+// 详见 docs/design-f33-desktop-notify.md；三端入口注入，引擎零改动
+export {
+  DEFAULT_NOTIFY_CONFIG,
+  NOTIFY_MERGE_FIELDS,
+  noopNotifier,
+  type Notifier,
+  type NotifyConfig,
+  type NotifyConfigSource,
+  type NotifyConfigWarning,
+  type NotifyMergeField,
+  type NotifyTrigger,
+} from './notify/types.js';
+export {
+  loadNotifyConfig,
+  normalizeNotifyLayer,
+  projectNotifyConfigPath,
+  updateUserNotifyEnabled,
+  userNotifyConfigPath,
+  type LoadNotifyConfigOptions,
+  type NotifyConfigLayer,
+  type ResolvedNotifyConfig,
+  type UpdateUserNotifyEnabledResult,
+} from './notify/config.js';
+export {
+  buildNotifyCommand,
+  createDesktopNotifier,
+  DesktopNotifier,
+  sanitizeBody,
+  type DesktopNotifierOptions,
+  type NotifyCommand,
+} from './notify/notifier.js';
 export {
   PermissionState,
   toolCapability,
