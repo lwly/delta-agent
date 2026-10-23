@@ -9,6 +9,7 @@ import * as http from 'node:http';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
 import type { ConfirmDecision } from '@y-zero/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
@@ -182,6 +183,29 @@ export function createWebServer(opts: ServeOptions): http.Server {
         return json(res, 200, { files });
       }
 
+      // POST /api/projects/:id/rename —— 侧栏更多菜单：重命名（仅改显示名）
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'rename' && parts.length === 4) {
+        const body = await readBody(req);
+        try {
+          return json(res, 200, service.renameProject(parts[2]!, String(body.name ?? '')));
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // POST /api/projects/:id/reveal —— 侧栏更多菜单：在系统文件管理器中打开项目目录
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'reveal' && parts.length === 4) {
+        const project = service.getProject(parts[2]!);
+        if (!project) return err(res, 404, 'project not found');
+        const dir = project.root_path;
+        if (!fs.existsSync(dir)) return err(res, 400, `目录不存在：${dir}`);
+        const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
+        const child = spawn(cmd, [dir], { detached: true, stdio: 'ignore' });
+        child.on('error', () => undefined); // 打开失败不阻塞响应（如无桌面环境）
+        child.unref();
+        return json(res, 200, { ok: true });
+      }
+
       // GET /api/skills?projectId=<id> —— Composer「/ 技能」候选（三层发现，只读元数据）
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts.length === 2) {
         const projectId = url.searchParams.get('projectId');
@@ -230,6 +254,19 @@ export function createWebServer(opts: ServeOptions): http.Server {
             return err(res, 404, (e as Error).message);
           }
         }
+        // 会话级权限模式（plan 只读 / default 询问确认 / yolo 全部放行）
+        if (method === 'GET' && parts[3] === 'permission' && parts.length === 4) {
+          return json(res, 200, { mode: hub.getPermissionMode(sessionId) });
+        }
+        if (method === 'PATCH' && parts[3] === 'permission' && parts.length === 4) {
+          const body = await readBody(req);
+          const mode = String(body.mode ?? '');
+          if (mode !== 'plan' && mode !== 'default' && mode !== 'yolo') {
+            return err(res, 400, `非法权限模式：${mode}（可选 plan / default / yolo）`);
+          }
+          hub.setPermissionMode(sessionId, mode);
+          return json(res, 200, { ok: true, mode });
+        }
         if (method === 'DELETE' && parts.length === 3) {
           // PASI-9：执行中的会话禁止删除（hub.running 覆盖「引擎收尾中」窗口，比 service.activeRuns 更严格）
           if (hub.isRunning(sessionId)) return err(res, 409, '会话执行中，请先暂停或停止后再删除');
@@ -250,6 +287,40 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const timeline = service.getRunTimeline(sessionId, Number(parts[4]));
           return timeline ? json(res, 200, timeline) : err(res, 404, 'run not found');
         }
+        // ── F-37 git 分支切换 + worktree 会话级隔离（4 端点，/permission 同级同风格）──
+        // GET /api/sessions/:id/git —— 底栏状态（SessionGitState）
+        if (method === 'GET' && parts[3] === 'git' && parts.length === 4) {
+          if (!service.getSession(sessionId)) return err(res, 404, 'session not found');
+          try {
+            return json(res, 200, await hub.worktreeState(sessionId));
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+        }
+        // GET /api/sessions/:id/branches —— 本地分支列表（非 repo / git 失败 → 400）
+        if (method === 'GET' && parts[3] === 'branches' && parts.length === 4) {
+          if (!service.getSession(sessionId)) return err(res, 404, 'session not found');
+          const r = await hub.listBranches(sessionId);
+          return r.ok ? json(res, 200, r) : err(res, 400, r.reason);
+        }
+        // POST /api/sessions/:id/checkout —— 会话级分支切换（运行中 409；git 失败 200 {ok:false}）
+        if (method === 'POST' && parts[3] === 'checkout' && parts.length === 4) {
+          const body = await readBody(req);
+          const branch = body.branch ? String(body.branch) : undefined;
+          const newBranch = body.newBranch ? String(body.newBranch) : undefined;
+          if (!branch && !newBranch) return err(res, 400, 'branch or newBranch is required');
+          if (hub.isRunning(sessionId)) return err(res, 409, '会话运行中，请先停止或等待任务结束后再切换分支');
+          return json(res, 200, await hub.checkoutBranch(sessionId, { branch, newBranch }));
+        }
+        // POST /api/sessions/:id/worktree —— worktree 开关（运行中 409；失败 200 {ok:false}）
+        if (method === 'POST' && parts[3] === 'worktree' && parts.length === 4) {
+          const body = await readBody(req);
+          const enabled = body.enabled === true;
+          const branch = body.branch ? String(body.branch) : undefined;
+          const newBranch = body.newBranch ? String(body.newBranch) : undefined;
+          if (hub.isRunning(sessionId)) return err(res, 409, '会话运行中，请先停止或等待任务结束后再切换工作区');
+          return json(res, 200, await hub.setWorktree(sessionId, enabled, { branch, newBranch }));
+        }
         // 发起一轮对话：后台运行，事件走 SSE
         if (method === 'POST' && parts[3] === 'messages') {
           const body = await readBody(req);
@@ -264,7 +335,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
             if (e instanceof ImageError) return err(res, 400, e.message);
             throw e;
           }
-          void hub.send(sessionId, input, images).catch(() => undefined); // 错误经 run_error 事件推送
+          void hub.send(sessionId, input, images).catch((e) => {
+            // run 前置失败（session/project 校验等）：日志留痕，前端经 state running:false 收尾
+            console.error('[hub] send crashed before run_error publish:', (e as Error).message);
+          });
           return json(res, 202, { ok: true, running: true });
         }
         if (method === 'POST' && parts[3] === 'abort') {

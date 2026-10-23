@@ -23,11 +23,17 @@ import {
   ToolRegistry,
   PermissionState,
   GitIntegration,
+  WorktreeManager,
   discoverSkills,
+  branchSwitchMessage,
+  worktreeOnMessage,
+  worktreeOffMessage,
+  resolveWorkRoot,
   type SkillRuntime,
   type PermissionMode,
   type GitPolicy,
   type Notifier,
+  type BranchInfo,
 } from '../index.js';
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
@@ -38,6 +44,7 @@ import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
 import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as fs from 'node:fs';
 
 /** 推送给 Web 的事件：AgentEvent + 桥接控制事件 */
 export type HubEvent =
@@ -81,6 +88,28 @@ export interface SessionHubDeps {
   notify?: Notifier;
 }
 
+// ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
+
+/** 底栏 git 状态（GET 语义，无副作用）；running 为前端置灰判断的权威来源。 */
+export interface SessionGitState {
+  isRepo: boolean;
+  /** path.basename(project.root_path) */
+  projectName: string;
+  /** 当前工作根分支（detached → 短 hash） */
+  branch: string | null;
+  worktree: { enabled: boolean; path: string | null; branch: string | null };
+  running: boolean;
+}
+
+export interface BranchSwitchResult {
+  ok: boolean;
+  reason?: string;
+  /** checkout 后生效的分支名 */
+  branch?: string;
+  /** worktree 切入后的绝对路径 */
+  path?: string;
+}
+
 interface PendingConfirm {
   kind: 'confirm';
   resolve: (d: ConfirmDecision) => void;
@@ -99,7 +128,10 @@ export class SessionHub {
   private readonly sessionStarted = new Set<string>();
   private readonly subs = new Map<string, Set<(ev: HubEvent) => void>>();
   private readonly waiters = new Map<string, PendingConfirm | PendingAsk | PendingPlan>();
-  private running = new Set<string>();
+  /** 运行中会话：AbortController 用于僵尸判定（aborted = 用户已点停止但收尾卡死） */
+  private running = new Map<string, { ac: AbortController; startedAt: number }>();
+  /** 会话级权限模式覆盖（未设置的会话回退 deps.permissionMode / default） */
+  private readonly sessionPermissionModes = new Map<string, PermissionMode>();
 
   constructor(private readonly deps: SessionHubDeps) {}
 
@@ -119,12 +151,45 @@ export class SessionHub {
   }
 
   isRunning(sessionId: string): boolean {
-    return this.running.has(sessionId);
+    return this.zombieReap(sessionId) ? false : this.running.has(sessionId);
+  }
+
+  /**
+   * 僵尸运行清理：引擎可能卡死在不可中断的 await 上（如网关流挂死），
+   * abort 信号无法穿透 → finally 不执行 → running 永不清理 → 会话被永久锁死（发消息 409）。
+   * 判定：AbortController 已中止（用户点过停止但收尾未完成）或运行超 30 分钟。
+   * 返回 true 表示本次清掉了一个僵尸。
+   */
+  private zombieReap(sessionId: string): boolean {
+    const entry = this.running.get(sessionId);
+    if (!entry) return false;
+    const stale = entry.ac.signal.aborted || Date.now() - entry.startedAt > 30 * 60_000;
+    if (!stale) return false;
+    this.running.delete(sessionId);
+    try {
+      entry.ac.abort(); // 确保 engine 侧信号也置位
+    } catch {
+      // 已 abort 的 Controller 重复 abort 不抛错，防御性忽略
+    }
+    this.publish(sessionId, { type: 'run_error', message: '运行已超时/中止，运行状态已重置（僵尸运行清理）' });
+    this.publish(sessionId, { type: 'state', running: false });
+    return true;
   }
 
   /** 当前所有运行中的会话 id（Web 侧栏运行态徽标 / 删除门禁的数据源）。 */
   runningSessionIds(): string[] {
-    return [...this.running];
+    for (const id of [...this.running.keys()]) this.zombieReap(id);
+    return [...this.running.keys()];
+  }
+
+  /** 会话级权限模式：未单独设置时回退全局默认。 */
+  getPermissionMode(sessionId: string): PermissionMode {
+    return this.sessionPermissionModes.get(sessionId) ?? this.deps.permissionMode ?? 'default';
+  }
+
+  /** 设置会话级权限模式（仅影响该会话后续的运行，不影响进行中的一轮）。 */
+  setPermissionMode(sessionId: string, mode: PermissionMode): void {
+    this.sessionPermissionModes.set(sessionId, mode);
   }
 
   /** 会话是否处于暂停态（status 落库为 paused；执行中止即本轮结束，不占运行中）。 */
@@ -184,6 +249,133 @@ export class SessionHub {
     return true;
   }
 
+  // ── F-37 分支 / worktree 编排（设计文档 §3.1）────────────────────────────
+
+  /** 会话 + 项目联合获取（任一不存在返回 null）。 */
+  private sessionWithProject(
+    sessionId: string,
+  ): { session: NonNullable<ReturnType<SessionService['getSession']>>; project: NonNullable<ReturnType<SessionService['getProject']>> } | null {
+    const session = this.deps.service.getSession(sessionId);
+    if (!session) return null;
+    const project = this.deps.service.getProject(session.project_id);
+    if (!project) return null;
+    return { session, project };
+  }
+
+  /** 切换结果落库后注入系统提示（role='user'，沿用引擎惯例；D5）+ git_notice 推送。 */
+  private injectWorkrootNotice(sessionId: string, message: string): void {
+    try {
+      this.deps.service.appendMessage(sessionId, { role: 'user', content: message });
+    } catch {
+      // 落库失败不阻断切换结果本身
+    }
+    this.publish(sessionId, { type: 'git_notice', message });
+  }
+
+  /** GET 语义：底栏状态（不产生副作用）。 */
+  async worktreeState(sessionId: string): Promise<SessionGitState> {
+    const pair = this.sessionWithProject(sessionId);
+    if (!pair) throw new Error('session not found');
+    const { session, project } = pair;
+    const wm = new WorktreeManager(project.root_path);
+    const base = {
+      projectName: path.basename(project.root_path),
+      running: this.isRunning(sessionId),
+    };
+    if (!(await wm.isRepo())) {
+      return {
+        isRepo: false,
+        ...base,
+        branch: null,
+        worktree: { enabled: false, path: null, branch: null },
+      };
+    }
+    const workRoot = resolveWorkRoot(session, project.root_path);
+    return {
+      isRepo: true,
+      ...base,
+      branch: await wm.currentBranch(workRoot),
+      worktree: {
+        // 目录丢失（被手动删除）时 resolveWorkRoot 已回退主工作根 → 不显示 worktree
+        enabled: Boolean(session.worktree_path) && workRoot === session.worktree_path,
+        path: session.worktree_path,
+        branch: session.worktree_branch,
+      },
+    };
+  }
+
+  /** 分支列表（worktreeState 已知 isRepo；非 repo / git 失败 → {ok:false, reason}）。 */
+  async listBranches(
+    sessionId: string,
+  ): Promise<{ ok: true; branches: BranchInfo[] } | { ok: false; reason: string }> {
+    const pair = this.sessionWithProject(sessionId);
+    if (!pair) return { ok: false, reason: 'session not found' };
+    const { session, project } = pair;
+    const wm = new WorktreeManager(project.root_path);
+    return wm.listBranches(resolveWorkRoot(session, project.root_path));
+  }
+
+  /**
+   * 会话级 checkout：运行中守卫（含等待确认间隙，isRunning 天然覆盖）→
+   * checkout（脏区在 WorktreeManager 内拦截，D9）→ 成功注入系统提示 + git_notice。
+   * 不落分支到会话表（D3：分支是仓库状态，恢复时以实际为准）。
+   */
+  async checkoutBranch(
+    sessionId: string,
+    opts: { branch?: string; newBranch?: string },
+  ): Promise<BranchSwitchResult> {
+    if (this.isRunning(sessionId)) {
+      return { ok: false, reason: '会话运行中，请先停止或等待任务结束后再切换分支' };
+    }
+    const pair = this.sessionWithProject(sessionId);
+    if (!pair) return { ok: false, reason: 'session not found' };
+    const { session, project } = pair;
+    const wm = new WorktreeManager(project.root_path);
+    if (!(await wm.isRepo())) return { ok: false, reason: 'not a git repository' };
+    const workRoot = resolveWorkRoot(session, project.root_path);
+    const r = await wm.checkout(workRoot, opts);
+    if (!r.ok || !r.branch) return r;
+    this.injectWorkrootNotice(sessionId, branchSwitchMessage(r.branch, workRoot));
+    return r;
+  }
+
+  /**
+   * Worktree 开关（运行中一律拒绝）：
+   * - enabled=true：addWorktree（D10 幂等）→ 落库两列 → 注入提示 → git_notice
+   * - enabled=false：清空两列（目录保留，PRD 裁决 #3）→ 注入提示 → git_notice
+   */
+  async setWorktree(
+    sessionId: string,
+    enabled: boolean,
+    opts?: { branch?: string; newBranch?: string },
+  ): Promise<BranchSwitchResult> {
+    if (this.isRunning(sessionId)) {
+      return { ok: false, reason: '会话运行中，请先停止或等待任务结束后再切换工作区' };
+    }
+    const pair = this.sessionWithProject(sessionId);
+    if (!pair) return { ok: false, reason: 'session not found' };
+    const { session, project } = pair;
+
+    if (!enabled) {
+      // 切回主工作区：不发生 checkout（主工作区分支未被移动），无需脏区检查（D9）
+      const prevPath = session.worktree_path;
+      this.deps.service.setSessionWorktree(sessionId, { worktreePath: null, worktreeBranch: null });
+      if (prevPath) {
+        this.injectWorkrootNotice(sessionId, worktreeOffMessage(project.root_path, prevPath));
+      }
+      return { ok: true };
+    }
+
+    const wm = new WorktreeManager(project.root_path);
+    if (!(await wm.isRepo())) return { ok: false, reason: 'not a git repository' };
+    const add = await wm.addWorktree(sessionId, opts);
+    if (!add.ok || !add.path) return { ok: add.ok, reason: add.reason };
+    const branch = (await wm.currentBranch(add.path)) ?? opts?.branch ?? opts?.newBranch ?? null;
+    this.deps.service.setSessionWorktree(sessionId, { worktreePath: add.path, worktreeBranch: branch });
+    this.injectWorkrootNotice(sessionId, worktreeOnMessage(branch ?? '（detached HEAD）', add.path));
+    return { ok: true, path: add.path, branch: branch ?? undefined };
+  }
+
   // ── 运行 ────────────────────────────────────────────────────────────────
 
   /**
@@ -209,51 +401,91 @@ export class SessionHub {
 
   /** 发起一轮对话：阻塞到引擎结束（事件经 publish 实时推送）。images = F-25 图片附件（已完成校验）。 */
   async send(sessionId: string, input: string, images?: MessageImage[]): Promise<void> {
-    if (this.running.has(sessionId)) {
-      throw new Error('session is already running');
+    const prev = this.running.get(sessionId);
+    if (prev) {
+      // 僵尸自愈：上次运行卡死未收尾（已中止或超时）时清理后继续，而不是永久 409 锁死会话
+      if (!this.zombieReap(sessionId)) throw new Error('session is already running');
     }
     const session = this.deps.service.getSession(sessionId);
     if (!session) throw new Error('session not found');
     const project = this.deps.service.getProject(session.project_id);
     if (!project) throw new Error('project not found');
-    // PASI-9：暂停会话恢复 = 继续发消息，清除 paused 标记后按正常流程执行
-    this.deps.service.resumeSession(sessionId);
 
-    this.running.add(sessionId);
+    this.running.set(sessionId, { ac: new AbortController(), startedAt: Date.now() });
     this.publish(sessionId, { type: 'state', running: true, paused: false });
-    // M5: 崩溃恢复——本会话孤儿任务（租约过期的 running）先回 queued
-    try {
-      this.deps.service.recoverTasks(sessionId);
-    } catch {
-      // 恢复失败不阻塞本轮运行
-    }
-    // 用户消息立即落库（即使 Provider 解析失败也不丢输入）
-    const userMessage: ChatMessage = { role: 'user', content: input };
-    if (images && images.length > 0) userMessage.images = images;
-    this.deps.service.appendMessage(sessionId, userMessage);
 
     const service = this.deps.service;
     const startedAt = Date.now(); // F-33：任务时长门槛判定基准
-    let assistantText = '';
-    const collectedCalls: ToolCall[] = [];
-    let assistantSaved = false;
+    let assistantText = ''; // 全程文本累计（通知/摘要用）
+    // 按"轮"落库：一轮 = 一次模型响应（文本 + 本轮工具调用）。
+    // 旧实现跨轮累积 calls 且 done 时丢 calls，产生重复 assistant 行 / 孤立 tool 消息。
+    let turnText = '';
+    let turnCalls: ToolCall[] = [];
+    let turnSaved = false;
+    // 本轮已收到 tool 消息结果的调用 id（配对校验用：缺失即断裂历史，网关 400）
+    const answeredCalls = new Set<string>();
     let acRef: AbortController | null = null; // F-33：finally 判定 aborted / failed 状态用
     let runError: string | null = null;
     // F-31：usage 事件计数器（每轮 +1），逐轮落库（D5，替代 done 一次性 turn=0）
     let usageTurn = 0;
-    const saveAssistantWithCalls = () => {
-      if (assistantSaved) return;
+    const beginTurnIfSaved = () => {
+      if (turnSaved) {
+        turnText = '';
+        turnCalls = [];
+        turnSaved = false;
+        answeredCalls.clear();
+      }
+    };
+    const saveTurnAssistant = () => {
+      if (turnSaved) return;
+      if (!turnText && turnCalls.length === 0) return;
       service.appendMessage(sessionId, {
         role: 'assistant',
-        content: assistantText,
-        toolCalls: [...collectedCalls],
+        content: turnText,
+        toolCalls: [...turnCalls],
       });
-      assistantSaved = true;
+      turnSaved = true;
+    };
+    // 中止/异常收尾：本轮已声明但未收到结果的 tool_calls 补齐占位 tool 消息，
+    // 保证 assistant(tool_calls) 与 tool 消息一一配对（网关强校验，缺失即下轮 400）
+    const pairUnansweredCalls = () => {
+      for (const call of turnCalls) {
+        if (answeredCalls.has(call.id)) continue;
+        answeredCalls.add(call.id);
+        service.appendMessage(sessionId, {
+          role: 'tool',
+          content: '（本轮执行被中止，工具调用未返回结果）',
+          toolCallId: call.id,
+        });
+      }
     };
 
     try {
+      // 项目根目录必须存在：无效 root 会让文件类工具全部 ENOENT、模型陷入无效重试循环
+      if (!fs.existsSync(project.root_path)) {
+        throw new Error(
+          `项目根目录不存在：${project.root_path}（请在项目管理中移除该项目后重新添加正确路径）`,
+        );
+      }
+      // F-37（D2）：工作根解析唯一入口——worktree 绑定存在且目录存活 → worktree，
+      // 否则项目根。切换只允许在非运行中发生，本轮内 workRoot 恒定，无并发改写问题。
+      const workRoot = resolveWorkRoot(session, project.root_path);
+      // PASI-9：暂停会话恢复 = 继续发消息，清除 paused 标记后按正常流程执行
+      service.resumeSession(sessionId);
+      // 崩溃恢复——本会话孤儿任务（租约过期的 running）先回 queued
+      try {
+        service.recoverTasks(sessionId);
+      } catch {
+        // 恢复失败不阻塞本轮运行
+      }
+      // 用户消息立即落库（即使 Provider 解析失败也不丢输入）。
+      // 注意：必须位于 try 内——早期失败（DB 异常等）也要走 catch → run_error 推送，
+      // 否则异常会被 HTTP 层的 .catch(() => undefined) 吞掉，前端表现为"运行直接停止"。
+      const userMessage: ChatMessage = { role: 'user', content: input };
+      if (images && images.length > 0) userMessage.images = images;
+      service.appendMessage(sessionId, userMessage);
       const provider = await this.deps.resolveProvider();
-      const ac = new AbortController();
+      const ac = this.running.get(sessionId)!.ac; // send 入口已创建，僵尸判定与 engine 共用同一 Controller
       acRef = ac;
       service.registerRun(sessionId, ac);
 
@@ -265,7 +497,7 @@ export class SessionHub {
 
       const budget = new BudgetManager();
       const { staticText, dynamicText } = await this.buildPrompt(
-        project.root_path,
+        workRoot,
         session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
         this.deps.registry.definitions(),
       );
@@ -296,16 +528,20 @@ export class SessionHub {
         provider,
         registry: this.deps.registry,
         toolContext: {
-          projectRoot: project.root_path,
+          // F-37：沙箱根 = 当前工作根（共享知识 6）。resolveInSandbox(ctx.projectRoot)
+          // 自动跟随；SandboxExecutor 构造期固化 projectRoot，若未来在本链路注入
+          // 沙箱实例，切换工作根后必须以 createSandboxRuntime({projectRoot: workRoot})
+          // 重建执行器，不可原地改写（D8，Seatbelt/Docker 字段 readonly）。
+          projectRoot: workRoot,
           signal: ac.signal,
           sessionId,
           projectId: session.project_id,
           memory: service.memory,
           // F-24 文件变更管理：写工具自动快照（diff 汇总/回滚走 HTTP 层读 service.changes）
           changes: service.changes,
-          // F-23 权限模式（每次运行新建：allow_session 记忆随运行结束重置）
+          // F-23 权限模式（每次运行新建：allow_session 记忆随运行结束重置；模式取会话级覆盖）
           permissions: new PermissionState({
-            mode: this.deps.permissionMode ?? 'default',
+            mode: this.getPermissionMode(sessionId),
             allowlist: this.deps.allowTools,
           }),
           confirm: async (req: ConfirmRequest) => {
@@ -370,17 +606,21 @@ export class SessionHub {
         this.publish(sessionId, ev);
         switch (ev.type) {
           case 'text_delta':
+            beginTurnIfSaved();
             assistantText += ev.text;
+            turnText += ev.text;
             break;
           case 'thinking_delta':
             break;
           case 'tool_call_start':
-            saveAssistantWithCalls();
-            collectedCalls.push(ev.call);
-            assistantSaved = false;
+            beginTurnIfSaved();
+            turnCalls.push(ev.call);
             break;
           case 'tool_result': {
-            // 工具结果落库（与 CLI App 落库策略一致）
+            // 首个工具结果前落库本轮 assistant（文本 + 本轮全部调用），
+            // 保证历史中 assistant.tool_calls 与紧随的 tool 消息一一对应（网关强校验）
+            saveTurnAssistant();
+            answeredCalls.add(ev.result.callId);
             service.appendMessage(sessionId, {
               role: 'tool',
               content: ev.result.content,
@@ -402,10 +642,9 @@ export class SessionHub {
             break;
           }
           case 'done': {
-            if (!assistantSaved && assistantText) {
-              service.appendMessage(sessionId, { role: 'assistant', content: assistantText });
-            }
-            assistantSaved = true;
+            // 最后一轮（通常无工具调用）在此落库；随后为中断残留的悬空调用补齐占位 tool 消息
+            saveTurnAssistant();
+            pairUnansweredCalls();
             // 记忆里程碑：任务结束自动提炼（0-3 条候选进待确认队列；默认开启）
             if (this.deps.autoDistill !== false && !ac.signal.aborted) {
               const transcript = service
@@ -421,8 +660,9 @@ export class SessionHub {
               }).catch(() => undefined); // 提炼失败不阻塞交付
             }
             // F-24 git 自动 commit 策略：提交本会话记录在案的文件变更
+            // （F-37-7：以当前工作根为基准——worktree 内的会话提交的就是 worktree 里的改动）
             if (this.deps.gitPolicy?.mode === 'auto' && !ac.signal.aborted) {
-              const git = new GitIntegration(project.root_path, this.deps.gitPolicy, ac.signal);
+              const git = new GitIntegration(workRoot, this.deps.gitPolicy, ac.signal);
               void git
                 .autoCommitChanges(sessionId, service.changes, input)
                 .then((out) => {
@@ -446,12 +686,12 @@ export class SessionHub {
     } catch (e) {
       runError = (e as Error).message;
       this.publish(sessionId, { type: 'run_error', message: (e as Error).message });
-      if (assistantText && !assistantSaved) {
-        this.deps.service.appendMessage(sessionId, { role: 'assistant', content: assistantText });
-      }
+      // 中断/异常时保留本轮已产出的文本与调用，并为未响应的调用补齐占位 tool 消息
+      //（此前直接丢弃 calls 丢失上下文；不补齐则 assistant.tool_calls 悬空，下轮请求被网关 400）
+      saveTurnAssistant();
+      pairUnansweredCalls();
     } finally {
-      this.running.delete(sessionId);
-      this.deps.service.unregisterRun(sessionId);
+      this.running.delete(sessionId);      this.deps.service.unregisterRun(sessionId);
       this.publish(sessionId, { type: 'state', running: false });
       // F-33 桌面通知：任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定）
       try {

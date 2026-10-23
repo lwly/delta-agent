@@ -149,10 +149,17 @@ UPDATE usage SET model = CASE WHEN usage.model = ''
   ELSE usage.model END;
 `;
 
+/** v4：F-37 worktree 会话级绑定——sessions 加 worktree_path / worktree_branch（NULL = 主工作区） */
+const MIGRATION_V4_F37_WORKTREE_BINDING = `
+ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT NULL;
+ALTER TABLE sessions ADD COLUMN worktree_branch TEXT DEFAULT NULL;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'baseline-core-tables', sql: MIGRATION_V1_BASELINE },
   { version: 2, name: 'f17-search-indexes', sql: MIGRATION_V2_F17_SEARCH },
   { version: 3, name: 'f31-usage-report', sql: MIGRATION_V3_F31_USAGE_REPORT },
+  { version: 4, name: 'f37-worktree-binding', sql: MIGRATION_V4_F37_WORKTREE_BINDING },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

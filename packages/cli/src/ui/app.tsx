@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type {
   AgentEvent,
   ChatMessage,
@@ -14,17 +16,22 @@ import {
   PermissionState,
   SessionService,
   ToolRegistry,
+  WorktreeManager,
   compactDiff,
   diffLines,
   formatSearchHits,
   prepareImages,
   describeImage,
+  branchSwitchMessage,
+  worktreeOnMessage,
+  worktreeOffMessage,
   ImageError,
   renderSummary,
   runReAct,
   runPlanExecute,
   runMultiAgent,
   modeSegment,
+  type BranchInfo,
   type DiffLine,
   type EngineMode,
   type GitPolicyMode,
@@ -35,6 +42,8 @@ import {
   type SkillRuntime,
 } from '@y-zero/core';
 import { ConfirmCard } from './confirm.js';
+import { BranchCard } from './branch-card.js';
+import { WorktreeBar } from './worktree-bar.js';
 import { theme, icons } from './theme.js';
 import { DiffView } from './diff-view.js';
 
@@ -89,6 +98,13 @@ export interface AppOptions {
   allowTools?: string[];
   /** F-24 git 策略（off/suggest/auto，默认 suggest） */
   gitPolicy?: GitPolicyMode;
+  /**
+   * F-37：共享工作根引用（cli/index.ts 创建并初始解析 resume 绑定；
+   * assemblePrompt 的 projectRoot getter 与本组件读写同一对象，保证提示词 CWD 同源）
+   */
+  workRootRef?: { current: string };
+  /** F-37（D6）：切换工作根后重读项目指令并重组装静态/动态提示段 */
+  rebuildPrompt?: () => Promise<void>;
   debugPrompt: boolean;
   maxTurns: number;
   /** M5: 执行模式（react / plan-execute / multi-agent），默认 react */
@@ -134,6 +150,60 @@ export function App(props: AppOptions) {
   if (!gitRef.current) {
     gitRef.current = new GitIntegration(process.cwd(), { mode: props.gitPolicy ?? 'suggest' });
   }
+  // ── F-37 git 分支切换 + worktree 会话级隔离 ──
+  // 工作根单一来源：cli/index.ts 已按 resume 绑定初始解析（目录丢失回退主工作根）；
+  // 未传共享引用时（独立挂载/测试）回退主工作区
+  const workRootRef = props.workRootRef ?? { current: process.cwd() };
+  const wtMgrRef = useRef<WorktreeManager | null>(null);
+  if (!wtMgrRef.current) {
+    wtMgrRef.current = new WorktreeManager(process.cwd());
+  }
+  // 当前 worktree 绑定（会话行快照 + 切换后的内存态；落库经 service.setSessionWorktree）
+  const wtBoundRef = useRef<{ path: string | null; branch: string | null }>({
+    path: props.session.worktree_path,
+    branch: props.session.worktree_branch,
+  });
+  // 底栏三段式状态（WorktreeBar）
+  const [gitBar, setGitBar] = useState<{
+    projectName: string;
+    branch: string | null;
+    worktreeEnabled: boolean;
+    worktreePath: string | null;
+  }>({
+    projectName: path.basename(process.cwd()),
+    branch: null,
+    worktreeEnabled: Boolean(wtBoundRef.current.path),
+    worktreePath: wtBoundRef.current.path,
+  });
+  const [branchCard, setBranchCard] = useState<BranchInfo[] | null>(null);
+  const [switching, setSwitching] = useState(false);
+
+  /** 刷新底栏（分支名 / worktree 状态）；失败静默（底栏是锦上添花）。 */
+  const refreshGitBar = useCallback(async () => {
+    try {
+      const wm = wtMgrRef.current!;
+      const isRepo = await wm.isRepo();
+      const bound = wtBoundRef.current;
+      if (!isRepo) {
+        setGitBar({
+          projectName: path.basename(process.cwd()),
+          branch: null,
+          worktreeEnabled: false,
+          worktreePath: null,
+        });
+        return;
+      }
+      const branch = await wm.currentBranch(workRootRef.current);
+      setGitBar({
+        projectName: path.basename(process.cwd()),
+        branch,
+        worktreeEnabled: Boolean(bound.path) && workRootRef.current === bound.path,
+        worktreePath: bound.path,
+      });
+    } catch {
+      // 状态获取失败不影响主流程
+    }
+  }, [workRootRef]);
   // F-25 多模态：/image 附件暂存区（随下一条消息发送后清空）
   const pendingImagesRef = useRef<PreparedImage[]>([]);
   // F-14 强制路由（/plan /direct /auto）：一次性覆盖下一次任务的执行路径（引擎 PlanOptions.force）
@@ -227,6 +297,10 @@ export function App(props: AppOptions) {
       // F-14 强制路由：/plan（强制规划）/ /direct（强制直达），一次性，随本次任务下发
       const runForce = forceRef.current;
       forceRef.current = undefined;
+      // F-37（D2）：工作根在 run 组装期解析（本组件内切换已同步 workRootRef）
+      const workRoot = workRootRef.current;
+      gitRef.current!.updateRoot(workRoot); // auto commit 以当前工作根为基准（F-37-7）
+      props.hooks?.rebindRoot(workRoot); // hook 命令 cwd 跟随
       const ctx: RunContext = {
         sessionId: props.session.id,
         projectId: props.session.project_id,
@@ -250,7 +324,10 @@ export function App(props: AppOptions) {
         provider: props.provider,
         registry: registryRef.current,
         toolContext: {
-          projectRoot: process.cwd(),
+          // F-37：沙箱根 = 当前工作根（共享知识 6）。resolveInSandbox(ctx.projectRoot)
+          // 自动跟随；若未来在交互链路注入 SandboxExecutor（构造期固化 projectRoot），
+          // 切换工作根后必须以新工作根重建执行器实例，不可原地改写（D8）。
+          projectRoot: workRoot,
           signal: ac.signal,
           sessionId: props.session.id,
           projectId: props.session.project_id,
@@ -525,6 +602,8 @@ export function App(props: AppOptions) {
         );
         setRunning(false);
         abortRef.current = null;
+        // F-37：运行结束后刷新底栏（分支/worktree 状态兜底同步）
+        void refreshGitBar();
         // F-27 Stop 钩子：单次任务结束（旁路触发）
         void props.hooks?.emit('Stop', {
           sessionId: props.session.id,
@@ -533,6 +612,82 @@ export function App(props: AppOptions) {
       }
     },
     [addItem, appendToItem, confirm, askUser, props],
+  );
+
+  // ── F-37 切换编排（与 hub 同语义：守卫 → git → 落库 → 注入提示 → 行内反馈）──
+
+  /** 会话级 checkout（主工作区或 worktree 内，D9 脏区由 WorktreeManager 拦截）。 */
+  const doCheckout = useCallback(
+    async (opts: { branch?: string; newBranch?: string }) => {
+      setSwitching(true);
+      try {
+        const wm = wtMgrRef.current!;
+        const workRoot = workRootRef.current;
+        const r = await wm.checkout(workRoot, opts);
+        if (!r.ok || !r.branch) {
+          addItem({ kind: 'system', text: `⎇ ✘ 切换失败：${r.reason ?? '未知原因'}` });
+          return;
+        }
+        // 注入系统提示（与 Web 同文案，模型下一轮自然感知；D5）
+        props.service.appendMessage(props.session.id, { role: 'user', content: branchSwitchMessage(r.branch, workRoot) });
+        addItem({ kind: 'system', text: `⎇ ✔ 已切换到 ${r.branch} @ ${workRoot}` });
+        // worktree 内 checkout：同步绑定分支展示（D3 不落分支列，仅展示口径）
+        if (wtBoundRef.current.path) {
+          wtBoundRef.current = { ...wtBoundRef.current, branch: r.branch };
+        }
+        await props.rebuildPrompt?.(); // 静态段重读（README 差异场景）+ 动态段 CWD 跟随
+      } finally {
+        setSwitching(false);
+        void refreshGitBar();
+      }
+    },
+    [addItem, props, refreshGitBar, workRootRef],
+  );
+
+  /** Worktree 开关（enabled=true：add → 落库两列 → 注入；false：清两列 → 目录保留）。 */
+  const doWorktree = useCallback(
+    async (enabled: boolean, opts?: { branch?: string; newBranch?: string }) => {
+      setSwitching(true);
+      try {
+        const wm = wtMgrRef.current!;
+        const service = props.service;
+        if (enabled) {
+          const add = await wm.addWorktree(props.session.id, opts);
+          if (!add.ok || !add.path) {
+            addItem({ kind: 'system', text: `🌿 ✘ 切入失败：${add.reason ?? '未知原因'}` });
+            return;
+          }
+          const branch =
+            (await wm.currentBranch(add.path)) ?? opts?.branch ?? opts?.newBranch ?? null;
+          service.setSessionWorktree(props.session.id, { worktreePath: add.path, worktreeBranch: branch });
+          wtBoundRef.current = { path: add.path, branch };
+          workRootRef.current = add.path;
+          gitRef.current!.updateRoot(add.path);
+          props.hooks?.rebindRoot(add.path);
+          const msg = worktreeOnMessage(branch ?? '（detached HEAD）', add.path);
+          service.appendMessage(props.session.id, { role: 'user', content: msg });
+          addItem({ kind: 'system', text: `🌿 ✔ 已切入 worktree：${branch ?? '（detached HEAD）'} @ ${add.path}` });
+        } else {
+          const prev = wtBoundRef.current.path;
+          service.setSessionWorktree(props.session.id, { worktreePath: null, worktreeBranch: null });
+          wtBoundRef.current = { path: null, branch: null };
+          workRootRef.current = process.cwd();
+          gitRef.current!.updateRoot(process.cwd());
+          props.hooks?.rebindRoot(process.cwd());
+          if (prev) {
+            // PRD 裁决 #3：目录保留不自动删除，提示显式清理入口
+            const msg = worktreeOffMessage(process.cwd(), prev);
+            service.appendMessage(props.session.id, { role: 'user', content: msg });
+            addItem({ kind: 'system', text: `🌿 ✔ 已切回主工作区（worktree 目录已保留：${prev}）` });
+          }
+        }
+        await props.rebuildPrompt?.();
+      } finally {
+        setSwitching(false);
+        void refreshGitBar();
+      }
+    },
+    [addItem, props, refreshGitBar, workRootRef],
   );
 
   // ── slash commands ──────────────────────────────────────────────────────
@@ -553,6 +708,8 @@ export function App(props: AppOptions) {
               '  /budget  查看 Token / 费用用量',
               '  /changes 查看会话文件变更汇总（F-24）',
               '  /rollback [id] 回滚变更（缺省全部；id = 回滚该变更之后）',
+              '  /branch  弹出分支列表切换会话工作分支（F-37，n 新建 / Esc 取消）',
+              '  /worktree [分支|off] 切换 Worktree 隔离工作区（F-37；无参 = 开/关切换）',
               '  /search <词> 全文/语义搜索历史对话（F-17）',
               '  /image <路径...> 附图片到下一条消息（F-25，最多 5 张；png/jpeg/gif/webp，单张 ≤4MB）',
               '  /exit    退出',
@@ -611,7 +768,7 @@ export function App(props: AppOptions) {
             return true;
           }
           void props.service.changes
-            .rollbackTo(props.session.id, process.cwd(), beforeId)
+            .rollbackTo(props.session.id, workRootRef.current, beforeId) // F-37-7：回滚作用于当前工作根
             .then((res) => {
               const lines = [
                 `↩ 已回滚 ${res.reverted.length} 项，跳过 ${res.skipped.length} 项：`,
@@ -622,6 +779,47 @@ export function App(props: AppOptions) {
             })
             .catch((e) => addItem({ kind: 'system', text: `回滚失败：${(e as Error).message}` }));
           addItem({ kind: 'system', text: beforeId ? `回滚 #${beforeId} 之后的变更…` : '回滚会话内全部变更…' });
+          return true;
+        }
+        case 'branch': {
+          // F-37：弹出分支选择卡（运行中禁切，含等待确认间隙）
+          if (running || switching) {
+            addItem({ kind: 'system', text: '⎇ 任务运行中，结束后再切换分支（/branch）' });
+            return true;
+          }
+          addItem({ kind: 'system', text: '⎇ 读取分支列表…' });
+          void wtMgrRef
+            .current!.listBranches(workRootRef.current)
+            .then((r) => {
+              if (!r.ok) {
+                addItem({ kind: 'system', text: `⎇ ✘ ${r.reason}` });
+                return;
+              }
+              setBranchCard(r.branches);
+            })
+            .catch((e) => addItem({ kind: 'system', text: `⎇ ✘ ${(e as Error).message}` }));
+          return true;
+        }
+        case 'worktree': {
+          // F-37：worktree 开关。/worktree 无参 = 开/关切换；/worktree <分支> = 以该分支切入；/worktree off = 切回
+          const arg = rest[0];
+          if (running || switching) {
+            addItem({ kind: 'system', text: '🌿 任务运行中，结束后再切换工作区（/worktree）' });
+            return true;
+          }
+          if (arg === 'off') {
+            if (!wtBoundRef.current.path) {
+              addItem({ kind: 'system', text: '🌿 当前已处于主工作区' });
+              return true;
+            }
+            void doWorktree(false);
+            return true;
+          }
+          if (wtBoundRef.current.path && !arg) {
+            void doWorktree(false);
+            return true;
+          }
+          void doWorktree(true, arg ? { branch: arg } : undefined);
           return true;
         }
         case 'search': {
@@ -677,7 +875,7 @@ export function App(props: AppOptions) {
           return false;
       }
     },
-    [addItem, exit, usage],
+    [addItem, exit, usage, running, switching, doWorktree, workRootRef],
   );
 
   const onSubmit = useCallback(
@@ -715,6 +913,8 @@ export function App(props: AppOptions) {
     void git.advisory(props.session.id).then((note) => {
       if (note) addItem({ kind: 'system', text: `⎇ ${note}` });
     });
+    // F-37：启动还原底栏状态（resume 绑定已在 cli/index.ts 解析进 workRootRef）
+    void refreshGitBar();
     // F-27 SessionStart 钩子（旁路触发）
     void props.hooks?.emit('SessionStart', {
       sessionId: props.session.id,
@@ -785,6 +985,23 @@ export function App(props: AppOptions) {
         })}
       </Box>
       <Box marginTop={0}>
+        {branchCard ? (
+          <BranchCard
+            branches={branchCard}
+            busy={switching}
+            onPick={(b) => {
+              setBranchCard(null);
+              void doCheckout({ branch: b });
+            }}
+            onNew={(n) => {
+              setBranchCard(null);
+              void doCheckout({ newBranch: n });
+            }}
+            onCancel={() => setBranchCard(null)}
+          />
+        ) : null}
+      </Box>
+      <Box marginTop={0}>
         {running ? (
           <>
             <Text color={theme.prompt}>{spinnerFrame} </Text>
@@ -799,6 +1016,13 @@ export function App(props: AppOptions) {
           </>
         )}
       </Box>
+      {/* F-37 底栏三段式：项目名 ｜ 当前分支 ｜ Worktree 开关 */}
+      <WorktreeBar
+        projectName={gitBar.projectName}
+        branch={gitBar.branch}
+        worktreeEnabled={gitBar.worktreeEnabled}
+        worktreePath={gitBar.worktreePath}
+      />
     </Box>
   );
 }

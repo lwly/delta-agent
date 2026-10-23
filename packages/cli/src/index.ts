@@ -63,6 +63,11 @@ import {
   cronRunCommand,
   cronDaemonCommand,
 } from './cron.js';
+import {
+  worktreeListCommand,
+  worktreeRemoveCommand,
+  worktreePruneCommand,
+} from './worktree.js';
 import { createSpawnExecutor } from './cron-executor.js';
 import { createDesktopNotifier, autoOnboardProject } from '@y-zero/core';
 import {
@@ -587,6 +592,18 @@ async function start(opts: CliOpts): Promise<void> {
   const recovered = service.recoverTasks(session.id);
   if (recovered > 0) console.error(`♻ 已恢复 ${recovered} 个中断任务（重新排队）`);
 
+  // ── F-37：会话恢复还原 worktree 绑定（设计文档 §4.3）──
+  // 工作根单一来源：workRootRef 被提示词 getter 与 App 组件共享，切换后同步更新
+  const workRootRef: { current: string } = { current: cwd };
+  if (session.worktree_path) {
+    if (fs.existsSync(session.worktree_path)) {
+      workRootRef.current = session.worktree_path;
+      console.error(`🌿 已恢复 worktree 绑定：${session.worktree_path}`);
+    } else {
+      console.error(`⚠ worktree 目录已丢失（${session.worktree_path}），已回退主工作区`);
+    }
+  }
+
   // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案
   // （fire-and-forget 不阻塞 TUI 启动；完成情况看 `.y-zero/onboarding.json` 或 `yzero onboarding status`）
   if (project.created) {
@@ -599,9 +616,11 @@ async function start(opts: CliOpts): Promise<void> {
   };
 
   // ── M3 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段加载 ──
+  // F-37（D6）：projectRoot 传 getter——动态段 CWD 每轮取 workRootRef 实时值，
+  // 切换分支/worktree 后由 App 调 rebuild() 重读静态段
   const model = session.model || 'claude-sonnet-4-5-20250929';
   const promptAssembly = await assemblePrompt({
-    projectRoot: cwd,
+    projectRoot: () => workRootRef.current,
     model,
     contextWindow: 200_000,
     tools: registry.definitions(),
@@ -632,6 +651,9 @@ async function start(opts: CliOpts): Promise<void> {
     permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
     allowTools: parseAllowTools(opts.allow),
     gitPolicy: normalizeGitPolicy(opts.git),
+    // F-37：共享工作根引用 + 切换后提示词重组装
+    workRootRef,
+    rebuildPrompt: promptAssembly.rebuild,
     debugPrompt: Boolean(opts.debugPrompt),
     maxTurns: Number(opts.maxTurns) || 50,
     engineMode: normalizeMode(opts.mode),
@@ -932,9 +954,36 @@ cron
     void cronDaemonCommand(opts);
   });
 
+// ── yzero worktree：F-37 worktree 生命周期管理（P1 顺手件，F-37-8）────────
+
+const worktree = program
+  .command('worktree')
+  .description('F-37 worktree 生命周期管理：查看注册清单 / 显式移除 / 清理孤儿（目录有未提交改动时拒绝移除）');
+
+worktree
+  .command('list')
+  .description('列出仓库的 worktree 注册清单（含主工作区与各会话目录）')
+  .action(() => {
+    void worktreeListCommand();
+  });
+
+worktree
+  .command('remove <path>')
+  .description('移除指定 worktree（路径为注册绝对路径，见 worktree list；脏目录拒绝）')
+  .action((wtPath: string) => {
+    void worktreeRemoveCommand(wtPath);
+  });
+
+worktree
+  .command('prune')
+  .description('清理孤儿注册项（目录已被手动删除的 worktree）')
+  .action(() => {
+    void worktreePruneCommand();
+  });
+
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

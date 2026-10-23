@@ -1,0 +1,74 @@
+classDiagram
+    class WorktreeManager {
+        -mainRoot: string
+        -signal: AbortSignal
+        +isRepo() Promise~boolean~
+        +repoName() string
+        +currentBranch(root?) Promise~string|null~
+        +isDirty(root?) Promise~boolean~
+        +listBranches(root?) Promise~BranchListResult~
+        +checkout(root, opts) Promise~GitOutcomeLike~
+        +worktreePathFor(sessionId) string
+        +addWorktree(sessionId, opts?) Promise~WorktreeAddResult~
+        +listWorktrees() Promise~WorktreeListResult~
+        +removeWorktree(wtPath) Promise~GitOutcomeLike~
+        +prune() Promise~GitOutcomeLike~
+    }
+    class GitIntegration {
+        -projectRoot: string
+        -policy: GitPolicy
+        +updateRoot(root) void
+        +autoCommitChanges(sessionId, changes, label) Promise~GitOutcome~
+        +advisory(sessionId) Promise~string|null~
+    }
+    class SessionStore {
+        +setSessionWorktree(id, patch) void
+        +touchSession(id, patch) void
+    }
+    class SessionService {
+        +setSessionWorktree(id, patch) void
+    }
+    class SessionHub {
+        -running: Map
+        +worktreeState(sessionId) Promise~SessionGitState~
+        +listBranches(sessionId) Promise~BranchListResult~
+        +checkoutBranch(sessionId, opts) Promise~BranchSwitchResult~
+        +setWorktree(sessionId, enabled, opts?) Promise~BranchSwitchResult~
+        +send(sessionId, input) Promise~void~
+        -buildPrompt(workRoot, model, tools) Promise
+    }
+    class resolveWorkRoot {
+        <<function>>
+        +resolveWorkRoot(session, projectRoot) string
+    }
+    class HookManager {
+        -projectRoot: string
+        +rebindRoot(root) void
+    }
+    class WorktreeInfo {
+        +path: string
+        +branch: string|null
+        +head: string
+    }
+    class BranchInfo {
+        +name: string
+        +current: boolean
+    }
+    class SessionGitState {
+        +isRepo: boolean
+        +projectName: string
+        +branch: string|null
+        +worktree: SessionWorktreeState
+        +running: boolean
+    }
+
+    SessionHub --> WorktreeManager : 切换编排调用
+    SessionHub --> SessionService : 落库/读会话
+    SessionHub --> resolveWorkRoot : 每次 send 解析工作根
+    SessionService --> SessionStore : 转发 setSessionWorktree
+    GitIntegration --> WorktreeManager : 无直接依赖（各自经 runWithShell 调 git）
+    WorktreeManager ..> WorktreeInfo : 产出
+    WorktreeManager ..> BranchInfo : 产出
+    SessionHub ..> SessionGitState : 产出（GET /api/sessions/:id/git）
+    SessionHub ..> HookManager : 切换后 rebindRoot
+    SessionHub ..> GitIntegration : done 时 autoCommit（根 = 当前工作根）

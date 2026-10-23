@@ -1,5 +1,13 @@
 import { defineStore } from 'pinia';
-import { api, type ChatMessage, type ConfirmRequest, type MessageImage, type PlanPayload } from '../api/client';
+import {
+  api,
+  type BranchInfo,
+  type ChatMessage,
+  type ConfirmRequest,
+  type MessageImage,
+  type PlanPayload,
+  type SessionGitState,
+} from '../api/client';
 import { subscribeSession } from '../api/sse';
 
 /** 对话运行时状态：SSE 事件 → 渲染消息流 + 待确认/待回答卡片 */
@@ -12,6 +20,10 @@ export const useChatStore = defineStore('chat', {
     running: false,
     /** PASI-9：会话处于暂停态（上一轮执行被暂停；发送消息即恢复） */
     paused: false,
+    /** 会话级权限模式（plan 只读 / default 询问确认 / yolo 全部放行） */
+    permissionMode: 'default' as 'plan' | 'default' | 'yolo',
+    /** F-37：底栏 git 状态（项目名 / 分支 / worktree 绑定）；非 git 仓库为 null */
+    gitState: null as SessionGitState | null,
     pendingConfirm: null as ConfirmRequest | null,
     pendingPlan: null as null | { requestId: string; plan: PlanPayload },
     pendingAsk: null as { requestId: string; question: string; options?: string[] } | null,
@@ -24,6 +36,8 @@ export const useChatStore = defineStore('chat', {
       this.close();
       this.sessionId = sessionId;
       const detail = await api.getSession(sessionId);
+      // 会话切换竞态防御：await 期间用户可能已切到其他会话，过期响应不得覆盖当前状态
+      if (this.sessionId !== sessionId) return;
       this.sessionMeta = {
         title: detail.session.title,
         mode: detail.session.mode,
@@ -34,6 +48,15 @@ export const useChatStore = defineStore('chat', {
       this.running = false;
       // PASI-9：打开会话时同步暂停态（status 落库值）
       this.paused = detail.session.status === 'paused';
+      // 会话级权限模式（失败保持默认，不阻塞会话打开）
+      try {
+        this.permissionMode = (await api.getPermission(sessionId)).mode;
+      } catch {
+        this.permissionMode = 'default';
+      }
+      // F-37：底栏 git 状态（失败静默，不阻塞会话打开）
+      await this.loadGitState(sessionId);
+      if (this.sessionId !== sessionId) return;
       this.pendingConfirm = null;
       this.pendingPlan = null;
       this.pendingAsk = null;
@@ -46,6 +69,16 @@ export const useChatStore = defineStore('chat', {
       this.sessionMeta = null;
       this.messages = [];
       this.streamingText = '';
+      // 切换/关闭会话必须清空上一会话的全部 UI 状态：notices 渲染在对话区内，
+      // 不清空会把旧会话的 token 统计 / 预算告警 / 错误提示带入新会话
+      this.notices = [];
+      this.running = false;
+      this.paused = false;
+      this.permissionMode = 'default';
+      this.gitState = null;
+      this.pendingConfirm = null;
+      this.pendingPlan = null;
+      this.pendingAsk = null;
     },
     notice(text: string) {
       this.notices.push({ id: this.noticeId++, text });
@@ -161,6 +194,13 @@ export const useChatStore = defineStore('chat', {
         case 'run_error':
           this.notice(`✘ ${String(ev.message)}`);
           break;
+        // F-37：切换结果行内反馈（注入消息已落库，done 拉取后自然进消息流）
+        case 'git_notice': {
+          const text = String(ev.message ?? '');
+          this.notice(text.replace(/^（系统提示：|\）$/g, ''));
+          void this.loadGitState(this.sessionId); // 切换即刷新底栏
+          break;
+        }
         case 'done': {
           // done 前最后一次 text_delta 已累积 → 落为 assistant 消息（与桥的落库一致）
           if (this.streamingText) {
@@ -169,9 +209,10 @@ export const useChatStore = defineStore('chat', {
           }
           const usage = ev.usage as { inputTokens?: number; outputTokens?: number } | undefined;
           if (usage) this.notice(`本任务 token：${usage.inputTokens ?? 0} 入 / ${usage.outputTokens ?? 0} 出`);
-          // 以服务端落库为准，重拉一次
-          const detail = await api.getSession(this.sessionId);
-          this.messages = detail.messages;
+          // 以服务端落库为准，重拉一次（期间会话已切换则丢弃过期响应，防止旧会话消息覆盖新会话）
+          const sid = this.sessionId;
+          const detail = await api.getSession(sid);
+          if (this.sessionId === sid) this.messages = detail.messages;
           break;
         }
         default:
@@ -222,6 +263,81 @@ export const useChatStore = defineStore('chat', {
         await api.pause(this.sessionId);
       } catch (e) {
         this.notice(`✘ ${(e as Error).message}`);
+      }
+    },
+    /** 会话级权限模式切换（仅影响后续运行；yolo 放行所有写/执行操作） */
+    async setPermissionMode(mode: 'plan' | 'default' | 'yolo') {
+      try {
+        await api.setPermission(this.sessionId, mode);
+        this.permissionMode = mode;
+        const label = mode === 'plan' ? '只读（写/执行类工具将被拒绝）'
+          : mode === 'yolo' ? '全部放行（写文件、执行命令不再询问）'
+          : '询问确认（写/执行操作前逐次确认）';
+        this.notice(`已切换会话权限：${label}`);
+      } catch (e) {
+        this.notice(`✘ ${(e as Error).message}`);
+      }
+    },
+
+    // ── F-37 git 分支切换 + worktree ──────────────────────────────────────
+
+    /** 拉取底栏 git 状态（失败静默：非 git 项目 / 服务异常时底栏不渲染交互）。 */
+    async loadGitState(sessionId: string) {
+      try {
+        this.gitState = await api.gitState(sessionId);
+      } catch {
+        this.gitState = null;
+      }
+    },
+
+    /** 本地分支列表（弹层数据源）；失败返回 null（reason 已由调用方 toast）。 */
+    async listBranches(): Promise<BranchInfo[] | null> {
+      try {
+        const r = await api.listBranches(this.sessionId);
+        return r.branches;
+      } catch (e) {
+        this.notice(`✘ ${(e as Error).message}`);
+        return null;
+      }
+    },
+
+    /** 会话级分支切换（branch = 切到既有分支；newBranch = 就地新建）。 */
+    async checkout(opts: { branch?: string; newBranch?: string }): Promise<boolean> {
+      try {
+        const r = await api.checkoutBranch(this.sessionId, opts);
+        if (!r.ok) {
+          this.notice(`✘ 切换失败：${r.reason ?? '未知原因'}`);
+          return false;
+        }
+        this.notice(`⎇ 已切换到 ${r.branch}`);
+        await this.loadGitState(this.sessionId);
+        return true;
+      } catch (e) {
+        this.notice(`✘ ${(e as Error).message}`);
+        return false;
+      }
+    },
+
+    /** Worktree 开关（勾选切入 / 取消切回；目录保留）。 */
+    async toggleWorktree(enabled: boolean, opts?: { branch?: string; newBranch?: string }): Promise<boolean> {
+      try {
+        const r = await api.setWorktree(this.sessionId, enabled, opts);
+        if (!r.ok) {
+          this.notice(`✘ ${enabled ? '切入' : '切回'}失败：${r.reason ?? '未知原因'}`);
+          await this.loadGitState(this.sessionId); // 失败也回读，校准 checkbox 状态
+          return false;
+        }
+        this.notice(
+          enabled
+            ? `🌿 已切入 worktree：${r.branch} @ ${r.path}`
+            : '🌿 已切回主工作区（worktree 目录已保留，可用 yzero worktree remove 清理）',
+        );
+        await this.loadGitState(this.sessionId);
+        return true;
+      } catch (e) {
+        this.notice(`✘ ${(e as Error).message}`);
+        await this.loadGitState(this.sessionId);
+        return false;
       }
     },
   },

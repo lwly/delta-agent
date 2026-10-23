@@ -14,6 +14,7 @@ import UsageModal from '../components/UsageModal.vue';
 import CronModal from '../components/CronModal.vue';
 import TrashModal from '../components/TrashModal.vue';
 import SearchModal from '../components/SearchModal.vue';
+import GitStatusBar from '../components/GitStatusBar.vue';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
@@ -64,7 +65,38 @@ async function refreshTodayUsage() {
   }
 }
 
-const platform = navigator.platform || '—';
+// ── 平台展示 ──
+// navigator.platform 在 Apple Silicon Mac 上仍返回历史遗留值 "MacIntel"（苹果为兼容未改过），
+// 改用 userAgentData 优先，降级解析 UA；Chrome 下再异步补架构（arm → arm64）
+const platform = ref(navigator.platform || '—');
+void (async () => {
+  const uad = (
+    navigator as Navigator & {
+      userAgentData?: {
+        platform?: string;
+        getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string; platform?: string }>;
+      };
+    }
+  ).userAgentData;
+  let name = uad?.platform;
+  if (!name) {
+    const ua = navigator.userAgent;
+    if (/Windows/.test(ua)) name = 'Windows';
+    else if (/Mac/.test(ua)) name = 'macOS';
+    else if (/Android/.test(ua)) name = 'Android';
+    else if (/Linux/.test(ua)) name = 'Linux';
+  }
+  let arch = '';
+  if (uad?.getHighEntropyValues) {
+    try {
+      const { architecture } = await uad.getHighEntropyValues(['architecture']);
+      if (architecture) arch = architecture === 'arm' ? 'arm64' : architecture;
+    } catch {
+      // 高熵提示不可用时忽略，仅展示 OS 名
+    }
+  }
+  platform.value = [name, arch].filter(Boolean).join(' · ') || platform.value;
+})();
 
 // ── 会话模式徽标（react / plan-execute / multi-agent → react/plan/multi 配色）──
 function modeCls(mode: string): string {
@@ -201,10 +233,21 @@ function onModeSwitch(mode: string) {
   void newSession(mode);
 }
 
+/** 会话级权限切换：plan 只读 / default 询问确认 / yolo 全部放行（影响该会话后续运行） */
+function onPermissionChange(mode: 'plan' | 'default' | 'yolo') {
+  if (mode === chat.permissionMode) return;
+  void chat.setPermissionMode(mode);
+}
+
 const modelOptions = computed(() => {
+  // provider 未配置模型名时不得把 provider id 当模型名传给 API（曾致 deepseek 400），
+  // 此时 value 留空，由后端回退到该 Provider 的默认模型
   const opts = providers.value
     .filter((p) => p.enabled)
-    .map((p) => ({ value: p.model || p.id, label: `${p.model || p.id}（${p.id}）` }));
+    .map((p) => ({
+      value: p.model || '',
+      label: p.model ? `${p.model}（${p.id}）` : `${p.id}（默认模型）`,
+    }));
   const cur = chat.sessionMeta?.model;
   if (cur && !opts.some((o) => o.value === cur)) opts.unshift({ value: cur, label: cur });
   return opts;
@@ -218,9 +261,50 @@ function onModelChange(ev: Event) {
 }
 
 function askRemoveProject(p: { id: string; name: string }) {
+  projectMenuFor.value = '';
   removeTarget.value = { kind: 'project', id: p.id, name: p.name };
   removeConfirmName.value = '';
   showRemove.value = true;
+}
+
+// ── 项目行「更多菜单」（对齐空间侧栏交互：打开文件夹 / 复制路径 / 重命名 / 移除）──
+const projectMenuFor = ref('');
+const renamingProjectId = ref('');
+const renameProjectText = ref('');
+
+function toggleProjectMenu(id: string) {
+  projectMenuFor.value = projectMenuFor.value === id ? '' : id;
+  renamingProjectId.value = '';
+}
+/** 在系统文件管理器中打开项目目录 */
+async function revealProject(p: { id: string }) {
+  projectMenuFor.value = '';
+  try {
+    await api.revealProject(p.id);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+function copyProjectPath(p: { root_path: string }) {
+  projectMenuFor.value = '';
+  copyText(p.root_path);
+}
+function startRenameProject(p: { id: string; name: string }) {
+  projectMenuFor.value = '';
+  renamingProjectId.value = p.id;
+  renameProjectText.value = p.name;
+}
+async function saveRenameProject(p: { id: string }) {
+  if (renamingProjectId.value !== p.id) return;
+  const name = renameProjectText.value.trim();
+  renamingProjectId.value = '';
+  if (!name) return;
+  try {
+    await api.renameProject(p.id, name);
+    await ws.refreshProjects();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
 }
 function askRemoveSession(s: { id: string; title: string }) {
   removeTarget.value = { kind: 'session', id: s.id, name: s.title };
@@ -551,6 +635,8 @@ watch(
 watch(
   () => chat.running,
   (running, prev) => {
+    // 运行态变化即时同步侧栏徽标（不等 5s 轮询）
+    if (running !== prev) void ws.refreshRunning();
     if (prev === true && running === false) {
       void refreshTodayUsage();
       void refreshMemoryBadge();
@@ -564,6 +650,8 @@ watch(showMemory, (open) => {
 
 <template>
   <div class="app">
+    <!-- 项目菜单打开时的点击外部关闭层 -->
+    <div v-if="projectMenuFor" class="menu-overlay" @click="projectMenuFor = ''" />
     <!-- ══════════ 侧边栏：多项目 × 多对话 ══════════ -->
     <aside class="sidebar">
       <div class="brand">
@@ -589,9 +677,26 @@ watch(showMemory, (open) => {
           <div class="project-header" :class="{ active: p.id === ws.activeProjectId && !chat.sessionId }" @click="selectProject(p.id)">
             <span class="project-caret" :class="{ open: expanded.has(p.id) }">▶</span>
             <span class="project-dot" />
-            <span class="project-name" :title="p.root_path">{{ p.name }}</span>
+            <input
+              v-if="renamingProjectId === p.id"
+              v-model="renameProjectText"
+              class="rename-input"
+              autofocus
+              @click.stop
+              @keydown.enter.prevent="saveRenameProject(p)"
+              @keydown.escape.prevent="renamingProjectId = ''"
+              @blur="saveRenameProject(p)"
+            />
+            <span v-else class="project-name" :title="p.root_path">{{ p.name }}</span>
             <span class="project-count">{{ p.session_count }}</span>
-            <button class="item-del" title="移除项目（软删除）" @click.stop="askRemoveProject(p)">✕</button>
+            <button class="item-del" title="更多操作" @click.stop="toggleProjectMenu(p.id)">⋯</button>
+            <!-- 项目更多菜单：打开文件夹 / 复制路径 / 重命名 / 移除 -->
+            <div v-if="projectMenuFor === p.id" class="project-menu" @click.stop>
+              <button class="menu-item" @click="revealProject(p)"><span class="mi">📂</span>打开文件夹</button>
+              <button class="menu-item" @click="copyProjectPath(p)"><span class="mi">📋</span>复制路径</button>
+              <button class="menu-item" @click="startRenameProject(p)"><span class="mi">✏️</span>重命名</button>
+              <button class="menu-item danger" @click="askRemoveProject(p)"><span class="mi">🗑</span>从列表中移除</button>
+            </div>
           </div>
           <div v-if="expanded.has(p.id) && p.id === ws.activeProjectId" class="session-list">
             <div
@@ -603,6 +708,8 @@ watch(showMemory, (open) => {
             >
               <span class="session-icon">💬</span>
               <span class="session-title" :title="s.title">{{ s.title }}</span>
+              <!-- F-37：绑定 worktree 的会话轻量标识（重开自动还原绑定） -->
+              <span v-if="s.worktree_path" class="wt-badge" title="已绑定 worktree：会话重开自动还原">🌿</span>
               <span v-if="isSessionRunning(s.id)" class="mode-tag running" title="执行中">运行中</span>
               <span v-else-if="s.status === 'paused'" class="mode-tag paused" title="已暂停，打开会话发送消息即恢复">已暂停</span>
               <span class="mode-tag" :class="modeCls(s.mode)">{{ modeShort(s.mode) }}</span>
@@ -829,6 +936,36 @@ watch(showMemory, (open) => {
         <!-- 输入区 -->
         <div class="composer-wrap">
           <div class="composer">
+            <!-- 工具栏：移至输入框上方（图片 / @引用 / skill / mcp / 执行模式 / 权限） -->
+            <div class="composer-tools">
+              <span class="hint-chip" @click="fileInput?.click()" style="cursor: pointer">🖼 图片</span>
+              <span class="hint-chip" title="插入 @ 后自动补全项目文件" style="cursor: pointer" @click="acTrigger('file')">@文件引用</span>
+              <span class="hint-chip" title="插入 / 后自动补全可用技能" style="cursor: pointer" @click="acTrigger('skill')">/skill 技能</span>
+              <span class="hint-chip">/mcp 扩展工具</span>
+              <!-- 当前会话模式下拉：模式在会话创建时确定，切换 = 以该模式新建对话 -->
+              <select
+                class="mode-select"
+                :value="chat.sessionMeta.mode"
+                :disabled="chat.running"
+                title="当前执行模式（模式在会话创建时确定，切换将以所选模式新建对话）"
+                @change="onModeSwitch(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
+              </select>
+              <!-- 会话级权限：控制写/执行类工具是否需要逐次确认 -->
+              <select
+                class="mode-select perm-select"
+                :class="{ yolo: chat.permissionMode === 'yolo' }"
+                :value="chat.permissionMode"
+                :disabled="chat.running"
+                title="会话权限：只读 / 询问确认 / 全部放行"
+                @change="onPermissionChange(($event.target as HTMLSelectElement).value as 'plan' | 'default' | 'yolo')"
+              >
+                <option value="default">🖐 询问确认</option>
+                <option value="plan">📖 只读</option>
+                <option value="yolo">⚡ 全部放行</option>
+              </select>
+            </div>
             <div v-if="pendingImages.length" class="pending-imgs">
               <span v-for="(p, i) in pendingImages" :key="p.preview" class="thumb">
                 <img :src="p.preview" :alt="p.name" />
@@ -866,21 +1003,8 @@ watch(showMemory, (open) => {
               </button>
               <div class="ac-tip">↑↓ 选择 · Enter / Tab 确认 · Esc 关闭</div>
             </div>
-            <div class="composer-bar">
-              <span class="hint-chip" @click="fileInput?.click()" style="cursor: pointer">🖼 图片</span>
-              <span class="hint-chip" title="插入 @ 后自动补全项目文件" style="cursor: pointer" @click="acTrigger('file')">@文件引用</span>
-              <span class="hint-chip" title="插入 / 后自动补全可用技能" style="cursor: pointer" @click="acTrigger('skill')">/skill 技能</span>
-              <span class="hint-chip">/mcp 扩展工具</span>
-              <!-- 当前会话模式下拉：模式在会话创建时确定，切换 = 以该模式新建对话 -->
-              <select
-                class="mode-select"
-                :value="chat.sessionMeta.mode"
-                :disabled="chat.running"
-                title="当前执行模式（模式在会话创建时确定，切换将以所选模式新建对话）"
-                @change="onModeSwitch(($event.target as HTMLSelectElement).value)"
-              >
-                <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
-              </select>
+            <!-- 底部操作区：暂停/停止/发送（仅运行态按钮 + 发送，右对齐） -->
+            <div class="composer-actions">
               <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
               <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
               <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
@@ -888,6 +1012,11 @@ watch(showMemory, (open) => {
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- F-37 底部状态条：项目名 ｜ 当前分支 ｜ Worktree 开关（输入框下方） -->
+        <div v-if="chat.sessionId" class="composer-wrap git-bar-zone">
+          <GitStatusBar />
         </div>
       </template>
     </main>
@@ -962,6 +1091,7 @@ watch(showMemory, (open) => {
 .sidebar-scroll { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
 .project-group { margin-top: 8px; }
 .project-header {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
   padding: 7px 8px; border-radius: 7px; cursor: pointer; transition: background 0.15s;
 }
@@ -972,6 +1102,32 @@ watch(showMemory, (open) => {
 .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 .project-name { font-weight: 600; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-count { font-size: 11px; color: var(--text-faint); background: var(--bg-elevated); padding: 1px 7px; border-radius: 8px; }
+
+/* 项目行重命名输入框 */
+.rename-input {
+  flex: 1; min-width: 0; font-size: 13px; font-weight: 600;
+  background: var(--bg-elevated); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 5px; padding: 2px 6px; outline: none;
+}
+/* 菜单打开时的全屏透明遮罩（点击外部关闭） */
+.menu-overlay { position: fixed; inset: 0; z-index: 40; }
+/* 项目行更多菜单（对齐空间侧栏交互） */
+.project-menu {
+  position: absolute; top: calc(100% + 4px); right: 6px; z-index: 41;
+  min-width: 168px; padding: 5px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex; flex-direction: column;
+}
+.project-menu .menu-item {
+  display: flex; align-items: center; gap: 8px;
+  border: none; background: transparent; color: var(--text-dim);
+  font-size: 12.5px; text-align: left; padding: 7px 9px; border-radius: 6px; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.project-menu .menu-item:hover { background: var(--bg-hover); color: var(--text); }
+.project-menu .menu-item .mi { width: 16px; text-align: center; flex: none; }
+.project-menu .menu-item.danger:hover { background: var(--red-soft); color: var(--red); }
 
 .session-list { margin: 2px 0 4px 18px; border-left: 1px solid var(--border); padding-left: 8px; }
 .session-item {
@@ -992,6 +1148,24 @@ watch(showMemory, (open) => {
 }
 .session-item:hover .item-del, .project-header:hover .item-del { opacity: 1; }
 .item-del:hover { background: var(--red-soft); color: var(--red); }
+
+/* 会话行徽标：模式 / 运行中 / 已暂停 */
+.mode-tag {
+  flex: none; font-size: 10.5px; line-height: 1; padding: 3px 6px;
+  border-radius: 4px; background: var(--bg-elevated); color: var(--text-faint);
+}
+.mode-tag.running {
+  color: var(--green); background: var(--green-soft); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.mode-tag.running::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); animation: run-pulse 1.2s ease-in-out infinite;
+}
+@keyframes run-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(0.75); } }
+.mode-tag.paused { color: var(--orange); background: var(--orange-soft); }
+/* F-37：会话行 worktree 绑定标识 */
+.wt-badge { flex: none; font-size: 11px; line-height: 1; }
 
 .sidebar-footer { border-top: 1px solid var(--border); padding: 10px 14px; font-size: 11.5px; color: var(--text-faint); }
 .footer-row { display: flex; justify-content: space-between; padding: 2.5px 0; }
@@ -1196,6 +1370,8 @@ watch(showMemory, (open) => {
 
 /* ══════════ 输入区 ══════════ */
 .composer-wrap { padding: 0 24px 18px; }
+/* F-37：git 状态条区（输入框下方，压缩底部留白） */
+.git-bar-zone { padding-top: 0; padding-bottom: 12px; }
 .composer {
   max-width: 860px; margin: 0 auto;
   background: var(--bg-panel); border: 1px solid var(--border);
@@ -1227,7 +1403,10 @@ watch(showMemory, (open) => {
 }
 .composer textarea:focus { border: none; }
 .composer textarea:disabled { opacity: 0.6; }
-.composer-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+/* 工具栏：位于输入框上方，底部分隔线与输入区衔接（替代原 composer-bar） */
+.composer-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-bottom: 8px; margin-bottom: 9px; border-bottom: 1px solid var(--border); }
+/* 底部操作区：暂停/停止/发送按钮右对齐 */
+.composer-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; justify-content: flex-end; }
 .hint-chip {
   font-size: 11px; color: var(--text-faint);
   background: var(--bg-elevated); border: 1px solid var(--border);
@@ -1241,6 +1420,8 @@ watch(showMemory, (open) => {
 }
 .mode-select:hover { color: var(--text); }
 .mode-select:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 权限选择器：yolo 高亮警示（全部放行状态一眼可辨） */
+.perm-select.yolo { color: var(--orange); border-color: var(--orange); background: var(--orange-soft); font-weight: 600; }
 .send-btn {
   margin-left: auto; padding: 7px 20px; border: none; border-radius: 8px;
   background: linear-gradient(135deg, #58a6ff, #4c8dff);
