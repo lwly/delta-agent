@@ -1008,7 +1008,7 @@ watch(showMemory, (open) => {
               <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
               <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
               <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
-                发送 <span class="kbd">↵</span>
+                发送 <span class="kbd">Enter</span>
               </button>
             </div>
           </div>
