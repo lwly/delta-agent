@@ -14,6 +14,15 @@ import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
+import {
+  addCronJob,
+  cronJobToJson,
+  loadCronJobs,
+  removeCronJob,
+  updateCronJob,
+  findCronJob,
+} from '../cron/store.js';
+import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -24,6 +33,13 @@ export interface ServeOptions {
   webDistDir?: string;
   /** 设置中心：Provider 管理（F-04a） */
   providers?: ProviderManager;
+  /**
+   * F-22 定时任务：Web 面板「立即运行」用的执行器（CLI serve 传 spawn 执行器）。
+   * 缺省 = 不提供手动运行能力（GET/PATCH/DELETE 正常，POST run 返回 400）。
+   */
+  cronExecutor?: CronExecutor;
+  /** F-22：cron.json 存储目录（缺省用户主目录；测试注入临时目录隔离） */
+  cronHomeDir?: string;
 }
 
 const MIME: Record<string, string> = {
@@ -340,6 +356,94 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (parts[2] === 'sessions') {
           const items = service.usage.bySession({ range, projectId: project });
           return json(res, 200, { range, project: project ?? null, items });
+        }
+      }
+
+      // ── cron（F-22 定时任务面板：清单/增改删/立即运行；存储与 CLI 共用 ~/.y-zero/cron.json）──
+      if (parts[0] === 'api' && parts[1] === 'cron') {
+        const cronHome = opts.cronHomeDir;
+        const cronJobs = (): ReturnType<typeof loadCronJobs>['jobs'] => loadCronJobs(cronHome).jobs;
+        const id = parts[2];
+        // GET /api/cron → 全量清单（含 warnings，供面板提示配置异常）
+        if (method === 'GET' && !id) {
+          const { jobs, warnings } = loadCronJobs(cronHome);
+          return json(res, 200, { jobs: jobs.map(cronJobToJson), warnings });
+        }
+        // GET /api/cron/:id → 单任务（运行中轮询用）
+        if (method === 'GET' && id) {
+          const job = findCronJob(cronJobs(), id);
+          return job ? json(res, 200, cronJobToJson(job)) : err(res, 404, 'job not found');
+        }
+        // POST /api/cron → 新增
+        if (method === 'POST' && !id) {
+          const body = await readBody(req);
+          const name = String(body.name ?? '').trim();
+          const cron = String(body.cron ?? '').trim();
+          const prompt = String(body.prompt ?? '');
+          if (!name || !cron || !prompt.trim()) return err(res, 400, 'name / cron / prompt are required');
+          try {
+            const job = addCronJob(
+              {
+                name,
+                cron,
+                prompt,
+                cwd: String(body.cwd ?? process.cwd()),
+                enabled: body.enabled === false ? false : true,
+                ...(body.maxCostUsd !== undefined && Number(body.maxCostUsd) > 0 ? { maxCostUsd: Number(body.maxCostUsd) } : {}),
+              },
+              cronHome,
+            );
+            return json(res, 200, cronJobToJson(job));
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+        }
+        if (id) {
+          // PATCH /api/cron/:id → 编辑（enabled / cron / prompt / cwd / name / maxCostUsd）
+          if (method === 'PATCH') {
+            const body = await readBody(req);
+            try {
+              const job = updateCronJob(
+                id,
+                {
+                  ...(body.enabled !== undefined ? { enabled: body.enabled === true } : {}),
+                  ...(body.cron !== undefined ? { cron: String(body.cron) } : {}),
+                  ...(body.prompt !== undefined ? { prompt: String(body.prompt) } : {}),
+                  ...(body.cwd !== undefined ? { cwd: String(body.cwd) } : {}),
+                  ...(body.name !== undefined ? { name: String(body.name) } : {}),
+                  ...(body.maxCostUsd !== undefined ? { maxCostUsd: Number(body.maxCostUsd) } : {}),
+                },
+                cronHome,
+              );
+              return json(res, 200, cronJobToJson(job));
+            } catch (e) {
+              return err(res, 400, (e as Error).message);
+            }
+          }
+          // DELETE /api/cron/:id → 删除
+          if (method === 'DELETE') {
+            try {
+              removeCronJob(id, cronHome);
+              return json(res, 200, { ok: true });
+            } catch (e) {
+              return err(res, 404, (e as Error).message);
+            }
+          }
+          // POST /api/cron/:id/run → 立即运行一次（无视调度；执行中 202，前端轮询 lastRun）
+          if (method === 'POST' && parts[3] === 'run') {
+            if (!opts.cronExecutor) return err(res, 400, 'cron executor not configured');
+            const job = findCronJob(cronJobs(), id);
+            if (!job) return err(res, 404, 'job not found');
+            if (job.runningSince) return err(res, 409, 'job is running');
+            // 后台执行：锁由 runner 写入/清除，前端轮询 GET /api/cron/:id 观察
+            void runDueCronJobs({
+              executor: opts.cronExecutor,
+              onlyJobId: job.id,
+              trigger: 'manual',
+              homeDir: cronHome,
+            }).catch(() => undefined);
+            return json(res, 202, { ok: true, running: true });
+          }
         }
       }
 

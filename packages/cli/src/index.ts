@@ -55,6 +55,7 @@ import {
   cronRunCommand,
   cronDaemonCommand,
 } from './cron.js';
+import { createSpawnExecutor } from './cron-executor.js';
 import { createDesktopNotifier, autoOnboardProject } from '@y-zero/core';
 import {
   normalizeGitPolicy,
@@ -508,6 +509,8 @@ program
       port,
       webDistDir: webDist,
       providers,
+      // F-22 定时任务：Web 面板「立即运行」复用 spawn 子进程执行器（与 daemon 同构）
+      cronExecutor: createSpawnExecutor(),
     });
     server.listen(port, '127.0.0.1', () => {
       console.log(`✔ yzero Web 控制台已启动：http://127.0.0.1:${port}`);

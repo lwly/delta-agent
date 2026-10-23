@@ -210,6 +210,47 @@ export interface ProviderView {
   keyMasked: string;
 }
 
+// ── F-22 定时任务（调度面板；字段与 core CronJob 对应，snake_case 承载）──────
+
+export interface CronRunRecordView {
+  trigger: 'schedule' | 'manual';
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  status: string;
+  exit_code: number | null;
+  session_id?: string;
+  cost_usd?: number;
+  turns?: number;
+  error?: string;
+  result_preview?: string;
+}
+
+export interface CronJobView {
+  id: string;
+  name: string;
+  cron: string;
+  prompt: string;
+  cwd: string;
+  enabled: boolean;
+  max_cost_usd?: number;
+  created_at: string;
+  updated_at: string;
+  next_run_at?: string;
+  running_since?: string;
+  last_run?: CronRunRecordView;
+  runs: CronRunRecordView[];
+}
+
+export interface CronJobInput {
+  name: string;
+  cron: string;
+  prompt: string;
+  cwd: string;
+  max_cost_usd?: number;
+  enabled?: boolean;
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -291,4 +332,13 @@ export const api = {
     const qs = q.toString();
     return request<UsageSessions>('GET', `/api/usage/sessions${qs ? `?${qs}` : ''}`);
   },
+
+  // cron（F-22 定时任务面板）
+  cronList: () => request<{ jobs: CronJobView[]; warnings: Array<{ message: string }> }>('GET', '/api/cron'),
+  cronGet: (id: string) => request<CronJobView>('GET', `/api/cron/${id}`),
+  cronAdd: (input: CronJobInput) => request<CronJobView>('POST', '/api/cron', input),
+  cronUpdate: (id: string, patch: Partial<Pick<CronJobInput, 'name' | 'cron' | 'prompt' | 'cwd' | 'max_cost_usd'> & { enabled: boolean }>) =>
+    request<CronJobView>('PATCH', `/api/cron/${id}`, patch),
+  cronRemove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/cron/${id}`),
+  cronRun: (id: string) => request<{ ok: boolean; running: boolean }>('POST', `/api/cron/${id}/run`),
 };

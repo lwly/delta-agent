@@ -1,14 +1,15 @@
 # F-22 定时任务/自动化 —— 设计与实现说明
 
-> 状态：✅ 2026-10-23 交付（core 内核 + CLI 子命令组，36 例单测全绿；Web 面板为后续增量）
+> 状态：✅ 2026-10-23 交付（core 内核 + CLI 子命令组 + Web 调度面板；36 + 6 例单测全绿）
 
 ## 1. 目标与范围
 
 Agent 任务的 cron 调度：按 5 字段 cron 表达式（本地时区）定期以 **headless 非交互语义**
 自动运行一条 agent 任务，运行记录可查、可启停、可手动补跑。
 
-**本期范围**：core 调度内核 + `yzero cron` CLI 子命令组 + 常驻 daemon。
-**不在本期**：Web 调度面板（PRD F-22 无 Web 要求，留作增量）、分布式/多机调度。
+**本期范围**：core 调度内核 + `yzero cron` CLI 子命令组 + 常驻 daemon + Web 调度面板
+（`yzero serve` 内 `/api/cron` 端点 + 工作台「⏰ 定时」弹窗，与 CLI 共用同一 `cron.json` 存储）。
+**不在本期**：分布式/多机调度。
 
 ## 2. 总体结构
 
@@ -90,6 +91,25 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 执行器超时默认 30 分钟（SIGTERM），超时记 `timeout`；子进程输出无法解析为 JSON
 报告时收敛为 `error` 并携带输出前 500 字。
 
+## 6.1 Web 调度面板（F-22 增量）
+
+**端点**（`core/server/http.ts`，serve 进程内直读 `~/.y-zero/cron.json`；`ServeOptions`
+新增 `cronExecutor`（CLI serve 传 spawn 执行器）与 `cronHomeDir`（测试隔离））：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/cron` | 全量清单 + 配置 warnings（snake_case 传输，`cronJobToJson` 口径） |
+| `GET /api/cron/:id` | 单任务（运行中轮询用） |
+| `POST /api/cron` | 新增（name/cron/prompt 必填；cwd 缺省 serve 启动目录） |
+| `PATCH /api/cron/:id` | 编辑（enabled / cron / prompt / cwd / name / maxCostUsd） |
+| `DELETE /api/cron/:id` | 删除 |
+| `POST /api/cron/:id/run` | 立即运行一次：202 后台执行（trigger=manual、不推进 nextRunAt、runningSince 锁防重复）；未配执行器 400、运行中 409 |
+
+**前端**（`web/src/components/CronModal.vue`，工作台「⏰ 定时」入口，沿用 UsageModal 弹窗惯例）：
+任务卡列表（状态点/表达式/下次运行/上次结果摘要）+ 新增表单 + 启停/删除（二次确认）/
+立即运行；「立即运行」提交后每 2s 轮询单任务端点，`running_since` 清除后自动展开
+运行历史；warnings 降级为顶部提示不阻塞面板。
+
 ## 7. 安全与口径
 
 - 写路径全部 tmp+rename 原子写；既有文件坏 JSON 时**拒绝写入**（宁可不落盘也不覆盖）；
@@ -109,5 +129,8 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 - `cron-runner.test.ts`：到期执行与推进 / 禁用跳过 / 运行锁与崩溃残留清理 /
   失败不中断 / 执行器抛错兜底 / onlyJobId 不推进 / 坏 JSON 安全返回 / 缺 nextRunAt 补跑 /
   scheduler 循环与 stop / signal 停止（12 例）；
+- `cron-server.test.ts`：/api/cron 清单/新增校验/编辑/删除/404/立即运行（202 + 轮询 last_run +
+  手动语义不推进 nextRunAt）/ 未配执行器 400 / cronHomeDir 隔离（6 例）；
 - 端到端冒烟：隔离 HOME 下 add/list/run --id（无 Provider 正确收敛 error）/ disable /
-  remove / daemon --once 全链路通过。
+  remove / daemon --once 全链路通过；`yzero serve` 冒烟：/api/cron GET / POST（snake_case
+  返回 + cwd 缺省 serve 目录）/ run 404 全通。
