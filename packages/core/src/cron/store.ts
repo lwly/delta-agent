@@ -230,6 +230,44 @@ export function findCronJob(jobs: CronJob[], idOrName: string): CronJob | undefi
   return jobs.find((j) => j.id === idOrName || j.name === idOrName);
 }
 
+// ── JSON 视图（Web /api/cron 传输口径：snake_case，与 usage/memory 端点一致）──
+
+/** 运行记录 → 传输 JSON（result_preview 截断已在写入时完成，这里只做字段重命名） */
+export function cronRunToJson(r: CronRunRecord): Record<string, unknown> {
+  return {
+    trigger: r.trigger,
+    started_at: r.startedAt,
+    finished_at: r.finishedAt,
+    duration_ms: r.durationMs,
+    status: r.status,
+    exit_code: r.exitCode,
+    ...(r.sessionId ? { session_id: r.sessionId } : {}),
+    ...(r.costUsd !== undefined ? { cost_usd: r.costUsd } : {}),
+    ...(r.turns !== undefined ? { turns: r.turns } : {}),
+    ...(r.error ? { error: r.error } : {}),
+    ...(r.resultPreview ? { result_preview: r.resultPreview } : {}),
+  };
+}
+
+/** 任务 → 传输 JSON（清单/单查/编辑返回共用，字段口径见 docs/design-f22-cron.md §3） */
+export function cronJobToJson(j: CronJob): Record<string, unknown> {
+  return {
+    id: j.id,
+    name: j.name,
+    cron: j.cron,
+    prompt: j.prompt,
+    cwd: j.cwd,
+    enabled: j.enabled,
+    ...(j.maxCostUsd !== undefined ? { max_cost_usd: j.maxCostUsd } : {}),
+    created_at: j.createdAt,
+    updated_at: j.updatedAt,
+    ...(j.nextRunAt ? { next_run_at: j.nextRunAt } : {}),
+    ...(j.runningSince ? { running_since: j.runningSince } : {}),
+    ...(j.lastRun ? { last_run: cronRunToJson(j.lastRun) } : {}),
+    runs: j.runs.map(cronRunToJson),
+  };
+}
+
 // ── 内部 ────────────────────────────────────────────────────────────────────
 
 /** 单条任务结构校验：必填字段齐全且类型正确才接受，否则返回 undefined（由调用方记 warning）。 */

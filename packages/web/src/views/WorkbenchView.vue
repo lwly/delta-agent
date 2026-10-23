@@ -11,6 +11,7 @@ import ModalShell from '../components/ModalShell.vue';
 import MemoryModal from '../components/MemoryModal.vue';
 import ProvidersModal from '../components/ProvidersModal.vue';
 import UsageModal from '../components/UsageModal.vue';
+import CronModal from '../components/CronModal.vue';
 import TrashModal from '../components/TrashModal.vue';
 import SearchModal from '../components/SearchModal.vue';
 
@@ -31,6 +32,7 @@ const removeConfirmName = ref('');
 const showMemory = ref(false);
 const showProviders = ref(false);
 const showUsage = ref(false);
+const showCron = ref(false);
 const showTrash = ref(false);
 const showSearch = ref(false);
 
@@ -422,6 +424,7 @@ watch(showMemory, (open) => {
           </button>
           <button class="cfg-op" @click="showProviders = true">⚙ 配置</button>
           <button class="cfg-op" @click="showUsage = true">📊 用量</button>
+          <button class="cfg-op" @click="showCron = true">⏰ 定时</button>
           <router-link class="cfg-op replay" :to="`/replay/${chat.sessionId}`" title="会话回放">🎬 回放</router-link>
           <div class="budget-pill" :title="`今日 token ${todayLabel} / ${DAILY_TOKEN_BUDGET / 10000}k（展示口径）`">
             <span class="budget-bar"><span class="budget-fill" :class="{ warn: todayPct >= 80 }" :style="{ width: `${Math.max(2, todayPct)}%` }" /></span>
@@ -614,6 +617,7 @@ watch(showMemory, (open) => {
     <MemoryModal v-if="showMemory" @close="showMemory = false" />
     <ProvidersModal v-if="showProviders" @close="showProviders = false" />
     <UsageModal v-if="showUsage" @close="showUsage = false" />
+    <CronModal v-if="showCron" @close="showCron = false" />
     <TrashModal v-if="showTrash" @close="showTrash = false" />
     <SearchModal v-if="showSearch" @close="showSearch = false" @open-session="openSession" />
   </div>
