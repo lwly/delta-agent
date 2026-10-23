@@ -16,6 +16,34 @@ const SUMMARIZE_SYSTEM = `你是编排汇总器。给定 DAG 各节点的执行�
 ## 遗留问题（无则省略）
 不超过 500 字。`;
 
+/** 累计 Usage（编排层用量口径：规划/分类/审查/汇总段 + worker 段统一入 done.usage）。 */
+export function addUsage(total: Usage, u: Usage): Usage {
+  total.inputTokens += u.inputTokens;
+  total.outputTokens += u.outputTokens;
+  total.costUsd = (total.costUsd ?? 0) + (u.costUsd ?? 0);
+  return total;
+}
+
+/**
+ * 编排段用量结算（费用口径闭环）：record 会话预算 + 产出 usage 事件，
+ * headless / hub / TUI 据此落库；零用量跳过（未发生的调用不入账）。
+ */
+export async function* settleUsage(
+  ctx: RunContext,
+  usage: Usage,
+  model: string,
+): AsyncGenerator<AgentEvent> {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return;
+  ctx.budget.record(usage);
+  yield { type: 'usage', usage: { ...usage }, model };
+}
+
+/** 新建编排段用量累计器：返回累计容器与其 onUsage 回调（供 planner/reviewer/classifier 注入）。 */
+export function usageAccumulator(): { total: Usage; onUsage: (u: Usage) => void } {
+  const total: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  return { total, onUsage: (u) => addUsage(total, u) };
+}
+
 export async function* runPlanExecute(
   ctx: RunContext,
   history: Parameters<typeof runReAct>[1],
@@ -26,21 +54,35 @@ export async function* runPlanExecute(
   const force = ctx.plan?.force;
 
   // ── 简单任务直达（用户未强制规划；规则强判定 + LLM 兜底分类）──
-  if (
-    force !== 'plan' &&
-    (force === 'direct' ||
-      (await resolveSimpleTask(ctx.provider, ctx.model, userInput, { signal: ctx.signal })))
-  ) {
-    for await (const ev of runReAct(ctx, history, userInput, images)) {
-      yield ev;
+  if (force !== 'plan') {
+    // 分类调用属编排段 LLM 用量（费用口径闭环）：无论走哪条路径都结算
+    const classify = usageAccumulator();
+    const simple =
+      force === 'direct' ||
+      (await resolveSimpleTask(ctx.provider, ctx.model, userInput, {
+        signal: ctx.signal,
+        onUsage: classify.onUsage,
+      }));
+    yield* settleUsage(ctx, classify.total, ctx.model);
+    addUsage(usageTotal, classify.total);
+    if (simple) {
+      for await (const ev of runReAct(ctx, history, userInput, images)) {
+        yield ev;
+      }
+      return;
     }
-    return;
   }
 
   try {
     // ── 规划 ──
     if (ctx.signal.aborted) throw new Error('aborted by user');
-    let plan = await buildPlan(ctx.provider, ctx.model, userInput, { signal: ctx.signal });
+    const planUsage = usageAccumulator();
+    let plan = await buildPlan(ctx.provider, ctx.model, userInput, {
+      signal: ctx.signal,
+      onUsage: planUsage.onUsage,
+    });
+    yield* settleUsage(ctx, planUsage.total, ctx.model);
+    addUsage(usageTotal, planUsage.total);
 
     // ── F-14 计划确认流：用户可批准 / 编辑（改节点、删节点、调依赖）/ 拒绝 ──
     if (ctx.planApproval) {
@@ -77,10 +119,13 @@ export async function* runPlanExecute(
     ctx.tasks?.createPlan(ctx.sessionId, plan);
     yield { type: 'plan_created', plan: snapshot(plan) };
 
-    // ── DAG 并行执行（事件经泵实时转发）──
+    // ── DAG 并行执行（事件经泵实时转发；worker 的 usage 同步累计入 done.usage）──
     const pump = createEventPump();
     const poolRun = runPlanWithPool(ctx, plan, { onEvent: pump.push }).finally(pump.close);
-    yield* pump.stream();
+    for await (const ev of pump.stream()) {
+      if (ev.type === 'usage') addUsage(usageTotal, ev.usage);
+      yield ev;
+    }
     await poolRun;
 
     if (ctx.signal.aborted) {
@@ -89,7 +134,7 @@ export async function* runPlanExecute(
     }
 
     // ── 汇总 ──
-    yield* summarize(ctx, plan);
+    yield* summarize(ctx, plan, usageTotal);
   } catch (e) {
     const err = e as Error;
     if (ctx.signal.aborted) yield { type: 'error', message: 'aborted by user', fatal: false };
@@ -103,7 +148,12 @@ function snapshot(plan: Plan): Plan {
   return { ...plan, nodes: plan.nodes.map((n) => ({ ...n })) };
 }
 
-export async function* summarize(ctx: RunContext, plan: Plan): AsyncGenerator<AgentEvent> {
+/** 汇总 DAG 各节点结果为最终交付说明（into 提供时同步把汇总用量累计进整轮口径）。 */
+export async function* summarize(
+  ctx: RunContext,
+  plan: Plan,
+  into?: Usage,
+): AsyncGenerator<AgentEvent> {
   const transcript = plan.nodes
     .map((n) => `### ${n.id} [${n.status}] ${n.goal}\n${n.result ?? n.error ?? '(无输出)'}`)
     .join('\n\n');
@@ -131,5 +181,7 @@ export async function* summarize(ctx: RunContext, plan: Plan): AsyncGenerator<Ag
     const fallback = plan.nodes.map((n) => `[${n.id}] ${n.result ?? n.error ?? ''}`).join('\n');
     yield { type: 'text_delta', text: fallback };
   }
-  void usage;
+  // 汇总调用属编排段用量（费用口径闭环）：record 预算 + usage 事件（此前被丢弃）
+  yield* settleUsage(ctx, usage, ctx.model);
+  if (into) addUsage(into, usage);
 }

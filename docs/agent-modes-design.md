@@ -238,3 +238,11 @@ skill-name/
   - §4/§5：worker-pool.ts（TaskQueue 竞争领取/unshift 优先重试/critical 终止）+ roles.ts（角色=提示词模板+工具白名单，RestrictedRegistry 越权拒绝）+ reviewer.ts/orchestrator.ts（主观+客观合并裁决，requeueFailed 带反馈重排，重试上限 2）
   - §6：session/tasks.ts（tasks 表 + 60s 租约 + 15s 心跳 + recoverOrphans + checkpoint 字段 + 会话删除级联 canceled），CLI/Web 启动扫描恢复
   - §9 跨平台：engine/shell.ts ShellAdapter（win PowerShell→cmd 降级、darwin zsh）+ `.github/workflows/ci.yml` 双平台 matrix；模式提示词段（prompt-design §5）由 hub/CLI 最后追加
+
+### 9.1 2026-10-23 增量（F-14/F-15 补齐）
+
+- **multi-agent 计划确认流**：`orchestrator.ts` 规划后走 `ctx.planApproval`（approve / edit：validatePlan 校验，非法回退原计划并提示 / reject：取消执行）；hub 与 TUI 接线条件放宽为 plan-execute ∪ multi-agent，TUI 拒绝语义按模式区分（plan=跳过计划直达，multi=取消本次任务）
+- **编排层用量入账闭环**：`buildPlan` / `classifyComplexity` / `review` 增可选 `onUsage` 回调，`summarize` 直接入账；`settleUsage`（record 预算 + usage 事件）+ `usageAccumulator`/`addUsage`（plan-execute.ts）；worker 用量经事件泵截获累计，`done.usage` 不再恒 0，headless/hub/TUI 费用口径覆盖规划/分类/审查/汇总段
+- **TUI 强制路由命令**：`/plan`（强制规划）/ `/direct`（强制直达）/ `/auto`（恢复自动检测），一次性覆盖下一次任务（RunContext.plan.force），仅 plan-execute / multi-agent 模式可用
+- **子任务事件过滤**：`subtask.ts` 不再外传内层 ReAct 的 done / error / budget_exhausted（生命周期归编排层，以 subtask_done/subtask_failed 与最终 done 表达），修复消费端把单个子任务结束误判为整轮运行结束
+- 单测 `test/orchestrator.test.ts` 8 例（审批四路 + 确认流故障降级 + 用量入账 + 生命周期过滤）

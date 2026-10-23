@@ -3,7 +3,7 @@
  * 分工不合并：Reviewer 找缺陷提意见；Verifier 跑测试/构建用事实说话。
  * 合并裁决为 ReviewVerdict：不通过时携带失败节点与原因，进入打回闭环。
  */
-import type { LLMProvider, Plan, ReviewVerdict, ToolCall } from '@y-zero/shared';
+import type { LLMProvider, Plan, ReviewVerdict, ToolCall, Usage } from '@y-zero/shared';
 import type { ToolContext } from '../tools/types.js';
 import { extractJson } from './planner.js';
 
@@ -25,6 +25,11 @@ export interface ReviewInput {
   registry?: { definitions(): Array<{ name: string }>; executeAll(calls: ToolCall[], ctx: ToolContext): Promise<Array<{ ok: boolean; content: string }>> };
   toolContext?: ToolContext;
   plan: Plan;
+  /**
+   * 用量回调（费用口径闭环）：Reviewer 属编排层 LLM 调用，此前不进预算与会话用量，
+   * 现回调实际用量，由编排层 record 预算并转 usage 事件（Verifier 跑工具不耗 LLM，无需回调）。
+   */
+  onUsage?: (usage: Usage) => void;
 }
 
 /** 主观审查：LLM 依据节点结果裁决（输出不可解析时视为通过，避免死循环）。 */
@@ -44,6 +49,10 @@ export async function review(input: ReviewInput): Promise<ReviewVerdict> {
     signal: input.signal,
   })) {
     if (ev.type === 'text_delta') text += ev.text;
+    if (ev.type === 'usage') {
+      const u: Usage = { inputTokens: ev.input, outputTokens: ev.output };
+      input.onUsage?.(u);
+    }
     if (ev.type === 'error') throw new Error(`reviewer llm error: ${ev.message}`);
   }
   try {

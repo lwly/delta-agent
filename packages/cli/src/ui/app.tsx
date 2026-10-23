@@ -136,6 +136,8 @@ export function App(props: AppOptions) {
   }
   // F-25 多模态：/image 附件暂存区（随下一条消息发送后清空）
   const pendingImagesRef = useRef<PreparedImage[]>([]);
+  // F-14 强制路由（/plan /direct /auto）：一次性覆盖下一次任务的执行路径（引擎 PlanOptions.force）
+  const forceRef = useRef<'plan' | 'direct' | undefined>(undefined);
 
   const addItem = useCallback((item: Omit<Item, 'id'>) => {
     const withId: Item = { ...item, id: nextId++ };
@@ -222,6 +224,9 @@ export function App(props: AppOptions) {
 
       // build run context
       const engineMode: EngineMode = props.engineMode ?? 'react';
+      // F-14 强制路由：/plan（强制规划）/ /direct（强制直达），一次性，随本次任务下发
+      const runForce = forceRef.current;
+      forceRef.current = undefined;
       const ctx: RunContext = {
         sessionId: props.session.id,
         projectId: props.session.project_id,
@@ -271,16 +276,23 @@ export function App(props: AppOptions) {
         },
         budget: budgetRef.current,
         windowTokens: 200_000,
+        // F-14 强制路由：/plan（强制规划）/ /direct（强制直达）一次性覆盖，缺省走自动检测
+        plan: runForce ? { force: runForce } : undefined,
         tasks: props.service.tasks,
-        // F-14 计划确认流：CLI 简化为批准/跳过（节点编辑引导去 Web 控制台）
+        // F-14 计划确认流：CLI 简化为批准/跳过（节点编辑引导去 Web 控制台）；multi-agent 与 plan-execute 同源支持
         planApproval:
-          engineMode === 'plan-execute'
+          engineMode === 'plan-execute' || engineMode === 'multi-agent'
             ? async (req) => {
                 const lines = req.plan.nodes
                   .map((n) => `  ${n.id}${n.deps.length ? ` ←(${n.deps.join(',')})` : ''} ${n.goal}`)
                   .join('\n');
+                // plan 模式拒绝=跳过计划走 ReAct 直达；multi-agent 拒绝=取消本次执行（无直达语义）
+                const hint =
+                  engineMode === 'plan-execute'
+                    ? 'y=执行 / n=跳过计划直接执行'
+                    : 'y=执行 / n=取消本次任务';
                 const answer = await askUser(
-                  `📋 规划完成（${req.plan.nodes.length} 节点）：\n${lines}\n\n执行该计划？(y=执行 / n=跳过计划直接执行；编辑节点请到 Web 控制台)`,
+                  `📋 规划完成（${req.plan.nodes.length} 节点）：\n${lines}\n\n执行该计划？(${hint}；编辑节点请到 Web 控制台)`,
                   ['y', 'n'],
                 );
                 return /^(y|yes|是|好|ok|执行)/i.test(answer.trim()) ? { kind: 'approve' } : { kind: 'reject' };
@@ -535,6 +547,9 @@ export function App(props: AppOptions) {
               '命令：',
               '  /new     新建会话（当前进程内重置上下文）',
               '  /todos   查看任务清单',
+              '  /plan    下一次任务强制规划（Plan/Multi-Agent 模式）',
+              '  /direct  下一次任务跳过规划直接执行',
+              '  /auto    恢复自动路由（简单任务检测）',
               '  /budget  查看 Token / 费用用量',
               '  /changes 查看会话文件变更汇总（F-24）',
               '  /rollback [id] 回滚变更（缺省全部；id = 回滚该变更之后）',
@@ -556,6 +571,24 @@ export function App(props: AppOptions) {
               : '（任务清单为空）',
           });
           return true;
+        case 'plan':
+        case 'direct':
+        case 'auto': {
+          // F-14 强制路由：覆盖下一次任务的执行路径（plan=强制规划 / direct=强制直达 / auto=恢复自动检测）
+          if ((props.engineMode ?? 'react') === 'react') {
+            addItem({ kind: 'system', text: '（当前会话为 ReAct 模式，无规划路由；请在 Web 控制台切换为 Plan & Execute 模式后再用）' });
+            return true;
+          }
+          forceRef.current = name === 'auto' ? undefined : (name as 'plan' | 'direct');
+          const tip =
+            name === 'plan'
+              ? '下一次任务将强制先规划（生成 DAG 并确认后执行）'
+              : name === 'direct'
+                ? '下一次任务将跳过规划直接执行'
+                : '已恢复自动路由（简单任务检测决定是否规划）';
+          addItem({ kind: 'system', text: tip });
+          return true;
+        }
         case 'changes': {
           // F-24 会话级 diff 汇总
           const summary = props.service.changes.summary(props.session.id);
