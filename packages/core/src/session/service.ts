@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import type { ChatMessage, LLMProvider } from '@y-zero/shared';
 import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
@@ -9,6 +10,18 @@ import { FileChangeStore } from './changes.js';
 import { SearchStore, type SearchOptions, type SearchHit } from './search.js';
 import { UsageStore } from './usage.js';
 import { resolveEmbedding } from '../llm/embeddings.js';
+
+/**
+ * F-37：会话当前工作根解析唯一入口（设计文档 §8 共享知识 2，禁止各端自行判断）。
+ * worktree 绑定存在且目录存活 → worktree 路径；否则（NULL / 目录被手动删除）回退项目根。
+ * 每次 run 组装前调用（D2：工作根重绑定 = 会话持久化字段 + 每次 run 前解析）。
+ */
+export function resolveWorkRoot(session: SessionRow, projectRoot: string): string {
+  if (session.worktree_path && fs.existsSync(session.worktree_path)) {
+    return session.worktree_path;
+  }
+  return projectRoot;
+}
 
 /** Default DB location: ~/.y-zero/agent.db */
 export function defaultDbPath(): string {
@@ -111,6 +124,9 @@ export class SessionService {
     const root = path.resolve(rootPath);
     const existing = this.store.findProjectByRoot(root);
     if (existing) return { id: existing.id, name: existing.name, created: false };
+    // 同路径软删除项目复活（历史会话/用量随之找回；UNIQUE(root_path) 不含软删行）
+    const revived = this.store.reviveProjectByRoot(root);
+    if (revived) return { id: revived.id, name: revived.name, created: true };
     const id = randomUUID();
     const name = path.basename(root) || root;
     this.store.createProject(id, name, root);
@@ -133,6 +149,12 @@ export class SessionService {
     const id = this.store.appendMessage(sessionId, m);
     this.search.indexMessage(id, sessionId, m.role, m.content); // F-17 同步全文索引
     this.store.touchSession(sessionId, {});
+  }
+
+  /** F-37：更新会话 worktree 绑定（worktreePath/worktreeBranch；null = 解绑回主工作区）。 */
+  setSessionWorktree(id: string, patch: { worktreePath?: string | null; worktreeBranch?: string | null }): void {
+    if (!this.store.getSession(id)) throw new Error('session not found');
+    this.store.setSessionWorktree(id, patch);
   }
 
   getHistory(sessionId: string): ChatMessage[] {
@@ -275,14 +297,23 @@ export class SessionService {
    * 移除项目：confirmName 必须与项目名完全一致（双端校验）；
    * 级联中止运行中会话并软/硬删除；仅解除注册，不触碰源码目录。
    */
-  removeProject(id: string, confirmName: string, opts?: { hard?: boolean }): void {
-    const project = this.store.getProject(id);
+  removeProject(id: string, confirmName: string, opts?: { hard?: boolean }): void {    const project = this.store.getProject(id);
     if (!project) throw new Error('project not found');
     if (confirmName !== project.name) throw new Error('confirmName does not match project name');
     this.abortAllProjectRuns(id);
     for (const s of this.store.listSessions(id)) this.tasks.cancelSession(s.id); // M5 级联取消
     if (opts?.hard) this.store.hardDeleteProject(id);
     else this.store.softDeleteProject(id);
+  }
+
+  /** 项目重命名（侧栏更多菜单；仅改显示名，不移动目录）。 */
+  renameProject(id: string, name: string): { id: string; name: string } {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('项目名不能为空');
+    const project = this.store.getProject(id);
+    if (!project) throw new Error('project not found');
+    this.store.renameProject(id, trimmed);
+    return { id, name: trimmed };
   }
 
   restore(kind: 'project' | 'session', id: string): void {

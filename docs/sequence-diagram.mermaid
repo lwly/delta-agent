@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant U as 用户（Web 底栏）
+    participant V as WorkbenchView/GitStatusBar
+    participant C as chat store / api client
+    participant H as http.ts
+    participant Hub as SessionHub
+    participant WM as WorktreeManager
+    participant DB as SessionStore
+
+    U->>V: 点击分支名 → 下拉列表
+    V->>C: loadBranches()
+    C->>H: GET /api/sessions/:id/branches
+    H->>Hub: listBranches(sessionId)
+    Hub->>WM: listBranches(workRoot)
+    WM-->>Hub: BranchInfo[]（当前打勾）
+    Hub-->>C: {ok, branches}
+    U->>V: 选中分支（回车）
+    V->>C: checkout(branch)
+    C->>H: POST /api/sessions/:id/checkout {branch}
+    H->>Hub: checkoutBranch(sessionId, {branch})
+    Hub->>Hub: isRunning? 运行中→{ok:false}（HTTP 409）
+    Hub->>DB: getSession → resolveWorkRoot(session)
+    Hub->>WM: checkout(workRoot, {branch})
+    WM->>WM: isDirty(root)? 脏→{ok:false,'请先提交/stash'}
+    WM-->>Hub: {ok:true, branch}
+    Hub->>DB: appendMessage(系统提示：工作根已切换…)
+    Hub-->>Hub: publish(git_notice) → SSE 行内提示
+    Hub-->>C: BranchSwitchResult
+    C->>H: GET /api/sessions/:id/git（刷新底栏分支名）
+    V-->>U: toast「已切换到 <branch>」+ 底栏更新

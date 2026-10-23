@@ -42,10 +42,16 @@ function oneLine(s: string, max = 80): string {
 
 export class GitIntegration {
   constructor(
-    private readonly projectRoot: string,
+    // F-37（D4）：去 readonly —— 切换工作根后经 updateRoot() 跟随（auto commit 以当前工作根为基准）
+    private projectRoot: string,
     private readonly policy: GitPolicy,
     private readonly signal: AbortSignal = new AbortController().signal,
   ) {}
+
+  /** F-37：切换分支/worktree 后重绑工作根（仅影响后续 git 调用，行为零改动）。 */
+  updateRoot(root: string): void {
+    this.projectRoot = path.resolve(root);
+  }
 
   get mode(): GitPolicyMode {
     return this.policy.mode;

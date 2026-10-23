@@ -124,7 +124,8 @@ export function hookMatches(hook: HookDef, tool?: string): boolean {
 }
 
 export class HookManager {
-  readonly projectRoot: string;
+  /** F-37：去 readonly —— 切换分支/worktree 后 rebindRoot() 跟随当前工作根（hook 命令 cwd）。 */
+  projectRoot: string;
 
   constructor(
     readonly hooks: HookDef[],
@@ -133,6 +134,11 @@ export class HookManager {
     private readonly onOutcome?: (o: HookOutcome) => void,
   ) {
     this.projectRoot = projectRoot;
+  }
+
+  /** F-37：切换工作根后重绑（后续 hook 命令 cwd 用新根；配置清单不重扫）。 */
+  rebindRoot(root: string): void {
+    this.projectRoot = root;
   }
 
   static load(projectRoot: string, homeDir?: string, onOutcome?: (o: HookOutcome) => void): HookManager {

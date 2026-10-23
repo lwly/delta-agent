@@ -125,6 +125,16 @@ export {
   type GitPolicyMode,
   type GitOutcome,
 } from './git/repo.js';
+// F-37 git 分支切换 + worktree 会话级隔离：git 原语层 + 切换注入消息（两端一致文案）
+export {
+  WorktreeManager,
+  branchSwitchMessage,
+  worktreeOnMessage,
+  worktreeOffMessage,
+  type GitOutcomeLike,
+  type BranchInfo,
+  type WorktreeInfo,
+} from './git/worktree.js';
 export { resolveInSandbox, COMMAND_WHITELIST, isWhitelistedCommand } from './tools/sandbox.js';
 // F-30 容器级沙箱：配置 / 探测 / 参数组装 / 执行器 / 降级编排（详见 docs/design-f30-container-sandbox.md）
 export * from './sandbox/index.js';
@@ -283,6 +293,7 @@ export {
   SessionService,
   defaultDbPath,
   resolveProviderFromEnv,
+  resolveWorkRoot,
   TRASH_RETENTION_DAYS,
   type ProviderId,
   type RunSummary,
@@ -376,7 +387,14 @@ export {
   type PreToolUseVerdict,
 } from './hooks/manager.js';
 
-export { SessionHub, createSkillRuntime, type HubEvent, type SessionHubDeps } from './server/hub.js';
+export {
+  SessionHub,
+  createSkillRuntime,
+  type HubEvent,
+  type SessionHubDeps,
+  type SessionGitState,
+  type BranchSwitchResult,
+} from './server/hub.js';
 export { createWebServer, type ServeOptions } from './server/http.js';
 
 export {

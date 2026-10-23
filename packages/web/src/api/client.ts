@@ -20,6 +20,31 @@ export interface SessionRow {
   status: string;
   created_at: string;
   updated_at: string;
+  /** F-37：worktree 绑定路径；NULL = 主工作区（会话列表 🌿 标识数据源） */
+  worktree_path: string | null;
+  worktree_branch: string | null;
+}
+
+// ── F-37 git 分支切换 + worktree 会话级隔离（与 core SessionGitState 同构）────
+
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+}
+
+export interface SessionGitState {
+  isRepo: boolean;
+  projectName: string;
+  branch: string | null;
+  worktree: { enabled: boolean; path: string | null; branch: string | null };
+  running: boolean;
+}
+
+export interface BranchSwitchResult {
+  ok: boolean;
+  reason?: string;
+  branch?: string;
+  path?: string;
 }
 
 export interface MessageImage {
@@ -264,6 +289,10 @@ export const api = {
   createProject: (root: string) => request<ProjectRow>('POST', '/api/projects', { root }),
   removeProject: (id: string, confirmName: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/projects/${id}`, { confirmName, hard }),
+  // 侧栏更多菜单：重命名（仅显示名）/ 在系统文件管理器打开目录
+  renameProject: (id: string, name: string) =>
+    request<{ id: string; name: string }>('POST', `/api/projects/${id}/rename`, { name }),
+  revealProject: (id: string) => request<{ ok: boolean }>('POST', `/api/projects/${id}/reveal`),
   // Composer「@ 文件引用」候选：项目根内相对路径（服务端已做忽略目录/符号链接过滤）
   listProjectFiles: (projectId: string, q = '') =>
     request<{ files: string[] }>('GET', `/api/projects/${projectId}/files?q=${encodeURIComponent(q)}`),
@@ -284,8 +313,22 @@ export const api = {
     request<{ ok: boolean }>('DELETE', `/api/sessions/${id}?hard=${hard}`),
   // PASI-9：暂停执行中的会话（中止本轮 + 状态落库 paused；发消息即恢复）
   pause: (sessionId: string) => request<{ ok: boolean }>('POST', `/api/sessions/${sessionId}/pause`),
+  // 会话级权限模式（plan 只读 / default 询问确认 / yolo 全部放行）
+  getPermission: (sessionId: string) =>
+    request<{ mode: 'plan' | 'default' | 'yolo' }>('GET', `/api/sessions/${sessionId}/permission`),
+  setPermission: (sessionId: string, mode: 'plan' | 'default' | 'yolo') =>
+    request<{ ok: boolean; mode: 'plan' | 'default' | 'yolo' }>('PATCH', `/api/sessions/${sessionId}/permission`, { mode }),
   // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁）
   runningSessions: () => request<{ ids: string[] }>('GET', '/api/running-sessions'),
+
+  // F-37 git 分支切换 + worktree（session 作用域，与 /permission 同级同风格）
+  gitState: (sessionId: string) => request<SessionGitState>('GET', `/api/sessions/${sessionId}/git`),
+  listBranches: (sessionId: string) =>
+    request<{ ok: true; branches: BranchInfo[] }>('GET', `/api/sessions/${sessionId}/branches`),
+  checkoutBranch: (sessionId: string, opts: { branch?: string; newBranch?: string }) =>
+    request<BranchSwitchResult>('POST', `/api/sessions/${sessionId}/checkout`, opts),
+  setWorktree: (sessionId: string, enabled: boolean, opts?: { branch?: string; newBranch?: string }) =>
+    request<BranchSwitchResult>('POST', `/api/sessions/${sessionId}/worktree`, { enabled, ...opts }),
 
   // 运行（images = F-25 多模态图片附件，base64 不含 data: 前缀）
   send: (sessionId: string, input: string, images?: MessageImage[]) =>

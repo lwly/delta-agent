@@ -13,6 +13,10 @@ export interface SessionRow {
   status: string;
   created_at: string;
   updated_at: string;
+  /** F-37（v4）：worktree 绑定路径；NULL = 主工作区 */
+  worktree_path: string | null;
+  /** F-37（v4）：切入 worktree 时的分支（恢复校验/展示用） */
+  worktree_branch: string | null;
 }
 
 export interface ProjectRow {
@@ -64,6 +68,20 @@ export class SessionStore {
       .get(path.resolve(rootPath)) as { id: string; name: string; root_path: string } | undefined;
   }
 
+  /**
+   * 复活同路径的软删除项目：UNIQUE(root_path) 不区分软删行，
+   * 不复活会导致重新注册同一路径时 INSERT 撞唯一索引（serve 启动崩溃）。
+   */
+  reviveProjectByRoot(rootPath: string): { id: string; name: string } | undefined {
+    return this.db
+      .prepare(
+        `UPDATE projects SET deleted_at = NULL
+         WHERE root_path = ? AND deleted_at IS NOT NULL
+         RETURNING id, name`,
+      )
+      .get(path.resolve(rootPath)) as { id: string; name: string } | undefined;
+  }
+
   createProject(id: string, name: string, rootPath: string): void {
     this.db
       .prepare('INSERT INTO projects (id, name, root_path, created_at) VALUES (?, ?, ?, ?)')
@@ -79,12 +97,19 @@ export class SessionStore {
     ).all() as ProjectRow[];
   }
 
-  getProject(id: string): ProjectRow | undefined {
-    return this.db.prepare(
+  getProject(id: string): ProjectRow | undefined {    return this.db.prepare(
       `SELECT p.id, p.name, p.root_path, p.created_at,
               (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL) AS session_count
        FROM projects p WHERE p.id = ? AND p.deleted_at IS NULL`,
     ).get(id) as ProjectRow | undefined;
+  }
+
+  /** 项目重命名（侧栏更多菜单）。 */
+  renameProject(id: string, name: string): void {
+    const r = this.db
+      .prepare('UPDATE projects SET name = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(name, id);
+    if (r.changes === 0) throw new Error('project not found');
   }
 
   // ── sessions ──────────────────────────────────────────────────────────────
@@ -107,14 +132,24 @@ export class SessionStore {
 
   getSession(id: string): SessionRow | undefined {
     return this.db
-      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at FROM sessions WHERE id = ? AND deleted_at IS NULL')
+      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at, worktree_path, worktree_branch FROM sessions WHERE id = ? AND deleted_at IS NULL')
       .get(id) as SessionRow | undefined;
   }
 
   listSessions(projectId: string): SessionRow[] {
     return this.db
-      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC')
+      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at, worktree_path, worktree_branch FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC')
       .all(projectId) as SessionRow[];
+  }
+
+  /**
+   * F-37：更新会话的 worktree 绑定（两列同语句原子更新；NULL = 解绑回主工作区）。
+   * 调用方经 SessionService.setSessionWorktree（校验会话存在）转发到这里。
+   */
+  setSessionWorktree(id: string, patch: { worktreePath?: string | null; worktreeBranch?: string | null }): void {
+    this.db
+      .prepare('UPDATE sessions SET worktree_path = ?, worktree_branch = ?, updated_at = ? WHERE id = ?')
+      .run(patch.worktreePath ?? null, patch.worktreeBranch ?? null, new Date().toISOString(), id);
   }
 
   touchSession(id: string, patch: { title?: string; status?: string }): void {
@@ -225,7 +260,7 @@ export class SessionStore {
   searchSessions(query: string, limit = 20): SessionRow[] {
     const like = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     return this.db.prepare(
-      `SELECT DISTINCT s.id, s.project_id, s.title, s.mode, s.model, s.status, s.created_at, s.updated_at
+      `SELECT DISTINCT s.id, s.project_id, s.title, s.mode, s.model, s.status, s.created_at, s.updated_at, s.worktree_path, s.worktree_branch
        FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
        WHERE s.deleted_at IS NULL AND (s.title LIKE ? ESCAPE '\\' OR m.content_json LIKE ? ESCAPE '\\')
        ORDER BY s.updated_at DESC LIMIT ?`,
