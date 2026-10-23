@@ -92,8 +92,8 @@ export function normalizeSandboxLayer(
   // 2) 逐字段校验
   if (record.mode !== undefined) {
     const v = record.mode;
-    if (v === 'local' || v === 'docker') layer.mode = v;
-    else warn('mode', `mode 非法值 ${JSON.stringify(v)}，已忽略（可选 local | docker）`);
+    if (v === 'local' || v === 'seatbelt' || v === 'docker') layer.mode = v;
+    else warn('mode', `mode 非法值 ${JSON.stringify(v)}，已忽略（可选 local | seatbelt | docker）`);
   }
 
   if (record.enforce !== undefined) {
@@ -373,7 +373,11 @@ export interface EnforceViolation {
   message: string;
 }
 
-const MODE_ORDER: Record<SandboxConfig['mode'], number> = { local: 0, docker: 1 };
+/**
+ * 隔离强度偏序（§19）：local（无隔离）< seatbelt（macOS 进程级白名单）
+ * < docker（容器级：文件系统/用户/资源上限全换）。enforce 下会话覆盖只能沿序收紧。
+ */
+const MODE_ORDER: Record<SandboxConfig['mode'], number> = { local: 0, seatbelt: 1, docker: 2 };
 const NETWORK_ORDER: Record<SandboxNetwork, number> = { bridge: 0, none: 1 };
 
 /**
@@ -396,7 +400,10 @@ export function checkEnforce(
       field: 'mode',
       projectValue: projectMode,
       overrideValue: override.mode,
-      message: '项目策略已强制容器执行：不能用 --sandbox local 降低隔离强度',
+      message:
+        projectMode === 'local'
+          ? '项目策略已强制沙箱隔离执行：不能用会话覆盖降低隔离强度'
+          : '项目策略已强制沙箱隔离执行：不能用 --sandbox local 降低隔离强度',
     });
   }
 

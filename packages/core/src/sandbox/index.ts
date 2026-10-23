@@ -40,6 +40,19 @@ export {
 } from './args.js';
 export { resolveExecutionPlan, buildUnavailableMessage, type ResolvePlanInput, type UnavailableMessageInput } from './plan.js';
 export {
+  SEATBELT_EXEC,
+  buildSeatbeltProfile,
+  seatbeltArgv,
+  classifySeatbeltProbe,
+  SeatbeltProbe,
+  realSeatbeltCli,
+  SeatbeltExecutor,
+  buildSeatbeltHints,
+  type SeatbeltProfileSpec,
+  type SeatbeltPlatformInfo,
+  type SeatbeltExecutorOptions,
+} from './seatbelt.js';
+export {
   LocalExecutor,
   DockerExecutor,
   buildHints,

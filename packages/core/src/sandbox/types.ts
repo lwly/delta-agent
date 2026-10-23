@@ -13,8 +13,13 @@ import type { ConfirmDecision, ConfirmRequest } from '@y-zero/shared';
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
 
-/** 用户可见的执行模式枚举只有两个值（`auto` 只是降级算法的内部概念，不落盘）。 */
-export type SandboxMode = 'local' | 'docker';
+/**
+ * 用户可见的执行模式枚举（`auto` 只是降级算法的内部概念，不落盘）。
+ *  - `local`：不隔离（默认，零影响）
+ *  - `seatbelt`：macOS 原生 sandbox-exec（方案 C 的**默认隔离后端**，免安装免 daemon）
+ *  - `docker`：容器隔离（可选后端，服务器 / Linux 场景保留）
+ */
+export type SandboxMode = 'local' | 'seatbelt' | 'docker';
 export type SandboxNetwork = 'none' | 'bridge';
 /** deny = fail-closed（默认）｜ask = 交互式询问｜local = 显式接受降级 */
 export type SandboxFallback = 'deny' | 'ask' | 'local';
@@ -178,10 +183,11 @@ export const PROBE_TTL_MS = 30_000;
 
 // ── 执行计划（纯函数）──────────────────────────────────────────────────────
 
-export type ExecutionAction = 'local' | 'docker' | 'deny' | 'ask';
+export type ExecutionAction = 'local' | 'seatbelt' | 'docker' | 'deny' | 'ask';
 
 export type ExecutionReason =
   | 'mode_local' // 配置 local：不探测、零开销
+  | 'seatbelt_ready' // sandbox-exec 可用
   | 'docker_ready'
   | 'fallback_deny'
   | 'enforced_deny' // enforce 下不可用：唯一允许的动作
@@ -202,6 +208,8 @@ export interface SandboxMeta {
   mode: SandboxMode;
   image?: string;
   containerName?: string;
+  /** seatbelt 模式：本次使用的 SBPL profile 文件路径（诊断用，每次运行可复用同一份） */
+  profile?: string;
   network?: SandboxNetwork;
   exitCode: number | null;
   ms: number;
@@ -266,6 +274,10 @@ export interface SandboxStatus {
   network: SandboxNetwork;
   /** 镜像是否已在本地（mode=local 或 docker 不可用时为 false） */
   imagePresent: boolean;
+  /**
+   * 当前后端的探测结论（字段名历史遗留：seatbelt 模式下是 sandbox-exec 的探测结果，
+   * local 模式下恒 not_applicable）。改名会破坏既有 `sandbox status` 消费方，故保留。
+   */
   docker: SandboxProbeResult;
   /** 残留容器名（label 前缀 yzero-） */
   residues: string[];

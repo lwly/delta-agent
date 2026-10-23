@@ -1,14 +1,18 @@
 /**
- * `SandboxRuntime` —— 降级编排（设计 §1.1 第 3 层 / §7 / D2）。
+ * `SandboxRuntime` —— 降级编排（设计 §1.1 第 3 层 / §7 / D2；§19 补充 seatbelt 后端）。
  *
- * 职责：probe → `resolveExecutionPlan` → local / docker / deny / ask（含降级确认），
+ * 职责：probe → `resolveExecutionPlan` → seatbelt / docker / local / deny / ask（含降级确认），
  * 并维护会话内状态（`degradeApproved`、runs、首次残留检查）。
- * 与 `LocalExecutor` / `DockerExecutor` 实现同一个 `SandboxExecutor` 接口 ——
+ * 与 `SeatbeltExecutor` / `LocalExecutor` / `DockerExecutor` 实现同一个 `SandboxExecutor` 接口 ——
  * 因此 `ToolContext.sandbox` 一处类型即可，测试可任选注入哪一层。
  */
 import { loadSandboxConfig } from './config.js';
 import { realDockerCli, type DockerCli } from './docker-cli.js';
 import { DockerProbe } from './probe.js';
+import {
+  realSeatbeltCli,
+  SeatbeltExecutor,
+} from './seatbelt.js';
 import { DockerExecutor, LocalExecutor, type RunOptions, type SandboxExecutor, type SandboxExecResult } from './executor.js';
 import { buildUnavailableMessage, resolveExecutionPlan } from './plan.js';
 import {
@@ -39,8 +43,12 @@ export interface SandboxRuntimeDeps {
   session?: SandboxSessionOverrides;
   /** 交互式入口（TUI / Web）。headless 传 false → ask ≡ deny */
   interactive?: boolean;
-  /** 命令执行端口（测试注入 FakeDockerCli）。缺省 realDockerCli */
+  /** docker 执行端口（测试注入 FakeDockerCli）。缺省 realDockerCli */
   cli?: DockerCli;
+  /** seatbelt 执行端口（测试注入 FakeDockerCli 同形状）。缺省 realSeatbeltCli */
+  seatbeltCli?: DockerCli;
+  /** seatbelt profile 落盘根目录（测试注入；缺省 os.tmpdir()/yzero-sbx） */
+  profileRoot?: string;
   /**
    * 降级确认**独立通道**（D9）：不复用 ctx.confirm，避免 allow_session 污染
    * 「本会话免确认 run_command」的权限语义。
@@ -67,6 +75,7 @@ export class SandboxRuntime implements SandboxExecutor {
   private readonly resolved: ResolvedSandboxConfig;
   private readonly local: LocalExecutor;
   private readonly docker: DockerExecutor;
+  private readonly seatbelt: SeatbeltExecutor;
   private readonly probeCache: DockerProbe;
   /** 降级确认已获准（本会话记忆；每次运行新建 runtime → 跨运行自然重置） */
   private degradeApproved = false;
@@ -102,6 +111,15 @@ export class SandboxRuntime implements SandboxExecutor {
       ...(deps.onWarning ? { onWarning: deps.onWarning } : {}),
     });
     this.probeCache = deps.probeCache ?? new DockerProbe(deps.cli ?? realDockerCli, { now });
+    this.seatbelt = new SeatbeltExecutor({
+      resolved: this.resolved,
+      projectRoot: deps.projectRoot,
+      cli: deps.seatbeltCli ?? realSeatbeltCli,
+      now,
+      ...(deps.profileRoot ? { profileRoot: deps.profileRoot } : {}),
+      ...(deps.onDebugArgv ? { onDebugArgv: deps.onDebugArgv } : {}),
+      ...(deps.onWarning ? { onWarning: deps.onWarning } : {}),
+    });
   }
 
   /** 生效配置（构造期解析一次，运行期只读）。 */
@@ -131,11 +149,12 @@ export class SandboxRuntime implements SandboxExecutor {
   }
 
   /**
-   * 探测（mode=local 不 spawn；docker 走 30s 缓存 + 单飞）。
+   * 探测（mode=local 不 spawn；seatbelt 走存在性检查 30s 缓存；docker 走 30s 缓存 + 单飞）。
    * 镜像拉取失败过的会话内结论优先（本会话不再重试）。
    */
   async probe(force = false): Promise<SandboxProbeResult> {
     if (this.config.mode === 'local') return this.local.probe();
+    if (this.config.mode === 'seatbelt') return this.seatbelt.probeBackend(force);
     if (force) {
       this.imageProbe = null;
       this.probeCache.invalidate();
@@ -147,7 +166,12 @@ export class SandboxRuntime implements SandboxExecutor {
   /** 徽标（确认卡/工具卡片）：只读缓存，绝不触发探测。 */
   badge(): SandboxBadge {
     const cfg = this.config;
-    const cached = this.imageProbe ?? this.probeCache.peek();
+    const cached =
+      cfg.mode === 'docker'
+        ? (this.imageProbe ?? this.probeCache.peek())
+        : cfg.mode === 'seatbelt'
+          ? this.seatbelt.peek()
+          : null;
     const badge: SandboxBadge = { mode: cfg.mode, network: cfg.network };
     if (cfg.mode === 'docker') badge.image = cfg.image;
     if (cached) badge.available = cached.available;
@@ -182,6 +206,36 @@ export class SandboxRuntime implements SandboxExecutor {
     }
     if (plan.action === 'local') {
       return this.runLocalDegraded(command, opts, probe, plan.reason);
+    }
+
+    // seatbelt（§19）：无镜像/容器概念，探测可用即直接执行
+    if (plan.action === 'seatbelt') {
+      try {
+        const r = await this.seatbelt.run(command, opts);
+        return this.record(command, r, 'seatbelt', false);
+      } catch (e) {
+        if (e instanceof SandboxPathError) {
+          // 工作区守卫 / cwd 逃逸：在任何子进程之前拒绝（AC-30-4）
+          const denied: SandboxExecResult = {
+            code: null,
+            stdout: '',
+            stderr: '',
+            timedOut: false,
+            denied: true,
+            diagnostic: e.message,
+            hints: [],
+            sandbox: {
+              mode: 'seatbelt',
+              network: cfg.network,
+              exitCode: null,
+              ms: 0,
+              pulled: false,
+            },
+          };
+          return this.record(command, denied, 'seatbelt', false);
+        }
+        throw e;
+      }
     }
 
     // docker：首次真正进容器前做一次残留检查（整会话 ≤1 次额外 docker 调用）
@@ -285,6 +339,7 @@ export class SandboxRuntime implements SandboxExecutor {
       image: cfg.image,
       enforced: cfg.enforce || reason === 'enforced_deny',
       interactive: this.interactive,
+      backend: cfg.mode === 'seatbelt' ? 'seatbelt' : 'docker',
     });
     if (!this.noticedUnavailable.has(detail)) {
       this.noticedUnavailable.add(detail);
@@ -326,6 +381,7 @@ export class SandboxRuntime implements SandboxExecutor {
         image: cfg.image,
         enforced: cfg.enforce,
         interactive: true,
+        backend: cfg.mode === 'seatbelt' ? 'seatbelt' : 'docker',
       }),
       variant: 'sandbox_degrade',
       sandbox: this.badge(),
@@ -420,7 +476,10 @@ export class SandboxRuntime implements SandboxExecutor {
       network: this.config.network,
       enforced: this.config.enforce,
       degraded: this.runs.some((r) => r.degraded === true),
-      probe: this.imageProbe ?? this.probeCache.peek(),
+      probe:
+        this.config.mode === 'seatbelt'
+          ? this.seatbelt.peek()
+          : (this.imageProbe ?? this.probeCache.peek()),
       runs: [...this.runs],
     };
   }

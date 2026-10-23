@@ -1199,3 +1199,46 @@ graph LR
 1. `sandbox status` 的**输出格式**是否需要 `--json`（当前设计只做人类可读 + 内部 `SandboxStatus` 结构；Web 直接消费结构体，CLI 暂不加 `--json`）。成本极低，若需要可在 T05 顺带加。
 2. `yzero sandbox enable` 写**全局**还是可 `--project` 写项目（PRD §4.10 只提「改写全局配置」）。当前按 PRD 只写全局；若团队想要「把项目策略提交进仓库」，应手工编辑 `.y-zero/sandbox.json`（避免工具替用户改仓库文件）。
 3. 一次性网络放行（P1）、`cacheVolume`（P2）、命令级 override（P2）均已在设计中预留位（`tmpfs`/`env` 同构的配置面、`onNotice` 通道、`SandboxSessionOverrides` 可扩展），本期不实现。
+
+## 17. §19 方案 C 补充：Seatbelt 主后端（2026-10-23 决策）
+
+主理人裁定：**默认隔离后端改为 macOS 原生 Seatbelt（sandbox-exec），Docker 保留为可选后端**。
+动机：不走 Docker —— 免安装、免 daemon、冷启动毫秒级，覆盖本机开发（macOS）90% 场景。
+
+### 17.1 模式枚举扩展
+
+`SandboxMode = 'local' | 'seatbelt' | 'docker'`（`seatbelt` 新增；默认值仍为 `local`，
+AC-30-1「默认零影响」不破坏——未配置用户行为逐字节不变）。
+
+隔离强度偏序：`local(0) < seatbelt(1) < docker(2)`（enforce 下会话覆盖只能沿序收紧）。
+
+### 17.2 SeatbeltExecutor（packages/core/src/sandbox/seatbelt.ts）
+
+- **profile**：`(deny default)` + 白名单 —— 读全放行、写仅限 项目工作区 + `tmpdir()`（均 realpath）+ `/dev/{null,urandom,random}`；`network=none` → `(deny network*)`。内存/CPU/pids 上限 Seatbelt 不支持（与 docker 的能力差异，status 文案说明）
+- **硬约束（本机实测发现）**：macOS `/tmp`、`/var` 是软链（→ `/private/...`），Seatbelt 按**真实路径**匹配 —— 所有写入 subpath 必须 `realpathOr()`，否则限制静默失效
+- **cwd 透传**：docker 的 cwd 由容器 workdir 承担；seatbelt 直接在宿主跑，`DockerInvokeOptions` 新增可选 `cwd`，spawn 时透传
+- **探测**：平台判断 + `existsSync('/usr/bin/sandbox-exec')`（rootless 系统组件，存在即可用），30s TTL 缓存，不 spawn
+- **复用**：执行端口与 `DockerCli` 同形状（`exec`/`execSync` + timeout + AbortSignal），测试注入 `FakeDockerCli` 即可；`relativeCwdOf`/`assertSafeWorkspaceRoot` 守卫语义与 docker 后端完全一致（AC-30-4）
+- profile 落盘：`<profileRoot>/<sha256(projectRoot+network) 前 12 位>/profile.sb`（0600），每会话一份
+
+### 17.3 决策表与文案
+
+`resolveExecutionPlan` 第 2 行泛化：`probe.available → { action: config.mode, reason: '<mode>_ready' }`。
+`buildUnavailableMessage` 新增可选 `backend` 入参（缺省 docker，既有文案与测试不变）；
+seatbelt 不可用时第一行动作指向 docker 后端切换。
+
+### 17.4 三后端能力对照
+
+| 维度 | local | seatbelt（macOS） | docker |
+|---|---|---|---|
+| 文件写范围 | 全盘 | 项目区 + tmpdir + /dev | 仅挂载区 + tmpfs |
+| 网络 | 全通 | 可关（deny network*） | 可关（network=none） |
+| 资源上限 | 无 | 不支持 | memory/cpus/pids |
+| 依赖 | 无 | macOS 自带 | Docker daemon |
+| 冷启动 | 0 | ~10ms | 秒级（镜像热）/ 分钟级（首次 pull） |
+| HOME 隔离 | 无 | 只读 | 不挂载 |
+
+### 17.5 验证
+
+- 单测 21 例（`sandbox-seatbelt.test.ts`）：profile 生成 / argv 形状 / 探测三分支 / 决策表 / runtime 路由（含路径逃逸零调用 AC-30-4）/ config 偏序
+- 真机冒烟（macOS 13，realSeatbeltCli）：项目内写 ✓、项目外写 EPERM ✓、断网 curl exit 6 + hint ✓、node 子进程 ✓
