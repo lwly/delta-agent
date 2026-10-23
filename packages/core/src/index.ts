@@ -452,3 +452,39 @@ export {
   type DiffLine,
   type DiffLineType,
 } from './diff/lines.js';
+
+// F-22 定时任务/自动化：cron 表达式解析 + 调度存储 + 到期执行器 + 常驻调度循环
+export {
+  parseCron,
+  nextRun,
+  type CronFields,
+} from './cron/parse.js';
+export {
+  userCronConfigPath,
+  loadCronJobs,
+  saveCronJobs,
+  addCronJob,
+  updateCronJob,
+  removeCronJob,
+  findCronJob,
+  MAX_RUN_HISTORY,
+  STALE_RUNNING_MS,
+  type CronJob,
+  type CronRunRecord,
+  type CronStoreFile,
+  type CronStoreWarning,
+  type LoadedCronStore,
+  type AddCronJobInput,
+} from './cron/store.js';
+export {
+  runDueCronJobs,
+  type CronExecutor,
+  type CronExecutorResult,
+  type RunDueOptions,
+  type RunDueResult,
+} from './cron/runner.js';
+export {
+  startCronScheduler,
+  type StartCronSchedulerOptions,
+  type CronSchedulerHandle,
+} from './cron/scheduler.js';

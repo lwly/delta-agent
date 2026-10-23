@@ -47,6 +47,14 @@ import {
   onboardingConfirmCommand,
   onboardingSkipCommand,
 } from './onboarding.js';
+import {
+  cronListCommand,
+  cronAddCommand,
+  cronRemoveCommand,
+  cronToggleCommand,
+  cronRunCommand,
+  cronDaemonCommand,
+} from './cron.js';
 import { createDesktopNotifier, autoOnboardProject } from '@y-zero/core';
 import {
   normalizeGitPolicy,
@@ -808,9 +816,66 @@ program
     await runHeadlessCommand(opts);
   });
 
+// ── yzero cron：F-22 定时任务/自动化（list / add / remove / enable / disable / run / daemon）────
+
+const cron = program
+  .command('cron')
+  .description('F-22 定时任务：按 cron 表达式调度 agent 任务（配置 ~/.y-zero/cron.json，复用 yzero run 非交互语义）');
+
+cron
+  .command('list')
+  .description('查看定时任务清单（--json 输出原始结构）')
+  .option('--json', '输出 JSON', false)
+  .action((opts: { json?: boolean }) => cronListCommand(opts));
+
+cron
+  .command('add')
+  .description('新增定时任务（name 唯一；cron 为 5 字段表达式或 @hourly/@daily/@weekly/@monthly 等别名）')
+  .requiredOption('--name <name>', '任务名称（唯一，用于后续引用）')
+  .requiredOption('--cron <expr>', '5 字段 cron 表达式，如 "30 8 * * *"（每天 08:30）或 @daily')
+  .requiredOption('--prompt <text>', '任务描述（等价 yzero run -p）')
+  .option('--dir <path>', '运行目录（决定项目与上下文；缺省当前目录）')
+  .option('--max-cost <usd>', '单次运行费用预算（USD）')
+  .option('--disable', '创建为停用状态', false)
+  .action((opts: { name: string; cron: string; prompt: string; dir?: string; maxCost?: string; disable?: boolean }) => {
+    cronAddCommand(opts);
+  });
+
+cron
+  .command('remove <id-or-name>')
+  .description('删除定时任务（id 或名称）')
+  .action((idOrName: string) => cronRemoveCommand(idOrName));
+
+cron
+  .command('enable <id-or-name>')
+  .description('启用任务（从当下重算下次运行）')
+  .action((idOrName: string) => cronToggleCommand(idOrName, true));
+
+cron
+  .command('disable <id-or-name>')
+  .description('停用任务（不删除，历史保留）')
+  .action((idOrName: string) => cronToggleCommand(idOrName, false));
+
+cron
+  .command('run')
+  .description('手动补跑：无 --id 执行全部到期任务；--id 强制执行指定任务一次（无视调度，便于试跑）')
+  .option('--id <id-or-name>', '只执行指定任务（强制一次，不推进调度时刻）')
+  .action((opts: { id?: string }) => {
+    void cronRunCommand(opts);
+  });
+
+cron
+  .command('daemon')
+  .description('常驻调度进程：每 tick 扫描到期任务并执行（SIGINT/SIGTERM 优雅退出）')
+  .option('--tick-ms <n>', '扫描间隔毫秒数（默认 30000）', '30000')
+  .option('--once', '单轮补跑后退出（配合系统 cron / systemd timer 使用）', false)
+  .action((opts: { tickMs?: string; once?: boolean }) => {
+    void cronDaemonCommand(opts);
+  });
+
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'onboarding', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'onboarding', 'cron', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
