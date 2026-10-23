@@ -397,6 +397,24 @@ export {
   type SkillScore,
 } from './skills/matcher.js';
 export { SkillBuffer, renderSkillContent, type LoadedSkill } from './skills/buffer.js';
+// Skill Hub：远端搜索 / 安装（skillhub.cn 兼容协议，hub 地址可配置）
+export {
+  DEFAULT_SKILL_HUB_BASE,
+  SKILL_HUB_ENV,
+  MAX_EXTRACT_BYTES,
+  searchHubSkills,
+  installHubSkill,
+  extractZipEntries,
+  resolveSkillHubBase,
+  readSkillHubUrl,
+  writeSkillHubUrl,
+  userSkillHubConfigPath,
+  type HubSkillInfo,
+  type SkillHubSource,
+  type SearchHubSkillsOptions,
+  type InstallHubSkillOptions,
+  type InstallHubSkillResult,
+} from './skills/hub.js';
 export { loadSkillTool, unloadSkillTool } from './tools/builtin/skill.js';
 export type { SkillRuntime } from './tools/types.js';
 // F-25 多模态：图片附件加载/校验/计价
