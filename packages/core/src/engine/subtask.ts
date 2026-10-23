@@ -99,7 +99,12 @@ export async function runSubTask(node: TaskNode, deps: SubTaskDeps): Promise<Sub
   let error: string | undefined;
   try {
     for await (const ev of runReAct(ctx, [], node.goal)) {
-      deps.onEvent?.(ev);
+      // 生命周期事件不外传：done / error / budget_exhausted 由编排层统一以
+      // subtask_done / subtask_failed 与最终 done 表达，避免消费端（TUI/Web/headless）
+      // 把单个子任务的结束误判为整轮运行结束（用量与进度事件照常转发）。
+      if (ev.type !== 'done' && ev.type !== 'error' && ev.type !== 'budget_exhausted') {
+        deps.onEvent?.(ev);
+      }
       switch (ev.type) {
         case 'text_delta':
           summary += ev.text;

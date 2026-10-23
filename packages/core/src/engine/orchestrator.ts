@@ -4,12 +4,13 @@
  *       → 不通过：失败节点回队重试或调整目标（携带审查反馈），重试上限默认 2
  *       → 超限终止并汇报遗留问题；通过：Orchestrator 汇总交付。
  */
-import type { AgentEvent, ChatMessage, MessageImage, Plan, ReviewVerdict, TaskNode, Usage } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, MessageImage, Plan, PlanDecision, ReviewVerdict, TaskNode, Usage } from '@y-zero/shared';
 import type { RunContext } from './react.js';
 import { buildPlan } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
 import { mergeVerdicts, review, verify } from './reviewer.js';
-import { summarize } from './plan-execute.js';
+import { summarize, addUsage, settleUsage, usageAccumulator } from './plan-execute.js';
+import { validatePlan } from './plan.js';
 import { createEventPump } from './pump.js';
 
 export const DEFAULT_MAX_REVIEW_RETRIES = 2;
@@ -22,11 +23,30 @@ export async function* runMultiAgent(
 ): AsyncIterable<AgentEvent> {
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   const maxReviewRetries = ctx.plan?.maxReviewRetries ?? DEFAULT_MAX_REVIEW_RETRIES;
-
   try {
-    // ① Planner：产出 DAG
+    // ① Planner：产出 DAG（规划调用属编排段用量，结算入预算与事件流）
     if (ctx.signal.aborted) throw new Error('aborted by user');
-    const plan = await buildPlan(ctx.provider, ctx.model, userInput, { signal: ctx.signal });
+    const planUsage = usageAccumulator();
+    let plan = await buildPlan(ctx.provider, ctx.model, userInput, {
+      signal: ctx.signal,
+      onUsage: planUsage.onUsage,
+    });
+    yield* settleUsage(ctx, planUsage.total, ctx.model);
+    addUsage(usageTotal, planUsage.total);
+
+    // ①' F-14 计划确认流（multi-agent 与 plan-execute 同源）：批准 / 编辑 / 拒绝
+    if (ctx.planApproval) {
+      const { decision, problems } = await requestApproval(ctx, plan);
+      if (decision.kind === 'reject') {
+        yield { type: 'text_delta', text: '（已按你的要求取消执行该计划）\n' };
+        return;
+      }
+      if (problems && problems.length > 0) {
+        yield { type: 'text_delta', text: `（编辑后的计划无效，已回退原计划：${problems[0]}）\n` };
+      }
+      if (decision.kind === 'edit') plan = decision.plan;
+    }
+
     ctx.tasks?.createPlan(ctx.sessionId, plan);
     yield { type: 'plan_created', plan: snapshot(plan) };
 
@@ -36,14 +56,18 @@ export async function* runMultiAgent(
     while (true) {
       if (ctx.signal.aborted) break;
 
-      // Worker Pool 并行执行
+      // Worker Pool 并行执行（worker 的 usage 同步累计入 done.usage）
       const pump = createEventPump();
       const poolRun = runPlanWithPool(ctx, plan, { onEvent: pump.push }).finally(pump.close);
-      yield* pump.stream();
+      for await (const ev of pump.stream()) {
+        if (ev.type === 'usage') addUsage(usageTotal, ev.usage);
+        yield ev;
+      }
       await poolRun;
       if (ctx.signal.aborted) break;
 
       // ③ Reviewer（主观）+ Verifier（客观）
+      const reviewUsage = usageAccumulator();
       const input = {
         provider: ctx.provider,
         model: ctx.model,
@@ -51,11 +75,14 @@ export async function* runMultiAgent(
         registry: ctx.registry,
         toolContext: ctx.toolContext,
         plan,
+        onUsage: reviewUsage.onUsage,
       };
       const [subjective, objective] = await Promise.all([
         review(input),
         verify(input),
       ]);
+      yield* settleUsage(ctx, reviewUsage.total, ctx.model);
+      addUsage(usageTotal, reviewUsage.total);
       verdict = mergeVerdicts(subjective, objective);
       plan.revision++;
       yield { type: 'review_verdict', verdict, revision: plan.revision };
@@ -89,7 +116,7 @@ export async function* runMultiAgent(
       };
       return;
     }
-    yield* summarize(ctx, plan);
+    yield* summarize(ctx, plan, usageTotal);
   } catch (e) {
     const err = e as Error;
     if (ctx.signal.aborted) yield { type: 'error', message: 'aborted by user', fatal: false };
@@ -97,6 +124,29 @@ export async function* runMultiAgent(
   } finally {
     yield { type: 'done', usage: usageTotal };
   }
+}
+
+/**
+ * 计划确认请求（multi-agent 路径）：编辑后的 DAG 经 validatePlan 校验，
+ * 非法时保留原计划继续执行（problems 带回，由调用方提示）；
+ * 确认流自身故障降级自动批准，不阻塞编排。
+ */
+async function requestApproval(
+  ctx: RunContext,
+  plan: Plan,
+): Promise<{ decision: PlanDecision; problems?: string[] }> {
+  const request = { id: `plan_${ctx.sessionId}_${Date.now()}`, plan: snapshot(plan) };
+  let decision: PlanDecision;
+  try {
+    decision = await ctx.planApproval!(request);
+  } catch {
+    return { decision: { kind: 'approve' } };
+  }
+  if (decision.kind === 'edit') {
+    const problems = validatePlan(decision.plan);
+    if (problems.length > 0) return { decision: { kind: 'approve' }, problems }; // 编辑后 DAG 非法 → 保留原计划
+  }
+  return { decision };
 }
 
 /**

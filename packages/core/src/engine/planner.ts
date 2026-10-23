@@ -3,7 +3,7 @@
  * - detectSimpleTask: 启发式第一层（关键词/意图分类）
  * - buildPlan: LLM 一次调用产出 DAG JSON，解析失败/结构非法时带错误反馈修复重试
  */
-import type { LLMProvider, Plan, TaskNode, TaskRole } from '@y-zero/shared';
+import type { LLMProvider, Plan, TaskNode, TaskRole, Usage } from '@y-zero/shared';
 import { validatePlan } from './plan.js';
 
 /** 复杂信号关键词：命中即判复杂（重构/迁移/批量/多模块）。 */
@@ -56,6 +56,11 @@ const CLASSIFIER_SYSTEM = `你是任务复杂度分类器。判断用户输入�
 export interface ClassifyOptions {
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * 用量回调（费用口径闭环）：分类属编排层 LLM 调用，此前不进预算与会话用量，
+   * 现按次回调实际用量，由编排层 record 预算并转 usage 事件。
+   */
+  onUsage?: (usage: Usage) => void;
 }
 
 /**
@@ -81,6 +86,10 @@ export async function classifyComplexity(
       signal: opts.signal,
     })) {
       if (ev.type === 'text_delta') text += ev.text;
+      if (ev.type === 'usage') {
+        const u: Usage = { inputTokens: ev.input, outputTokens: ev.output };
+        opts.onUsage?.(u);
+      }
       if (ev.type === 'error') return undefined;
     }
   } catch {
@@ -141,6 +150,11 @@ export interface PlanOptions {
   /** 规划调用最大修复重试次数（默认 2） */
   maxRetries?: number;
   signal?: AbortSignal;
+  /**
+   * 用量回调（费用口径闭环）：规划可能多次修复重试，每次调用的实际用量
+   * 都回调给编排层统一 record 预算并转 usage 事件。
+   */
+  onUsage?: (usage: Usage) => void;
 }
 
 interface RawNode {
@@ -224,6 +238,10 @@ export async function buildPlan(
       signal: opts.signal,
     })) {
       if (ev.type === 'text_delta') text += ev.text;
+      if (ev.type === 'usage') {
+        const u: Usage = { inputTokens: ev.input, outputTokens: ev.output };
+        opts.onUsage?.(u);
+      }
       if (ev.type === 'error') throw new Error(`planner llm error: ${ev.message}`);
     }
     try {

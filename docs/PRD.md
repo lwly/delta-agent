@@ -123,8 +123,8 @@ y-zero-agent
 
 | 编号 | 需求 | 描述 |
 |------|------|------|
-| F-14 | Plan-and-Execute 模式 | 简单任务检测路由（规则+LLM 兜底，`/plan`/`/direct` 可强制）：简单直达，复杂 LLM 规划 → 生成 DAG → 拓扑排序 → 按层并行执行 → 汇总；计划卡可编辑/调整依赖后确认；节点失败可标 critical 终止。详见 docs/agent-modes-design.md §3 |
-| F-15 | Multi-Agent 模式 | 四角色闭环：编排器（纯调度）→ 规划者（产出 DAG，可按反馈调整）→ 执行者并行工作池（节点级隔离上下文）→ 检查者（质量检查，不通过返回规划者或重试，上限可配默认 2）；**完整角色集为四层十角色**（决策/执行/质量/协调层），MVP 实现核心五角色（Orchestrator/Planner/Worker/Reviewer/Verifier），Researcher/Writer/Tool Caller/Memory Keeper/Router 按任务类型动态启用。详见 docs/agent-modes-design.md §4 |
+| F-14 | Plan-and-Execute 模式 | 简单任务检测路由（规则+LLM 兜底，`/plan`/`/direct` 可强制）：简单直达，复杂 LLM 规划 → 生成 DAG → 拓扑排序 → 按层并行执行 → 汇总；计划卡可编辑/调整依赖后确认；节点失败可标 critical 终止。详见 docs/agent-modes-design.md §3——✅ 2026-10-23 增量补齐：TUI 新增 `/plan` / `/direct` / `/auto` 斜杠命令（一次性强制路由，ReAct 模式下提示切换）；plan/multi 模式编排段（分类/规划/审查/汇总）用量入账（此前费用口径缺失该部分） |
+| F-15 | Multi-Agent 模式 | 四角色闭环：编排器（纯调度）→ 规划者（产出 DAG，可按反馈调整）→ 执行者并行工作池（节点级隔离上下文）→ 检查者（质量检查，不通过返回规划者或重试，上限可配默认 2）；**完整角色集为四层十角色**（决策/执行/质量/协调层），MVP 实现核心五角色（Orchestrator/Planner/Worker/Reviewer/Verifier），Researcher/Writer/Tool Caller/Memory Keeper/Router 按任务类型动态启用。详见 docs/agent-modes-design.md §4——✅ 2026-10-23 增量交付（代码核验）：multi-agent 接入 F-14 计划确认流（规划后 approve / edit（validatePlan 校验，非法回退原计划）/ reject 取消执行；hub 与 TUI 双端接线，TUI 拒绝语义=取消本次任务）；编排层用量入账闭环（planner/classifier/reviewer/summarize 增 onUsage 回调 → settleUsage 统一 record 预算 + 发 usage 事件，worker 用量经泵截获累计，done.usage 真实反映整轮用量）；修复子任务内层 done/error/budget_exhausted 外传导致消费端误判运行结束的问题；单测 8 例（orchestrator.test.ts：审批四路 + 确认流故障降级 + 用量入账 + 生命周期过滤） |
 | F-15a | Worker Pool 并行调度 | 共享任务队列，多 worker 竞争领取（默认 4，可配 1–8）；审查失败任务回队首重新排队；节点状态以事件流推送 CLI/Web。详见 docs/agent-modes-design.md §5 |
 | F-15b | 后台任务可靠恢复 | 任务状态机（queued/running/completed/failed/canceled）持久化 SQLite；租约 60s + 心跳 15s 防重复执行；启动时扫描孤儿任务（租约过期）回队列重排；checkpoint 幂等重试。详见 docs/agent-modes-design.md §6 |
 | F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.y-zero/skills < 项目级 .y-zero/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |

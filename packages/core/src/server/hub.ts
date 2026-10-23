@@ -319,9 +319,9 @@ export class SessionHub {
         windowTokens: this.deps.windowTokens ?? 200_000,
         plan: this.deps.plan,
         tasks: service.tasks,
-        // F-14 计划确认流：Web 端回填决策（挂起等待，事件实时推送）
+        // F-14 计划确认流：Web 端回填决策（挂起等待，事件实时推送）；multi-agent 与 plan-execute 同源支持
         planApproval:
-          ctxMode === 'plan-execute'
+          ctxMode === 'plan-execute' || ctxMode === 'multi-agent'
             ? (req) => {
                 this.publish(sessionId, { type: 'plan_approval_request', request: req });
                 return new Promise<PlanDecision>((resolve) => {
