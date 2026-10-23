@@ -5,7 +5,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
-import { api, type MessageHit, type MessageImage, type ProviderView } from '../api/client';
+import { api, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
 import MemoryModal from '../components/MemoryModal.vue';
@@ -229,6 +229,7 @@ async function doRemove() {
 // ── 对话区渲染辅助（自 ChatView 迁移）──────────────────────
 const listRef = ref<HTMLElement | null>(null);
 const input = ref('');
+const composerEl = ref<HTMLTextAreaElement | null>(null);
 const pendingImages = ref<Array<MessageImage & { preview: string; name: string }>>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 const MAX_IMAGES = 5;
@@ -352,6 +353,7 @@ async function resend(m: { content: string }) {
 async function submit() {
   const text = input.value.trim();
   if ((!text && pendingImages.value.length === 0) || chat.running) return;
+  ac.value = null; // 发送时收起自动补全面板
   input.value = '';
   const images = pendingImages.value.length
     ? pendingImages.value.map(({ mediaType, base64 }) => ({ mediaType, base64 }))
@@ -359,6 +361,159 @@ async function submit() {
   for (const p of pendingImages.value) URL.revokeObjectURL(p.preview);
   pendingImages.value = [];
   await chat.send(text, images);
+}
+
+// ── Composer 自动补全（@ 文件引用 / / 技能）─────────────────
+interface AcItem {
+  kind: 'file' | 'skill';
+  /** 插入文本（文件 = 相对路径；技能 = 名称） */
+  label: string;
+  detail: string;
+}
+interface AcState {
+  kind: 'file' | 'skill';
+  /** 触发符（@ 或 / 的起始下标，替换区间起点） */
+  tokenStart: number;
+  query: string;
+  items: AcItem[];
+  index: number;
+}
+const AC_MAX_ITEMS = 20; // 面板最多展示条数，超出依赖继续输入缩小范围
+const ac = ref<AcState | null>(null);
+const fileCandidates = ref<string[]>([]);
+const fileCandidatesProject = ref(''); // 文件候选缓存对应的项目 id
+const skillCandidates = ref<SkillCandidate[] | null>(null);
+
+/** 拉取文件候选（按项目缓存一次；失败时面板退化为空，不阻塞输入） */
+async function ensureFileCandidates(): Promise<'loaded' | 'cached' | 'failed'> {
+  const pid = ws.activeProjectId;
+  if (!pid) return 'failed';
+  if (fileCandidatesProject.value === pid) return 'cached';
+  try {
+    fileCandidates.value = (await api.listProjectFiles(pid)).files;
+    fileCandidatesProject.value = pid;
+    return 'loaded';
+  } catch {
+    return 'failed';
+  }
+}
+/** 拉取技能候选（会话内缓存一次；失败时面板退化为空） */
+async function ensureSkillCandidates(): Promise<'loaded' | 'cached' | 'failed'> {
+  if (skillCandidates.value) return 'cached';
+  try {
+    skillCandidates.value = (await api.listSkills(ws.activeProjectId ?? undefined)).skills;
+    return 'loaded';
+  } catch {
+    return 'failed';
+  }
+}
+
+function filterFiles(q: string): AcItem[] {
+  const needle = q.toLowerCase();
+  return fileCandidates.value
+    .filter((f) => f.toLowerCase().includes(needle))
+    .slice(0, AC_MAX_ITEMS)
+    .map((f) => ({ kind: 'file' as const, label: f, detail: '文件' }));
+}
+function filterSkills(q: string): AcItem[] {
+  const needle = q.toLowerCase();
+  return (skillCandidates.value ?? [])
+    .filter((s) => s.name.toLowerCase().includes(needle) || s.description.toLowerCase().includes(needle))
+    .slice(0, AC_MAX_ITEMS)
+    .map((s) => ({ kind: 'skill' as const, label: s.name, detail: s.description || s.layer }));
+}
+
+/**
+ * 根据当前输入与光标位置重算补全状态：
+ * - `/` 仅在输入开头触发（slash 技能语义），`@` 需位于词首（行首或空白后）
+ * - 候选数据未加载时先展示空面板，加载完成（loaded）后重算一次
+ */
+function recomputeAc() {
+  const ta = composerEl.value;
+  if (!ta) {
+    ac.value = null;
+    return;
+  }
+  const caret = ta.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, caret);
+  const slash = /^\/([^\s]*)$/.exec(before);
+  if (slash) {
+    const q = slash[1]!;
+    ac.value = { kind: 'skill', tokenStart: 0, query: q, items: filterSkills(q), index: 0 };
+    void ensureSkillCandidates().then((r) => {
+      if (r === 'loaded') recomputeAc();
+    });
+    return;
+  }
+  const at = /(^|\s)@([^\s]*)$/.exec(before);
+  if (at) {
+    const q = at[2]!;
+    ac.value = { kind: 'file', tokenStart: caret - q.length - 1, query: q, items: filterFiles(q), index: 0 };
+    void ensureFileCandidates().then((r) => {
+      if (r === 'loaded') recomputeAc();
+    });
+    return;
+  }
+  ac.value = null;
+}
+function onComposerInput() {
+  recomputeAc();
+}
+
+/** 键盘导航：↑↓ 在面板内循环移动（仅面板打开时拦截默认行为） */
+function onArrow(e: KeyboardEvent, delta: number) {
+  if (!ac.value || ac.value.items.length === 0) return;
+  e.preventDefault();
+  const n = ac.value.items.length;
+  ac.value.index = (ac.value.index + delta + n) % n;
+}
+/** Enter：面板打开时选中项，否则发送 */
+function onEnterKey(e: KeyboardEvent) {
+  e.preventDefault(); // 输入框内 Enter 永不换行（Shift+Enter 才换行）
+  if (ac.value && ac.value.items.length > 0) {
+    applyAcAt(ac.value.index);
+    return;
+  }
+  void submit();
+}
+/** Tab：面板打开时选中项，否则保留默认行为 */
+function onTabKey(e: KeyboardEvent) {
+  if (!ac.value || ac.value.items.length === 0) return;
+  e.preventDefault();
+  applyAcAt(ac.value.index);
+}
+function onEscKey() {
+  ac.value = null;
+}
+
+/** 应用选中项：替换触发 token（文件 → @路径空格；技能 → /名称 空格），光标移到插入末尾 */
+function applyAcAt(i: number) {
+  const st = ac.value;
+  if (!st) return;
+  const item = st.items[i];
+  if (!item) return;
+  const ta = composerEl.value;
+  const caret = ta?.selectionStart ?? input.value.length;
+  const inserted = item.kind === 'file' ? `@${item.label} ` : `/${item.label} `;
+  input.value = input.value.slice(0, st.tokenStart) + inserted + input.value.slice(caret);
+  ac.value = null;
+  void nextTick(() => {
+    ta?.focus();
+    const pos = st.tokenStart + inserted.length;
+    ta?.setSelectionRange(pos, pos);
+  });
+}
+
+/** 提示 chip 点击：插入触发符并打开面板（可发现性） */
+function acTrigger(kind: 'file' | 'skill') {
+  const ch = kind === 'file' ? '@' : '/';
+  if (!input.value.endsWith(ch) && !input.value.endsWith(' ')) input.value += ' ';
+  input.value += ch;
+  void nextTick(() => {
+    composerEl.value?.focus();
+    composerEl.value?.setSelectionRange(input.value.length, input.value.length);
+    recomputeAc();
+  });
 }
 
 // 消息增长 / 流式输出时滚到底部；运行结束后刷新今日 token 与待确认记忆角标
@@ -654,16 +809,39 @@ watch(showMemory, (open) => {
             </div>
             <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="onPickImages" />
             <textarea
+              ref="composerEl"
               v-model="input"
               :disabled="chat.running"
               :placeholder="chat.running ? 'Agent 运行中…' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill，可直接粘贴图片（Enter 发送，Shift+Enter 换行）'"
-              @keydown.enter.exact.prevent="submit"
+              @input="onComposerInput"
+              @blur="ac = null"
+              @keydown.enter.exact="onEnterKey"
+              @keydown.tab="onTabKey"
+              @keydown.esc="onEscKey"
+              @keydown.up="onArrow($event, -1)"
+              @keydown.down="onArrow($event, 1)"
               @paste="onPaste"
             />
+            <!-- 自动补全面板：@ 文件引用 / / 技能（键盘 ↑↓ Enter/Tab Esc，鼠标 mousedown 选中避免失焦关闭） -->
+            <div v-if="ac && ac.items.length" class="ac-panel">
+              <button
+                v-for="(it, ai) in ac.items"
+                :key="it.kind + it.label"
+                class="ac-item"
+                :class="{ active: ai === ac.index }"
+                :title="it.detail"
+                @mousedown.prevent="applyAcAt(ai)"
+              >
+                <span class="ac-ico">{{ it.kind === 'file' ? '📄' : '⚡' }}</span>
+                <span class="ac-label">{{ it.kind === 'file' ? it.label : `/${it.label}` }}</span>
+                <span class="ac-detail">{{ it.detail }}</span>
+              </button>
+              <div class="ac-tip">↑↓ 选择 · Enter / Tab 确认 · Esc 关闭</div>
+            </div>
             <div class="composer-bar">
               <span class="hint-chip" @click="fileInput?.click()" style="cursor: pointer">🖼 图片</span>
-              <span class="hint-chip">@文件引用</span>
-              <span class="hint-chip">/skill 技能</span>
+              <span class="hint-chip" title="插入 @ 后自动补全项目文件" style="cursor: pointer" @click="acTrigger('file')">@文件引用</span>
+              <span class="hint-chip" title="插入 / 后自动补全可用技能" style="cursor: pointer" @click="acTrigger('skill')">/skill 技能</span>
               <span class="hint-chip">/mcp 扩展工具</span>
               <!-- 当前会话模式下拉：模式在会话创建时确定，切换 = 以该模式新建对话 -->
               <select
@@ -995,6 +1173,24 @@ watch(showMemory, (open) => {
   border-radius: 14px; padding: 12px 14px 10px; transition: border-color 0.15s;
 }
 .composer:focus-within { border-color: rgba(88, 166, 255, 0.5); }
+/* 自动补全面板：悬浮于输入框上方 */
+.composer { position: relative; }
+.ac-panel {
+  position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px);
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); overflow: hidden; z-index: 30;
+  max-height: 300px; overflow-y: auto;
+}
+.ac-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px; border: none; background: none; color: var(--text);
+  font-size: 12.5px; cursor: pointer; text-align: left;
+}
+.ac-item:hover, .ac-item.active { background: var(--accent-soft); }
+.ac-ico { flex-shrink: 0; }
+.ac-label { font-family: var(--mono); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+.ac-detail { color: var(--text-faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; }
+.ac-tip { padding: 4px 10px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 10.5px; }
 .composer textarea {
   width: 100%; background: transparent; border: none; outline: none;
   color: var(--text); font-size: 14px; resize: none; height: 44px; line-height: 1.5;

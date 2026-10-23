@@ -7,6 +7,7 @@
  */
 import * as http from 'node:http';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConfirmDecision } from '@y-zero/shared';
 import type { SessionHub } from './hub.js';
@@ -14,6 +15,7 @@ import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
+import { discoverSkills } from '../skills/loader.js';
 import {
   addCronJob,
   cronJobToJson,
@@ -40,6 +42,50 @@ export interface ServeOptions {
   cronExecutor?: CronExecutor;
   /** F-22：cron.json 存储目录（缺省用户主目录；测试注入临时目录隔离） */
   cronHomeDir?: string;
+  /** Composer 自动补全：用户级 skills 扫描目录（缺省 os.homedir()；测试注入临时目录隔离） */
+  skillsHomeDir?: string;
+}
+
+/**
+ * Composer「@ 文件引用」候选收集（只读、白名单边界内）：
+ * - 只返回相对路径；遍历范围锁定在项目根内，不跟随任何符号链接（防目录逃逸）
+ * - 跳过构建产物/依赖目录（IGNORED_DIRS）与隐藏目录（. 开头），控制噪声
+ * - maxEntries 截断 + 最大深度限制，防止大仓库/深目录拖垮端点
+ */
+const IGNORED_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'target',
+  '__pycache__', '.venv', 'venv', '.next', '.nuxt', 'bin', 'obj', '.idea', '.vscode',
+]);
+const MAX_FILE_CANDIDATES = 500;
+const MAX_WALK_DEPTH = 8;
+
+async function collectProjectFiles(root: string, q: string, maxEntries = MAX_FILE_CANDIDATES): Promise<string[]> {
+  const out: string[] = [];
+  const needle = q.toLowerCase();
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (out.length >= maxEntries || depth > MAX_WALK_DEPTH) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // 无权限/已消失：静默跳过该子树
+    }
+    for (const e of entries) {
+      if (out.length >= maxEntries) return;
+      if (e.isSymbolicLink()) continue; // 一律不跟随，防逃逸出项目根
+      const rel = path.relative(root, path.join(dir, e.name));
+      if (e.isDirectory()) {
+        if (IGNORED_DIRS.has(e.name) || e.name.startsWith('.')) continue;
+        await walk(path.join(dir, e.name), depth + 1);
+        continue;
+      }
+      if (!e.isFile()) continue;
+      if (needle && !rel.toLowerCase().includes(needle)) continue;
+      out.push(rel.split(path.sep).join('/'));
+    }
+  };
+  await walk(root, 0);
+  return out.sort();
 }
 
 const MIME: Record<string, string> = {
@@ -122,6 +168,31 @@ export function createWebServer(opts: ServeOptions): http.Server {
           return json(res, 200, { ok: true });
         } catch (e) {
           return err(res, 400, (e as Error).message);
+        }
+      }
+      // GET /api/projects/:id/files?q=<前缀> —— Composer「@ 文件引用」候选（只读）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'files' && parts.length === 4) {
+        const project = service.getProject(parts[2]!);
+        if (!project) return err(res, 404, 'project not found');
+        const files = await collectProjectFiles(project.root_path, url.searchParams.get('q') ?? '');
+        return json(res, 200, { files });
+      }
+
+      // GET /api/skills?projectId=<id> —— Composer「/ 技能」候选（三层发现，只读元数据）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts.length === 2) {
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        try {
+          const { skills, errors } = await discoverSkills({
+            homeDir: opts.skillsHomeDir ?? os.homedir(),
+            ...(projectRoot ? { projectRoot } : {}),
+          });
+          return json(res, 200, {
+            skills: skills.map((s) => ({ name: s.name, description: s.description, layer: s.layer })),
+            errors,
+          });
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
         }
       }
 
