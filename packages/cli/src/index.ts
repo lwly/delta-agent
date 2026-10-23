@@ -42,6 +42,14 @@ import {
   notifyTestCommand,
 } from './notify.js';
 import {
+  skillHubGetCommand,
+  skillHubResetCommand,
+  skillHubSetCommand,
+  skillInstallCommand,
+  skillListCommand,
+  skillSearchCommand,
+} from './skill.js';
+import {
   onboardingStatusCommand,
   onboardingRunCommand,
   onboardingConfirmCommand,
@@ -759,6 +767,54 @@ notify
     void notifyTestCommand();
   });
 
+// ── yzero skill：Skill Hub 搜索 / 安装 / hub 地址管理 ────────────────────
+
+const skill = program
+  .command('skill')
+  .description('Skill 管理：从 Skill Hub 搜索/安装技能（地址可配置，存于 ~/.y-zero/skill-hub.json）');
+
+skill
+  .command('search <query...>')
+  .description('在 Skill Hub 搜索技能')
+  .option('--hub <url>', '一次性指定 hub 地址（优先级高于环境变量与配置文件）')
+  .action((query: string[], opts: { hub?: string }) => {
+    void skillSearchCommand(query, opts);
+  });
+
+skill
+  .command('install <slug>')
+  .description('安装技能：默认装到用户层 ~/.y-zero/skills/，--project 装到项目层 .y-zero/skills/')
+  .option('--project', '安装到项目层（.y-zero/skills/）而非用户层', false)
+  .option('--force', '目标已存在时覆盖重装', false)
+  .option('--hub <url>', '一次性指定 hub 地址')
+  .action((slug: string, opts: { hub?: string; project?: boolean; force?: boolean }) => {
+    void skillInstallCommand(slug, opts);
+  });
+
+skill
+  .command('list')
+  .description('列出本机已装 Skill（builtin / user / project 三层分组）')
+  .action(() => {
+    void skillListCommand();
+  });
+
+const skillHub = skill.command('hub').description('查看 / 设置 Skill Hub 地址');
+
+skillHub
+  .command('get')
+  .description('查看生效 hub 地址与来源')
+  .action(() => skillHubGetCommand());
+
+skillHub
+  .command('set <url>')
+  .description('持久化 hub 地址（写入 ~/.y-zero/skill-hub.json 的 url 字段，其余字段保留）')
+  .action((url: string) => skillHubSetCommand(url));
+
+skillHub
+  .command('reset')
+  .description('清除配置，恢复官方默认（api.skillhub.cn）')
+  .action(() => skillHubResetCommand());
+
 // ── yzero onboarding：F-34 项目 onboarding（status / run / confirm / skip）────
 
 const onboarding = program
@@ -878,7 +934,7 @@ cron
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'onboarding', 'cron', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
