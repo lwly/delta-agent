@@ -81,6 +81,24 @@ export class SessionService {
     return true;
   }
 
+  /**
+   * 暂停执行中的会话（PASI-9）：中止当前主循环并把状态落库为 `paused`。
+   * 返回 false 表示会话未在执行（无可暂停的运行）。
+   * 恢复语义：引擎无断点续跑能力，暂停即结束本轮；下次 send 由 hub 清除
+   * paused 标记后正常继续（历史消息保留，用户可追问续做）。
+   */
+  pauseRun(sessionId: string): boolean {
+    if (!this.abortRun(sessionId)) return false;
+    this.store.touchSession(sessionId, { status: 'paused' });
+    return true;
+  }
+
+  /** 清除会话的 paused 标记（恢复执行前由 hub 调用；非 paused 会话不动状态）。 */
+  resumeSession(sessionId: string): void {
+    const s = this.store.getSession(sessionId);
+    if (s?.status === 'paused') this.store.touchSession(sessionId, { status: 'active' });
+  }
+
   private abortAllProjectRuns(projectId: string): void {
     for (const s of this.store.listSessions(projectId)) this.abortRun(s.id);
   }
@@ -240,10 +258,13 @@ export class SessionService {
   }
 
   /**
-   * 删除会话：默认软删除（回收站 30 天）；运行中先中止。
+   * 删除会话：默认软删除（回收站 30 天）。
+   * PASI-9：执行中的会话禁止删除（调用方应先暂停或停止），直接抛错；
+   * 项目级联删除 / 回收站彻底清除路径会先 abort 再走到这里，不受影响。
    * hard=true 物理清除（事务内）。
    */
   removeSession(id: string, opts?: { hard?: boolean }): void {
+    if (this.isRunning(id)) throw new Error('会话执行中，请先暂停或停止后再删除');
     this.abortRun(id);
     this.tasks.cancelSession(id); // M5: 级联取消排队/运行中任务（§6 中断传播）
     if (opts?.hard) this.store.hardDeleteSession(id);

@@ -114,15 +114,41 @@ describe('项目移除（二次确认 + 级联）', () => {
     expect(fs.existsSync('/tmp/proj-a') || true).toBe(true);
   });
 
-  it('运行中会话删除前先中止', () => {
+  it('PASI-9：执行中的会话禁止删除，暂停后可删除', () => {
     const p = svc.ensureProject('/tmp/proj-a');
     const s = svc.createSession(p.id, { title: 'running' });
     const ac = new AbortController();
     svc.registerRun(s.id, ac);
 
-    svc.removeSession(s.id);
+    // 执行中：删除被拦截
+    expect(() => svc.removeSession(s.id)).toThrow(/执行中/);
+    expect(svc.getSession(s.id)).toBeDefined();
+
+    // 暂停：中止本轮并把状态落库为 paused
+    expect(svc.pauseRun(s.id)).toBe(true);
     expect(ac.signal.aborted).toBe(true);
     expect(svc.isRunning(s.id)).toBe(false);
+    expect(svc.getSession(s.id)!.status).toBe('paused');
+
+    // 暂停后（非执行中）：允许删除
+    svc.removeSession(s.id);
+    expect(svc.getSession(s.id)).toBeUndefined();
+  });
+
+  it('PASI-9：pauseRun 对未运行的会话返回 false；resumeSession 清除暂停标记', () => {
+    const p = svc.ensureProject('/tmp/proj-a');
+    const s = svc.createSession(p.id, { title: 'idle' });
+    expect(svc.pauseRun(s.id)).toBe(false);
+
+    svc.registerRun(s.id, new AbortController());
+    expect(svc.pauseRun(s.id)).toBe(true);
+    expect(svc.getSession(s.id)!.status).toBe('paused');
+
+    // resume 幂等：paused 才动状态，active 会话不受影响
+    svc.resumeSession(s.id);
+    expect(svc.getSession(s.id)!.status).toBe('active');
+    svc.resumeSession(s.id);
+    expect(svc.getSession(s.id)!.status).toBe('active');
   });
 
   it('运行中项目级联中止', () => {

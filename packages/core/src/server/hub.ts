@@ -46,7 +46,8 @@ export type HubEvent =
   | { type: 'ask_user'; requestId: string; question: string; options?: string[] }
   | { type: 'run_error'; message: string }
   | { type: 'git_notice'; message: string }
-  | { type: 'state'; running: boolean };
+  /** paused 仅在状态变化时携带（PASI-9 暂停语义：本轮中止、状态落库，发消息即恢复） */
+  | { type: 'state'; running: boolean; paused?: boolean };
 
 export interface SessionHubDeps {
   service: SessionService;
@@ -121,6 +122,29 @@ export class SessionHub {
     return this.running.has(sessionId);
   }
 
+  /** 当前所有运行中的会话 id（Web 侧栏运行态徽标 / 删除门禁的数据源）。 */
+  runningSessionIds(): string[] {
+    return [...this.running];
+  }
+
+  /** 会话是否处于暂停态（status 落库为 paused；执行中止即本轮结束，不占运行中）。 */
+  isPaused(sessionId: string): boolean {
+    return this.deps.service.getSession(sessionId)?.status === 'paused';
+  }
+
+  /**
+   * 暂停执行中的会话（PASI-9）：中止主循环并把状态落库为 paused。
+   * 返回 false 表示会话未在执行（无可暂停的运行）。
+   */
+  pause(sessionId: string): boolean {
+    const ok = this.deps.service.pauseRun(sessionId);
+    if (ok) {
+      // 引擎收尾是异步的（finally 稍后还会发 running:false），这里先推暂停态供前端即时切换
+      this.publish(sessionId, { type: 'state', running: false, paused: true });
+    }
+    return ok;
+  }
+
   private publish(sessionId: string, ev: HubEvent): void {
     for (const fn of this.subs.get(sessionId) ?? []) {
       try {
@@ -192,9 +216,11 @@ export class SessionHub {
     if (!session) throw new Error('session not found');
     const project = this.deps.service.getProject(session.project_id);
     if (!project) throw new Error('project not found');
+    // PASI-9：暂停会话恢复 = 继续发消息，清除 paused 标记后按正常流程执行
+    this.deps.service.resumeSession(sessionId);
 
     this.running.add(sessionId);
-    this.publish(sessionId, { type: 'state', running: true });
+    this.publish(sessionId, { type: 'state', running: true, paused: false });
     // M5: 崩溃恢复——本会话孤儿任务（租约过期的 running）先回 queued
     try {
       this.deps.service.recoverTasks(sessionId);

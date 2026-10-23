@@ -73,6 +73,9 @@ input::placeholder, textarea::placeholder { color: var(--text-faint); }
 .mode-tag.react { background: var(--green-soft); color: var(--green); }
 .mode-tag.plan { background: var(--orange-soft); color: var(--orange); }
 .mode-tag.multi { background: var(--purple-soft); color: var(--purple); }
+/* PASI-9：会话运行态徽标（执行中 / 已暂停） */
+.mode-tag.running { background: var(--accent-soft); color: var(--accent); }
+.mode-tag.paused { background: var(--orange-soft); color: var(--orange); }
 
 /* 记忆类型徽标配色 */
 .mem-kind { font-size: 9.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
