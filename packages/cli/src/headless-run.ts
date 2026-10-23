@@ -12,6 +12,7 @@
  */
 import * as fs from 'node:fs';
 import {
+  autoOnboardProject,
   BudgetManager,
   GitIntegration,
   McpManager,
@@ -124,6 +125,24 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     session = { ...session, model: opts.model };
   }
   service.recoverTasks(session.id);
+
+  // F-34 项目 onboarding：新注册项目时同步扫描一次，生成静态记忆草案
+  // （一次性成本可接受；失败静默——状态留在 pending，下次新项目启动重试）
+  if (project.created) {
+    console.error('✨ 新项目已注册：开始 onboarding 扫描…');
+    try {
+      const r = await autoOnboardProject({
+        projectRoot: cwd,
+        provider,
+        model: session.model || 'claude-sonnet-4-5-20250929',
+      });
+      if (r && !r.skipped) {
+        console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`yzero onboarding confirm\` 采纳）`);
+      }
+    } catch {
+      console.error('⚠ onboarding 扫描失败（已跳过，可稍后运行 `yzero onboarding run`）');
+    }
+  }
 
   // 提示词组装（7 层 + Skill 三层）
   const model = session.model || 'claude-sonnet-4-5-20250929';
