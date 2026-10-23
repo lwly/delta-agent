@@ -15,7 +15,7 @@
 | `packages/core/src/server/hub.ts` | 改 | `SessionHubDeps.modelRouter` / `resolveProviderById`；`routeAux(kind)`；distill 接线 |
 | `packages/core/src/index.ts` | 改 | 导出 ModelRouter / 类型 |
 | `packages/cli/src/index.ts` | 改 | serve 装配路由器；`models routing` 五个子命令 |
-| `packages/core/test/router.test.ts` | 新 | 10 例单测 |
+| `packages/core/test/router.test.ts` | 新 | 9 例单测 |
 
 ---
 
@@ -128,7 +128,7 @@ void distillMemories(service.memory, routed?.provider ?? provider, routed?.model
 
 ---
 
-## 6. 测试矩阵（test/router.test.ts，10 例）
+## 6. 测试矩阵（test/router.test.ts，9 例）
 
 | 组 | 用例 |
 |----|------|
