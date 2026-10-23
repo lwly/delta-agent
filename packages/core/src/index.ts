@@ -442,3 +442,13 @@ export {
   type ConfirmOnboardingResult,
   type AutoOnboardOptions,
 } from './onboarding/index.js';
+
+// F-36 CLI TUI 细节：行级 diff 生成（edit/write 快照 → 彩色渲染）
+export {
+  diffLines,
+  compactDiff,
+  DIFF_MAX_LINES,
+  DIFF_MAX_RENDER_LINES,
+  type DiffLine,
+  type DiffLineType,
+} from './diff/lines.js';

@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 import type { ConfirmDecision, ConfirmRequest } from '@y-zero/shared';
+import { theme, icons } from './theme.js';
 
 /**
  * TUI confirmation card (decision #9): arrow keys to choose
@@ -33,10 +34,10 @@ export function ConfirmCard(props: {
   ];
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={0}>
-      <Text color="yellow">⚠ 确认操作 · {props.request.tool}</Text>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.warn} paddingX={1} marginY={0}>
+      <Text color={theme.warn}>{icons.warn} 确认操作 · {props.request.tool}</Text>
       <Text dimColor>{props.request.reason}</Text>
-      <ArgsView args={props.request.args} />
+      <ArgsView tool={props.request.tool} args={props.request.args} />
       <SelectInput
         items={options}
         onSelect={(item) => {
@@ -51,7 +52,39 @@ export function ConfirmCard(props: {
   );
 }
 
-function ArgsView({ args }: { args: Record<string, unknown> }) {
+/** F-36 edit_file：确认前展示替换内容彩色对照（旧红 / 新绿），先看后批。 */
+function EditPreview({ oldStr, newStr }: { oldStr: string; newStr: string }) {
+  const clip = (s: string): string[] => {
+    const lines = s.split('\n').slice(0, 10);
+    if (s.split('\n').length > 10) lines.push(`…（其余 ${s.split('\n').length - 10} 行省略）`);
+    return lines;
+  };
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      {clip(oldStr).map((l, i) => (
+        <Text key={`o${i}`} color={theme.diffDel}>
+          - {l}
+        </Text>
+      ))}
+      {clip(newStr).map((l, i) => (
+        <Text key={`n${i}`} color={theme.diffAdd}>
+          + {l}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function ArgsView({ tool, args }: { tool: string; args: Record<string, unknown> }) {
+  // edit_file：old_string/new_string 逐行彩色对照（其余参数仍列摘要行）
+  if (tool === 'edit_file' && typeof args.old_string === 'string' && typeof args.new_string === 'string') {
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>  path: {String(args.path ?? '')}</Text>
+        <EditPreview oldStr={args.old_string} newStr={args.new_string} />
+      </Box>
+    );
+  }
   const lines = Object.entries(args).map(([k, v]) => {
     const s = typeof v === 'string' ? v : JSON.stringify(v);
     const shown = s.length > 300 ? s.slice(0, 300) + '…' : s;
@@ -76,8 +109,8 @@ function EditArgs(props: {
 
   return (
     <Box flexDirection="column">
-      <Text color="cyan">编辑参数（JSON，回车提交，Esc 取消）：</Text>
-      {error ? <Text color="red">{error}</Text> : null}
+      <Text color={theme.user}>编辑参数（JSON，回车提交，Esc 取消）：</Text>
+      {error ? <Text color={theme.error}>{error}</Text> : null}
       <TextInput
         value={value}
         onChange={setValue}
