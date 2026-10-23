@@ -319,9 +319,10 @@ const editingIdx = ref(-1); // 正在编辑的消息下标（-1 表示无编辑�
 const editText = ref('');
 
 /** 复制用户消息原文到剪贴板 */
-function copyUserMessage(m: { content: string }) {
+/** 复制任意文本到剪贴板，结果以通知条反馈 */
+function copyText(text: string) {
   navigator.clipboard
-    .writeText(m.content)
+    .writeText(text)
     .then(() => chat.notice('已复制到剪贴板'))
     .catch(() => chat.notice('✘ 复制失败'));
 }
@@ -513,7 +514,7 @@ watch(showMemory, (open) => {
                   </div>
                   <div class="msg-text">{{ m.content }}</div>
                   <div class="msg-ops">
-                    <button class="uop" title="复制原文" @click="copyUserMessage(m)">复制</button>
+                    <button class="uop" title="复制原文" @click="copyText(m.content)">复制</button>
                     <button class="uop" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">编辑</button>
                     <button class="uop" title="原样重发" :disabled="chat.running" @click="resend(m)">重发</button>
                   </div>
@@ -526,11 +527,17 @@ watch(showMemory, (open) => {
                 <div class="ai-col">
                   <div class="msg-meta"><span class="tag turn">ASSISTANT</span><span>{{ chat.sessionMeta.model || '默认模型' }}</span></div>
                   <div v-if="m.content" class="bubble msg-text md" v-html="md(m.content)" />
+                  <!-- 快捷操作：悬停显示，与用户消息一致 -->
+                  <div v-if="m.content" class="msg-ops">
+                    <button class="uop" title="复制回复" @click="copyText(m.content)">复制</button>
+                  </div>
                   <div v-for="(c, ci) in m.toolCalls ?? []" :key="ci" class="tool-card">
                     <div class="tool-head">
                       <span class="tool-status run">⚙</span>
                       <span class="tool-name">{{ c.name }}</span>
                       <span class="tool-args">{{ argsOneLine(c.argsJson) }}</span>
+                      <!-- 阻止冒泡：点击复制不折叠卡片 -->
+                      <button class="uop tool-copy" title="复制参数 JSON" @click.stop.prevent="copyText(argsPretty(c.argsJson))">复制 JSON</button>
                       <span class="tool-caret">▶</span>
                     </div>
                     <div class="tool-body"><pre>{{ argsPretty(c.argsJson) }}</pre></div>
@@ -549,6 +556,12 @@ watch(showMemory, (open) => {
                         🛡 {{ m.sandboxMeta.mode }}{{ m.sandboxMeta.ms != null ? ` · ${m.sandboxMeta.ms}ms` : '' }}
                       </span>
                       <span class="tool-args">{{ m.content.length }} 字符</span>
+                      <button
+                        v-if="callMap.get(m.toolCallId ?? '')"
+                        class="uop tool-copy"
+                        title="复制参数 JSON"
+                        @click.stop.prevent="copyText(argsPretty(callMap.get(m.toolCallId ?? '')!.argsJson))"
+                      >复制 JSON</button>
                       <span class="tool-caret">▶</span>
                     </summary>
                     <pre v-if="callMap.get(m.toolCallId ?? '')" class="args-pre">{{ argsPretty(callMap.get(m.toolCallId ?? '')!.argsJson) }}</pre>
@@ -870,9 +883,9 @@ watch(showMemory, (open) => {
 .md :deep(table) { border-collapse: collapse; }
 .md :deep(th), .md :deep(td) { border: 1px solid var(--border); padding: 4px 8px; }
 .msg-user .msg-text { white-space: pre-wrap; }
-/* 用户消息快捷操作条：默认隐藏，悬停气泡时浮现 */
+/* 消息快捷操作条：默认隐藏，悬停气泡时浮现（用户 / 助手通用） */
 .msg-ops { display: flex; gap: 4px; margin-top: 7px; opacity: 0; transition: opacity 0.15s; }
-.msg-user:hover .msg-ops { opacity: 1; }
+.msg-user:hover .msg-ops, .msg-ai:hover .msg-ops { opacity: 1; }
 .uop {
   padding: 2px 9px; border-radius: 6px; border: 1px solid var(--border);
   background: var(--bg-elevated); color: var(--text-faint); font-size: 11px; cursor: pointer;
@@ -918,6 +931,8 @@ watch(showMemory, (open) => {
 .tool-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--accent); }
 .tool-args { font-family: var(--mono); font-size: 11.5px; color: var(--text-faint); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-caret { color: var(--text-faint); font-size: 10px; }
+/* 工具卡片头部的「复制 JSON」按钮：紧凑形态，不挤占一行 */
+.tool-copy { padding: 0 6px; font-size: 10.5px; flex-shrink: 0; }
 .tool-card details[open] .tool-caret { transform: rotate(90deg); }
 .tool-body pre, .args-pre, .result-pre {
   font-family: var(--mono); font-size: 12px; line-height: 1.6;
