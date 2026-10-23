@@ -58,6 +58,17 @@ function stepIcon(s: RunStep): string {
   return s.result ? (s.result.ok ? '🔧✔' : '🔧✘') : '🔧…';
 }
 
+/** 复制任意文本到剪贴板；按钮短暂显示「已复制」作为反馈 */
+const copiedKey = ref('');
+function copyText(text: string, key: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    copiedKey.value = key;
+    setTimeout(() => {
+      if (copiedKey.value === key) copiedKey.value = '';
+    }, 1500);
+  });
+}
+
 onMounted(loadRuns);
 </script>
 
@@ -98,7 +109,23 @@ onMounted(loadRuns);
           <div v-for="(s, i) in timeline.steps" :key="i" class="step" :class="s.type">
             <span class="icon">{{ stepIcon(s) }}</span>
             <div class="body">
-              <div class="when">{{ fmt(s.at) }}</div>
+              <div class="when">
+              {{ fmt(s.at) }}
+              <!-- 快捷复制：文本步骤复制原文，工具步骤复制参数/结果 -->
+              <span class="copy-row">
+                <template v-if="s.type === 'tool_call'">
+                  <button class="mini-copy" @click="copyText(argsPretty(s.argsJson ?? ''), `a${i}`)">
+                    {{ copiedKey === `a${i}` ? '已复制' : '复制参数' }}
+                  </button>
+                  <button v-if="s.result" class="mini-copy" @click="copyText(s.result.content, `r${i}`)">
+                    {{ copiedKey === `r${i}` ? '已复制' : '复制结果' }}
+                  </button>
+                </template>
+                <button v-else class="mini-copy" @click="copyText(s.text ?? '', `t${i}`)">
+                  {{ copiedKey === `t${i}` ? '已复制' : '复制' }}
+                </button>
+              </span>
+            </div>
               <div v-if="s.type === 'user'" class="text user">{{ s.text }}</div>
               <div v-else-if="s.type === 'assistant'" class="text assistant">{{ s.text }}</div>
               <div v-else class="toolcall">
@@ -142,7 +169,15 @@ h2 { margin: 0; font-size: 18px; }
 .step { display: flex; gap: 10px; margin: 12px 0; }
 .icon { width: 28px; text-align: center; }
 .body { flex: 1; min-width: 0; }
-.when { color: var(--text-faint); font-size: 11px; }
+.when { color: var(--text-faint); font-size: 11px; display: flex; align-items: center; gap: 8px; }
+/* 快捷复制：默认隐藏，悬停步骤时浮现（与工作台消息操作一致） */
+.copy-row { margin-left: auto; display: flex; gap: 6px; }
+.mini-copy {
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint);
+  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s;
+}
+.step:hover .mini-copy { opacity: 1; }
+.mini-copy:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
 .text { border-radius: 10px; padding: 8px 12px; margin-top: 2px; white-space: pre-wrap; font-size: 13px; }
 .text.user { background: var(--accent-soft); border: 1px solid rgba(88, 166, 255, 0.25); display: inline-block; }
 .text.assistant { background: var(--bg-elevated); border: 1px solid var(--border); }
