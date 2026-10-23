@@ -26,6 +26,13 @@ import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
+import {
+  sandboxStatusCommand,
+  sandboxEnableCommand,
+  sandboxDisableCommand,
+  sandboxPullCommand,
+  sandboxGcCommand,
+} from './sandbox.js';
 import { evalsListCommand, evalsRunCommand, type EvalsOptions } from './evals.js';
 import {
   normalizeGitPolicy,
@@ -539,6 +546,38 @@ program
     else await evalsRunCommand(opts);
   });
 
+// ── yzero sandbox：F-30 沙箱运维（status / enable / disable / pull / gc）──
+
+const sandbox = program.command('sandbox').description('F-30 沙箱运维：查看状态、启用/关闭（seatbelt 为主后端，Docker 为可选）');
+
+sandbox
+  .command('status')
+  .description('查看生效模式、后端探测结论与配置警告（不执行任何命令）')
+  .option('--refresh', '强制重新探测（绕过 30s 缓存）', false)
+  .action((opts: { refresh?: boolean }) => sandboxStatusCommand(opts));
+
+sandbox
+  .command('enable')
+  .description('全局启用沙箱（写 ~/.y-zero/sandbox.json 的 mode；默认 seatbelt，其它字段保留）')
+  .option('--mode <mode>', '隔离后端：seatbelt（macOS 自带，默认）| docker（容器）', 'seatbelt')
+  .action((opts: { mode: string }) => sandboxEnableCommand(opts));
+
+sandbox
+  .command('disable')
+  .description('全局关闭沙箱（mode=local，其它字段保留）')
+  .action(() => sandboxDisableCommand());
+
+sandbox
+  .command('pull')
+  .description('预拉取 docker 镜像（仅 docker 后端需要；seatbelt 无镜像概念）')
+  .option('-i, --image <image>', '镜像名（缺省用生效配置的 sandbox.image）')
+  .action((opts: { image?: string }) => sandboxPullCommand(opts));
+
+sandbox
+  .command('gc')
+  .description('清理 yzero 残留容器（上次运行未正常退出时的兜底）')
+  .action(() => sandboxGcCommand());
+
 // ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
 
 /** F-25：--image 可重复参数收集。 */
@@ -572,7 +611,7 @@ program
 
 // ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
