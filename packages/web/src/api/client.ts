@@ -251,12 +251,28 @@ export interface CronJobInput {
   enabled?: boolean;
 }
 
+/** Composer「/ 技能」候选：skill 元数据（不含正文内容） */
+export interface SkillCandidate {
+  name: string;
+  description: string;
+  layer: 'builtin' | 'user' | 'project';
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
   createProject: (root: string) => request<ProjectRow>('POST', '/api/projects', { root }),
   removeProject: (id: string, confirmName: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/projects/${id}`, { confirmName, hard }),
+  // Composer「@ 文件引用」候选：项目根内相对路径（服务端已做忽略目录/符号链接过滤）
+  listProjectFiles: (projectId: string, q = '') =>
+    request<{ files: string[] }>('GET', `/api/projects/${projectId}/files?q=${encodeURIComponent(q)}`),
+  // Composer「/ 技能」候选：三层发现的 skill 元数据
+  listSkills: (projectId?: string) =>
+    request<{ skills: SkillCandidate[]; errors: string[] }>(
+      'GET',
+      `/api/skills${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
 
   // sessions
   listSessions: (projectId: string) => request<SessionRow[]>('GET', `/api/projects/${projectId}/sessions`),
