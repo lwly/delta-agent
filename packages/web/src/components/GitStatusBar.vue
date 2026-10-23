@@ -88,7 +88,7 @@ watch(() => [chat.sessionId, chat.running], () => {
     <div ref="menuWrap" class="seg branch-wrap">
       <button class="branch-btn" :disabled="!canInteract" :title="disabled && chat.running ? '任务运行中，结束后再切换' : '切换分支'" @click="openBranchMenu">
         ⎇ {{ branchesLoading ? '加载中…' : switching ? '切换中…' : gs.branch ?? '（非 git 仓库）' }}
-        <span class="caret">▾</span>
+        <span class="caret">▴</span>
       </button>
       <div v-if="showBranchMenu" class="branch-menu">
         <button
@@ -151,10 +151,10 @@ watch(() => [chat.sessionId, chat.running], () => {
 .branch-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
 .caret { font-size: 9px; color: var(--text-faint); margin-left: 4px; }
 .branch-menu {
-  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
   z-index: 45; min-width: 260px; max-height: 280px; overflow-y: auto;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 9px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); padding: 5px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4); padding: 5px;
 }
 .branch-item {
   display: flex; align-items: center; gap: 6px; width: 100%;
