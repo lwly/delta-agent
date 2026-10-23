@@ -120,13 +120,14 @@ async function test(id: string) {
           </select>
           <input v-else v-model="form.id" disabled />
         </label>
-        <label>API Key *<input v-model="form.apiKey" type="password" placeholder="保存后加密存储，不回显" /></label>
+        <label>API Key{{ editing ? '（留空保留原 Key）' : ' *' }}<input v-model="form.apiKey" type="password" :placeholder="editing ? '留空则保留已存储的 Key' : '保存后加密存储，不回显'" /></label>
         <label>Base URL（openai 兼容网关）<input v-model="form.baseUrl" placeholder="https://…" /></label>
         <label>默认模型<input v-model="form.model" placeholder="如 deepseek-chat" /></label>
       </div>
       <label class="check"><input v-model="form.setDefault" type="checkbox" /> 设为默认</label>
       <p v-if="error" class="error">✘ {{ error }}</p>
-      <button class="btn primary save" :disabled="!form.id || !form.apiKey" @click="save">保存</button>
+      <!-- 编辑模式 Key 可留空（保留原 Key），新增模式必填 -->
+      <button class="btn primary save" :disabled="!form.id || (!editing && !form.apiKey)" @click="save">保存</button>
     </div>
     <p class="note">Key 经本地加密存储、界面不回显（更新需重新输入）；配置对<b>新建对话</b>即时生效。</p>
   </ModalShell>

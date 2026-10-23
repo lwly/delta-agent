@@ -57,7 +57,8 @@ export class ProviderManager {
     }));
   }
 
-  /** Add (or replace) a provider. `id` must be a known vendor or any openai-compatible id. */
+  /** Add (or replace) a provider. `id` must be a known vendor or any openai-compatible id.
+   *  apiKey 留空时：编辑已有 Provider 视为「保留原 Key」（密文原样沿用，不二次加密）；新增仍必须提供。 */
   add(opts: {
     id: string;
     apiKey: string;
@@ -65,19 +66,19 @@ export class ProviderManager {
     model?: string;
     setDefault?: boolean;
   }): void {
-    if (!opts.apiKey) throw new Error('apiKey 不能为空');
     const data = this.load();
+    const idx = data.providers.findIndex((p) => p.id === opts.id);
+    if (!opts.apiKey && idx < 0) throw new Error('apiKey 不能为空');
     const vendor = KNOWN_VENDORS[opts.id] ?? 'openai-compatible';
     const entry: StoredProvider = {
       id: opts.id,
       vendor,
-      apiKey: encryptKey(opts.apiKey),
+      apiKey: opts.apiKey ? encryptKey(opts.apiKey) : data.providers[idx]!.apiKey,
       baseUrl: opts.baseUrl,
       model: opts.model,
       enabled: true,
       default: Boolean(opts.setDefault),
     };
-    const idx = data.providers.findIndex((p) => p.id === opts.id);
     if (idx >= 0) {
       entry.enabled = data.providers[idx]!.enabled;
       entry.default = data.providers[idx]!.default;

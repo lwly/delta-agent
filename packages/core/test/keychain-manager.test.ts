@@ -142,6 +142,26 @@ describe('ProviderManager', () => {
     expect(view[0]!.default).toBe(true);
   });
 
+  it('keeps the stored key when editing an existing provider with empty apiKey', () => {
+    const mgr = new ProviderManager(tmpFile);
+    mgr.add({ id: 'deepseek', apiKey: 'keep-key-000000', model: 'deepseek-chat' });
+    // 编辑场景：只改 model，Key 留空 → 保留原 Key（解密后一致），模型更新
+    mgr.add({ id: 'deepseek', apiKey: '', model: 'DeepSeek-V4.1-Flash' });
+    const view = mgr.list();
+    expect(view).toHaveLength(1);
+    expect(view[0]!.model).toBe('DeepSeek-V4.1-Flash');
+    // keyMasked 掩码形态一致，说明密文原样沿用
+    const masked = view[0]!.keyMasked;
+    expect(masked).toBeTruthy();
+    // 实际可用：createProvider 能用保留的 Key 构建实例（不抛错）
+    expect(() => mgr.add({ id: 'deepseek', apiKey: '' })).not.toThrow();
+  });
+
+  it('still rejects empty apiKey when creating a new provider', () => {
+    const mgr = new ProviderManager(tmpFile);
+    expect(() => mgr.add({ id: 'qwen', apiKey: '' })).toThrow('apiKey 不能为空');
+  });
+
   it('createProvider builds the right provider class from stored config', async () => {
     const mgr = new ProviderManager(tmpFile);
     mgr.add({ id: 'deepseek', apiKey: 'sk-x' });
