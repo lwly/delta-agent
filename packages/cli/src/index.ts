@@ -13,6 +13,7 @@ import {
   McpManager,
   loadMcpConfig,
   ProviderManager,
+  ModelRouter,
   SessionHub,
   createWebServer,
   createSkillRuntime,
@@ -196,6 +197,100 @@ models
     if (!r.ok) process.exitCode = 1;
   });
 
+// ── F-32 模型路由：yzero models routing 子命令组 ─────────────────────────
+
+models
+  .command('routing')
+  .description('查看模型路由配置（F-32：分类/提炼/摘要类辅助调用按规则走小模型）')
+  .action(() => {
+    const cfg = new ProviderManager().getRouting();
+    if (!cfg) {
+      console.log('（未配置）可用命令：routing set <kind> <model> [--provider <id>] / routing on / routing off');
+      return;
+    }
+    console.log(`状态：${cfg.enabled ? '已启用' : '已停用'}`);
+    const kinds = Object.keys(cfg.rules);
+    if (kinds.length === 0) {
+      console.log('规则：（空）');
+      return;
+    }
+    for (const kind of kinds) {
+      const rule = cfg.rules[kind]!;
+      console.log(`  ${kind.padEnd(12)} → ${rule.model}${rule.provider ? ` @ ${rule.provider}` : '（主 Provider）'}`);
+    }
+  });
+
+models
+  .command('routing-set')
+  .description('设置一条路由规则（kind 如 distill/classify/summarize，也可自定义）')
+  .argument('<kind>', '任务类型')
+  .argument('<model>', '目标模型 id')
+  .option('--provider <id>', '目标 Provider（缺省跟随会话主 Provider）')
+  .action((kind: string, model: string, opts: { provider?: string }) => {
+    try {
+      const mgr = new ProviderManager();
+      const cfg = mgr.getRouting() ?? { enabled: true, rules: {} };
+      cfg.rules[kind] = { model, provider: opts.provider };
+      cfg.enabled = true; // 配置规则即启用（可用 routing-set-off 关闭）
+      mgr.setRouting(cfg);
+      console.log(`✔ 路由规则已保存：${kind} → ${model}${opts.provider ? ` @ ${opts.provider}` : ''}（路由已启用）`);
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+models
+  .command('routing-remove')
+  .description('删除一条路由规则（该类任务回退主模型）')
+  .argument('<kind>', '任务类型')
+  .action((kind: string) => {
+    const mgr = new ProviderManager();
+    const cfg = mgr.getRouting();
+    if (!cfg || !cfg.rules[kind]) {
+      console.error(`✘ 未找到路由规则：${kind}`);
+      process.exitCode = 1;
+      return;
+    }
+    delete cfg.rules[kind];
+    mgr.setRouting(cfg);
+    console.log(`✔ 已删除路由规则 ${kind}`);
+  });
+
+models
+  .command('routing-on')
+  .description('启用模型路由')
+  .action(() => {
+    try {
+      const mgr = new ProviderManager();
+      const cfg = mgr.getRouting();
+      if (!cfg || Object.keys(cfg.rules).length === 0) {
+        console.error('✘ 尚无路由规则，先 routing-set <kind> <model>');
+        process.exitCode = 1;
+        return;
+      }
+      mgr.setRouting({ ...cfg, enabled: true });
+      console.log('✔ 模型路由已启用');
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+models
+  .command('routing-off')
+  .description('停用模型路由（全部调用回退会话主模型）')
+  .action(() => {
+    const mgr = new ProviderManager();
+    const cfg = mgr.getRouting();
+    if (!cfg) {
+      console.log('（本就未配置路由）');
+      return;
+    }
+    mgr.setRouting({ ...cfg, enabled: false });
+    console.log('✔ 模型路由已停用');
+  });
+
 // ── yzero memory：L2 动态记忆管理（memory-design §8）────────────────────
 
 const memory = program.command('memory').description('管理 L2 长期动态记忆（memories 表）');
@@ -350,6 +445,9 @@ program
       service,
       registry,
       resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
+      // F-32 模型路由：路由规则每次运行即时读取（settings 修改后生效）；目标 provider 走同一解析链
+      modelRouter: new ModelRouter(),
+      resolveProviderById: (id) => resolveProviderFromEnv(id),
       skills,
       hooks,
     });

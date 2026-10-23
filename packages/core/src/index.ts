@@ -90,6 +90,12 @@ export { DeepSeekProvider } from './llm/providers/deepseek.js';
 export { QwenProvider } from './llm/providers/qwen.js';
 export { ProviderManager, type ProviderView } from './llm/manager.js';
 export {
+  ModelRouter,
+  KNOWN_TASK_KINDS,
+  type RoutingTaskKind,
+  type RoutedTarget,
+} from './llm/router.js';
+export {
   encryptKey,
   decryptKey,
   decryptKeyDetailed,
@@ -99,6 +105,8 @@ export {
   modelsConfigPath,
   type StoredProvider,
   type ModelsFile,
+  type RoutingRule,
+  type RoutingConfig,
 } from './llm/keychain.js';
 
 export { ToolRegistry } from './tools/registry.js';

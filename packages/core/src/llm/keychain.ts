@@ -168,9 +168,27 @@ export interface StoredProvider {
   default?: boolean;
 }
 
+/** F-32 单条路由规则：某类辅助任务使用的目标模型（provider 缺省 = 会话主 Provider） */
+export interface RoutingRule {
+  /** 目标 provider id（须已在 providers 中配置且启用）；缺省跟随会话主 Provider */
+  provider?: string;
+  /** 目标模型 id（如 deepseek-chat、qwen-turbo 等小模型） */
+  model: string;
+}
+
+/** F-32 路由配置：按任务类型（kind）分流到不同模型，规划/执行类任务不在此列（固定走主模型） */
+export interface RoutingConfig {
+  /** 总开关：关闭时全部调用走会话主模型 */
+  enabled: boolean;
+  /** 任务类型 → 路由规则；已知 kind 见 core/llm/router.ts KNOWN_TASK_KINDS，也允许自定义扩展 */
+  rules: Record<string, RoutingRule>;
+}
+
 export interface ModelsFile {
   version: 1;
   providers: StoredProvider[];
+  /** F-32 模型路由配置（可选；旧配置文件无此字段时视为未启用路由） */
+  routing?: RoutingConfig;
 }
 
 export function modelsConfigPath(): string {
@@ -180,7 +198,24 @@ export function modelsConfigPath(): string {
 export function loadModelsFile(file: string = modelsConfigPath()): ModelsFile {
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as ModelsFile;
-    if (raw.version === 1 && Array.isArray(raw.providers)) return raw;
+    if (raw.version === 1 && Array.isArray(raw.providers)) {
+      // F-32：routing 字段容忍手工编辑出错——形状非法时整体忽略（不阻断主流程）
+      const r = raw.routing;
+      if (
+        r &&
+        typeof r === 'object' &&
+        typeof r.enabled === 'boolean' &&
+        r.rules &&
+        typeof r.rules === 'object' &&
+        !Array.isArray(r.rules) &&
+        Object.values(r.rules).every(
+          (v) => v && typeof v === 'object' && typeof v.model === 'string' && v.model.trim() !== '',
+        )
+      ) {
+        return raw;
+      }
+      return { version: 1, providers: raw.providers };
+    }
   } catch {
     // missing/corrupt file → empty store (corrupt file is overwritten on next save)
   }

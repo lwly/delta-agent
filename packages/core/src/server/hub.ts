@@ -33,6 +33,7 @@ import { runPlanExecute } from '../engine/plan-execute.js';
 import { runMultiAgent } from '../engine/orchestrator.js';
 import { modeSegment } from '../engine/mode-prompt.js';
 import { distillMemories } from '../session/distill.js';
+import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
 import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -70,6 +71,10 @@ export interface SessionHubDeps {
   gitPolicy?: GitPolicy;
   /** F-27 Hook 系统（工具钩子 + SessionStart/Stop 生命周期；缺省不挂钩） */
   hooks?: HookManager;
+  /** F-32 模型路由器（缺省不路由：辅助调用跟随会话主模型） */
+  modelRouter?: ModelRouter;
+  /** F-32 按 provider id 构建 LLM 实例（路由规则指定 provider 时使用；缺省复用 resolveProvider） */
+  resolveProviderById?: (id: string) => Promise<LLMProvider>;
 }
 
 interface PendingConfirm {
@@ -153,6 +158,23 @@ export class SessionHub {
   }
 
   // ── 运行 ────────────────────────────────────────────────────────────────
+
+  /**
+   * F-32：解析某类辅助任务的路由目标（如 distill 用小模型）。
+   * 未启用路由 / 规则缺失 / 目标 provider 构建失败时返回 undefined，调用方回退会话主模型。
+   */
+  private async routeAux(kind: RoutingTaskKind): Promise<{ provider: LLMProvider; model: string } | undefined> {
+    const target = this.deps.modelRouter?.resolve(kind);
+    if (!target) return undefined;
+    try {
+      const provider = target.provider
+        ? await (this.deps.resolveProviderById ?? this.deps.resolveProvider)(target.provider)
+        : await this.deps.resolveProvider();
+      return { provider, model: target.model };
+    } catch {
+      return undefined; // 路由目标不可用 → 回退主模型，不阻塞任务
+    }
+  }
 
   abort(sessionId: string): boolean {
     return this.deps.service.abortRun(sessionId);
@@ -351,7 +373,9 @@ export class SessionHub {
                 .getHistory(sessionId)
                 .map((m) => `${m.role}: ${m.content}`)
                 .join('\n');
-              void distillMemories(service.memory, provider, ctx.model, {
+              // F-32：提炼属轻量辅助调用，优先走路由规则指定的小模型（未配置则回退主模型）
+              const routed = await this.routeAux('distill');
+              void distillMemories(service.memory, routed?.provider ?? provider, routed?.model ?? ctx.model, {
                 scope: `project:${session.project_id}`,
                 transcript,
                 signal: ac.signal,

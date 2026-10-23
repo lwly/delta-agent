@@ -8,6 +8,7 @@ import {
   modelsConfigPath,
   maskKey,
   type StoredProvider,
+  type RoutingConfig,
 } from './keychain.js';
 
 const KNOWN_VENDORS: Record<string, StoredProvider['vendor']> = {
@@ -194,9 +195,30 @@ export class ProviderManager {
     }
   }
 
+  // ── F-32 模型路由配置（routing 字段 CRUD，CLI/Web 设置页共用）────────────
+
+  /** 读取路由配置（未配置时返回 undefined） */
+  getRouting(): RoutingConfig | undefined {
+    return this.load().routing;
+  }
+
+  /** 整体写入路由配置；传 undefined 清除（回退全部走主模型） */
+  setRouting(routing: RoutingConfig | undefined): void {
+    const data = this.load();
+    if (routing) {
+      // 写入前兜底校验：每条规则必须有非空 model
+      for (const [kind, rule] of Object.entries(routing.rules)) {
+        if (!rule || typeof rule.model !== 'string' || rule.model.trim() === '') {
+          throw new Error(`路由规则 ${kind} 非法：model 不能为空`);
+        }
+      }
+    }
+    data.routing = routing;
+    this.save(data);
+  }
+
   /** Connectivity probe: minimal chat request, returns latency ms. */
-  async test(id: string, timeoutMs = 15_000): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
-    const t0 = Date.now();
+  async test(id: string, timeoutMs = 15_000): Promise<{ ok: boolean; latencyMs: number; detail: string }> {    const t0 = Date.now();
     try {
       const provider = await this.createProvider(id);
       const stored = this.storedById(id);
