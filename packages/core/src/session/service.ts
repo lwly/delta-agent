@@ -395,8 +395,13 @@ export async function resolveProviderFromEnv(
     const env = PROVIDER_ENV[pid];
     const apiKey = process.env[env.key];
     if (!apiKey) continue;
-    const mod = await import(`../llm/providers/${pid}.js`);
-    const Ctor = mod[`${pid[0]!.toUpperCase()}${pid.slice(1)}Provider`] as new (opts: {
+    const mod = (await import(`../llm/providers/${pid}.js`)) as Record<string, unknown>;
+    // 导出名不做朴素驼峰拼名（deepseek→DeepSeekProvider、openai→OpenAIProvider 含连续大写），
+    // 先按 camelCase 精确取，取不到再按「类名以 Provider 结尾」兜底查找
+    const Ctor = (mod[`${pid[0]!.toUpperCase()}${pid.slice(1)}Provider`] ??
+      Object.values(mod).find(
+        (v) => typeof v === 'function' && v.name.endsWith('Provider'),
+      )) as new (opts: {
       apiKey: string;
       baseUrl?: string;
       model?: string;
