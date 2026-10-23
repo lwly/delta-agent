@@ -37,10 +37,11 @@ const showTrash = ref(false);
 const showSearch = ref(false);
 
 // ── 新对话偏好（模式 / 模型）────────────────────────────────
+// 执行模式枚举：value 为后端存储值，label 为界面中文显示名
 const MODES = [
-  { value: 'react', label: 'ReAct', ico: '⚡', cls: 'react' },
-  { value: 'plan-execute', label: 'Plan & Execute', ico: '📋', cls: 'plan' },
-  { value: 'multi-agent', label: 'Multi-Agent', ico: '🤖', cls: 'multi' },
+  { value: 'react', label: 'ReAct 推理', ico: '⚡', cls: 'react' },
+  { value: 'plan-execute', label: '计划执行', ico: '📋', cls: 'plan' },
+  { value: 'multi-agent', label: '多智能体', ico: '🤖', cls: 'multi' },
 ] as const;
 const modeChoice = ref<string>('react');
 const preferredModel = ref(localStorage.getItem('yz.preferredModel') ?? '');
@@ -74,6 +75,12 @@ function modeCls(mode: string): string {
 function modeLabel(mode: string): string {
   const m = MODES.find((x) => x.value === mode);
   return m ? m.label : mode;
+}
+/** 侧栏徽标短名（中文） */
+function modeShort(mode: string): string {
+  if (mode === 'plan-execute') return '计划';
+  if (mode === 'multi-agent') return '多智能体';
+  return '推理';
 }
 
 // ── 初始化 ──────────────────────────────────────────────────
@@ -258,22 +265,19 @@ function dataUrlOf(img: MessageImage): string {
   return `data:${img.mediaType};base64,${img.base64}`;
 }
 
-// F-25：选择图片 → 读入 base64（格式/大小前端预检，服务端仍校验）
-async function onPickImages(ev: Event) {
-  const target = ev.target as HTMLInputElement;
-  const files = Array.from(target.files ?? []);
-  target.value = '';
+// F-25：图片附件统一入口（文件选择 / 粘贴共用）——读入 base64（格式/大小前端预检，服务端仍校验）
+async function addImageFiles(files: File[]) {
   for (const f of files) {
     if (pendingImages.value.length >= MAX_IMAGES) {
       chat.notice(`最多附加 ${MAX_IMAGES} 张图片`);
       break;
     }
     if (f.size > MAX_BYTES) {
-      chat.notice(`✘ ${f.name} 过大（>4MB），请压缩后再附加`);
+      chat.notice(`✘ ${f.name || '图片'} 过大（>4MB），请压缩后再附加`);
       continue;
     }
     if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) {
-      chat.notice(`✘ ${f.name}：仅支持 png/jpeg/gif/webp`);
+      chat.notice(`✘ ${f.name || '图片'}：仅支持 png/jpeg/gif/webp`);
       continue;
     }
     const buf = await f.arrayBuffer();
@@ -286,13 +290,62 @@ async function onPickImages(ev: Event) {
       mediaType: f.type,
       base64: btoa(binary),
       preview: URL.createObjectURL(f),
-      name: f.name,
+      name: f.name || '粘贴图片',
     });
   }
+}
+
+async function onPickImages(ev: Event) {
+  const target = ev.target as HTMLInputElement;
+  const files = Array.from(target.files ?? []);
+  target.value = '';
+  await addImageFiles(files);
+}
+
+/** 输入框粘贴图片：从剪贴板提取图片文件走统一附加流程（文本粘贴不受影响） */
+async function onPaste(ev: ClipboardEvent) {
+  const files = Array.from(ev.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'));
+  if (files.length === 0) return;
+  ev.preventDefault();
+  await addImageFiles(files);
 }
 function removePendingImage(i: number) {
   const [item] = pendingImages.value.splice(i, 1);
   if (item) URL.revokeObjectURL(item.preview);
+}
+
+// ── 用户消息快捷操作（复制 / 编辑 / 重发）──────────────────
+const editingIdx = ref(-1); // 正在编辑的消息下标（-1 表示无编辑）
+const editText = ref('');
+
+/** 复制用户消息原文到剪贴板 */
+function copyUserMessage(m: { content: string }) {
+  navigator.clipboard
+    .writeText(m.content)
+    .then(() => chat.notice('已复制到剪贴板'))
+    .catch(() => chat.notice('✘ 复制失败'));
+}
+/** 进入编辑态：把消息原文填入输入框，保存后以新内容重发 */
+function startEdit(i: number, m: { content: string }) {
+  if (chat.running) return;
+  editingIdx.value = i;
+  editText.value = m.content;
+}
+function cancelEdit() {
+  editingIdx.value = -1;
+  editText.value = '';
+}
+/** 保存编辑并重发（作为一条新的用户消息发送） */
+async function resendEdit() {
+  const text = editText.value.trim();
+  if (!text || chat.running) return;
+  cancelEdit();
+  await chat.send(text);
+}
+/** 原样重发该消息 */
+async function resend(m: { content: string }) {
+  if (chat.running || !m.content.trim()) return;
+  await chat.send(m.content);
 }
 
 async function submit() {
@@ -370,7 +423,7 @@ watch(showMemory, (open) => {
             >
               <span class="session-icon">💬</span>
               <span class="session-title" :title="s.title">{{ s.title }}</span>
-              <span class="mode-tag" :class="modeCls(s.mode)">{{ modeCls(s.mode) }}</span>
+              <span class="mode-tag" :class="modeCls(s.mode)">{{ modeShort(s.mode) }}</span>
               <button class="item-del" title="删除会话（软删除）" @click.stop="askRemoveSession(s)">✕</button>
             </div>
             <div v-if="ws.sessions.length === 0" class="session-empty">（暂无会话，点「＋ 新对话」开始）</div>
@@ -395,7 +448,7 @@ watch(showMemory, (open) => {
         <div class="hero-logo">y0</div>
         <h1>y-zero-agent</h1>
         <p>从左侧选择一个对话，或新建对话开始你的任务。</p>
-        <p class="hero-hint">支持 ReAct / Plan-and-Execute / Multi-Agent 三种执行模式 · MCP 工具扩展 · 自动上下文压缩</p>
+        <p class="hero-hint">支持 ReAct 推理 / 计划执行 / 多智能体 三种执行模式 · MCP 工具扩展 · 自动上下文压缩</p>
       </div>
 
       <template v-else>
@@ -439,11 +492,31 @@ watch(showMemory, (open) => {
             <div v-for="(m, i) in chat.messages" :key="i">
               <div v-if="m.role === 'user'" class="msg msg-user">
                 <span class="avatar user">👤</span>
-                <div class="bubble">
+                <!-- 编辑态：原文填入文本框，可改后重发 -->
+                <div v-if="editingIdx === i" class="bubble edit-box">
+                  <textarea
+                    v-model="editText"
+                    class="edit-input"
+                    rows="3"
+                    placeholder="编辑消息内容（Enter 保存并重发，Esc 取消）"
+                    @keydown.enter.exact.prevent="resendEdit"
+                    @keydown.esc="cancelEdit"
+                  />
+                  <div class="edit-ops">
+                    <button class="uop primary" :disabled="chat.running || !editText.trim()" @click="resendEdit">保存并重发</button>
+                    <button class="uop" @click="cancelEdit">取消</button>
+                  </div>
+                </div>
+                <div v-else class="bubble">
                   <div v-if="m.images?.length" class="imgs">
                     <img v-for="(img, ii) in m.images" :key="ii" :src="dataUrlOf(img)" alt="附件" />
                   </div>
                   <div class="msg-text">{{ m.content }}</div>
+                  <div class="msg-ops">
+                    <button class="uop" title="复制原文" @click="copyUserMessage(m)">复制</button>
+                    <button class="uop" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">编辑</button>
+                    <button class="uop" title="原样重发" :disabled="chat.running" @click="resend(m)">重发</button>
+                  </div>
                 </div>
               </div>
 
@@ -570,15 +643,25 @@ watch(showMemory, (open) => {
             <textarea
               v-model="input"
               :disabled="chat.running"
-              :placeholder="chat.running ? 'Agent 运行中…' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill（Enter 发送，Shift+Enter 换行）'"
+              :placeholder="chat.running ? 'Agent 运行中…' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill，可直接粘贴图片（Enter 发送，Shift+Enter 换行）'"
               @keydown.enter.exact.prevent="submit"
+              @paste="onPaste"
             />
             <div class="composer-bar">
               <span class="hint-chip" @click="fileInput?.click()" style="cursor: pointer">🖼 图片</span>
               <span class="hint-chip">@文件引用</span>
               <span class="hint-chip">/skill 技能</span>
               <span class="hint-chip">/mcp 扩展工具</span>
-              <span class="hint-chip">当前模式：<b>{{ modeLabel(chat.sessionMeta.mode) }}</b></span>
+              <!-- 当前会话模式下拉：模式在会话创建时确定，切换 = 以该模式新建对话 -->
+              <select
+                class="mode-select"
+                :value="chat.sessionMeta.mode"
+                :disabled="chat.running"
+                title="当前执行模式（模式在会话创建时确定，切换将以所选模式新建对话）"
+                @change="onModeSwitch(($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
+              </select>
               <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
               <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
                 发送 <span class="kbd">↵</span>
@@ -787,6 +870,25 @@ watch(showMemory, (open) => {
 .md :deep(table) { border-collapse: collapse; }
 .md :deep(th), .md :deep(td) { border: 1px solid var(--border); padding: 4px 8px; }
 .msg-user .msg-text { white-space: pre-wrap; }
+/* 用户消息快捷操作条：默认隐藏，悬停气泡时浮现 */
+.msg-ops { display: flex; gap: 4px; margin-top: 7px; opacity: 0; transition: opacity 0.15s; }
+.msg-user:hover .msg-ops { opacity: 1; }
+.uop {
+  padding: 2px 9px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-faint); font-size: 11px; cursor: pointer;
+  transition: all 0.12s;
+}
+.uop:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
+.uop:disabled { opacity: 0.4; cursor: not-allowed; }
+.uop.primary { color: var(--accent); border-color: rgba(88, 166, 255, 0.45); }
+.edit-box { min-width: 420px; }
+.edit-input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 13px; line-height: 1.6;
+  padding: 8px 10px; resize: vertical; margin-bottom: 8px;
+}
+.edit-input:focus { outline: none; border-color: rgba(88, 166, 255, 0.5); }
+.edit-ops { display: flex; gap: 6px; justify-content: flex-end; }
 .msg-meta { font-size: 11px; color: var(--text-faint); margin-bottom: 5px; display: flex; gap: 8px; align-items: center; }
 .tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; }
 .tag.turn { background: var(--bg-elevated); color: var(--text-dim); }
@@ -892,6 +994,13 @@ watch(showMemory, (open) => {
   border-radius: 6px; padding: 3px 9px; cursor: default;
 }
 .hint-chip b { color: var(--accent); font-weight: 500; font-family: var(--mono); }
+.mode-select {
+  font-size: 11px; color: var(--text-dim);
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 6px; cursor: pointer;
+}
+.mode-select:hover { color: var(--text); }
+.mode-select:disabled { opacity: 0.5; cursor: not-allowed; }
 .send-btn {
   margin-left: auto; padding: 7px 20px; border: none; border-radius: 8px;
   background: linear-gradient(135deg, #58a6ff, #4c8dff);

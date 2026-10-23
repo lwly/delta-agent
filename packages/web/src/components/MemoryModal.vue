@@ -22,7 +22,18 @@ const error = ref('');
 const previewQuery = ref('');
 const previewHits = ref<MemoryItem[]>([]);
 
-const KINDS = ['preference', 'fact', 'decision', 'pitfall', 'workflow'];
+/** 记忆类型枚举：value 为后端存储值，label 为界面中文显示名 */
+const KINDS = [
+  { value: 'preference', label: '偏好' },
+  { value: 'fact', label: '事实' },
+  { value: 'decision', label: '决策' },
+  { value: 'pitfall', label: '避坑' },
+  { value: 'workflow', label: '工作流' },
+];
+/** 类型枚举 → 中文名（未匹配时原样返回） */
+function kindLabel(kind: string): string {
+  return KINDS.find((k) => k.value === kind)?.label ?? kind;
+}
 
 const shown = computed(() =>
   items.value.filter(
@@ -99,7 +110,7 @@ async function runPreview() {
       <div class="filters">
         <select v-model="kindFilter">
           <option value="">全部类型</option>
-          <option v-for="k in KINDS" :key="k" :value="k">{{ k }}</option>
+          <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
         </select>
         <input v-model="scopeFilter" placeholder="scope（如 project:<id> / global）" />
         <button class="btn" @click="load">刷新</button>
@@ -107,7 +118,7 @@ async function runPreview() {
       <div v-if="shown.length === 0" class="empty">（暂无记忆条目）</div>
       <div v-for="m in shown" :key="m.id" class="row">
         <template v-if="!m.editing">
-          <span class="mem-kind" :class="m.kind">{{ m.kind }}</span>
+          <span class="mem-kind" :class="m.kind">{{ kindLabel(m.kind) }}</span>
           <span class="body-col">
             <span class="content" :class="{ superseded: m.superseded_by }">{{ m.content }}</span>
             <span class="stats">imp {{ m.importance.toFixed(2) }} · conf {{ m.confidence.toFixed(2) }} · 召回 {{ m.access_count }} 次</span>
@@ -120,7 +131,7 @@ async function runPreview() {
         </template>
         <template v-else>
           <select v-model="m.kind" class="kind-select">
-            <option v-for="k in KINDS" :key="k" :value="k">{{ k }}</option>
+            <option v-for="k in KINDS" :key="k.value" :value="k.value">{{ k.label }}</option>
           </select>
           <input v-model="m.content" class="content-input" />
           <span class="ops">
@@ -148,7 +159,7 @@ async function runPreview() {
     <template v-else-if="tab === 'pending'">
       <div v-if="pending.length === 0" class="empty">（没有待确认的自动提炼候选）</div>
       <div v-for="m in pending" :key="m.id" class="row pending">
-        <span class="mem-kind" :class="m.kind">{{ m.kind }}</span>
+        <span class="mem-kind" :class="m.kind">{{ kindLabel(m.kind) }}</span>
         <span class="body-col"><span class="content">{{ m.content }}</span></span>
         <span class="ops">
           <button class="op ok" @click="approve(m)">采纳</button>
@@ -161,7 +172,7 @@ async function runPreview() {
     <template v-else>
       <div v-if="trash.length === 0" class="empty">（回收站为空，30 天后自动清除）</div>
       <div v-for="m in trash" :key="m.id" class="row">
-        <span class="mem-kind" :class="m.kind">{{ m.kind }}</span>
+        <span class="mem-kind" :class="m.kind">{{ kindLabel(m.kind) }}</span>
         <span class="body-col"><span class="content superseded">{{ m.content }}</span></span>
         <span class="ops"><button class="op" @click="restore(m)">恢复</button></span>
       </div>
