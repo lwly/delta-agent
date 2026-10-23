@@ -338,6 +338,37 @@ async function doRemove() {
 const listRef = ref<HTMLElement | null>(null);
 const input = ref('');
 const composerEl = ref<HTMLTextAreaElement | null>(null);
+
+// ── 输入框高度拖拽：上/下边框手柄，向上/向下拖增高，localStorage 记忆 ──
+const COMPOSER_H_KEY = 'yzero-composer-h';
+const composerH = ref(Number(localStorage.getItem(COMPOSER_H_KEY)) || 44);
+const composerResizing = ref(false);
+
+function clampComposerH(h: number): number {
+  const max = Math.round(window.innerHeight * 0.6);
+  return Math.min(max, Math.max(44, Math.round(h)));
+}
+
+function startComposerResize(edge: 'top' | 'bottom', ev: PointerEvent) {
+  ev.preventDefault();
+  const startY = ev.clientY;
+  const startH = composerH.value;
+  composerResizing.value = true;
+  document.body.style.userSelect = 'none';
+  const onMove = (e: PointerEvent) => {
+    const dy = e.clientY - startY;
+    composerH.value = clampComposerH(edge === 'top' ? startH - dy : startH + dy);
+  };
+  const onUp = () => {
+    composerResizing.value = false;
+    document.body.style.userSelect = '';
+    localStorage.setItem(COMPOSER_H_KEY, String(composerH.value));
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
 const pendingImages = ref<Array<MessageImage & { preview: string; name: string }>>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 const MAX_IMAGES = 5;
@@ -935,7 +966,9 @@ watch(showMemory, (open) => {
 
         <!-- 输入区 -->
         <div class="composer-wrap">
-          <div class="composer">
+          <div class="composer" :class="{ resizing: composerResizing }">
+            <!-- 高度拖拽手柄：贴上/下边框，hover 显示 grip 条 -->
+            <div class="rsz top" title="拖动调整输入框高度" @pointerdown="startComposerResize('top', $event)"></div>
             <!-- 工具栏：移至输入框上方（图片 / @引用 / skill / mcp / 执行模式 / 权限） -->
             <div class="composer-tools">
               <span class="hint-chip" @click="fileInput?.click()" style="cursor: pointer">🖼 图片</span>
@@ -977,6 +1010,7 @@ watch(showMemory, (open) => {
               ref="composerEl"
               v-model="input"
               :disabled="chat.running"
+              :style="{ height: composerH + 'px' }"
               :placeholder="chat.running ? 'Agent 运行中…' : chat.paused ? '已暂停——发送消息将继续执行' : '描述你的任务，支持 Markdown 语法（**粗体**、代码块、列表…），@ 引用文件，/ 调用 Skill，可直接粘贴图片（Enter 发送，Shift+Enter 换行）'"
               @input="onComposerInput"
               @blur="ac = null"
@@ -1011,6 +1045,7 @@ watch(showMemory, (open) => {
                 发送 <span class="kbd">Enter</span>
               </button>
             </div>
+            <div class="rsz bottom" title="拖动调整输入框高度" @pointerdown="startComposerResize('bottom', $event)"></div>
           </div>
         </div>
 
@@ -1400,7 +1435,21 @@ watch(showMemory, (open) => {
   width: 100%; background: transparent; border: none; outline: none;
   color: var(--text); font-size: 14px; resize: none; height: 44px; line-height: 1.5;
   padding: 0; border-radius: 0;
+  transition: height 0.12s;
 }
+/* 拖拽调高过程中关闭过渡，跟手 */
+.composer.resizing textarea { transition: none; }
+/* 高度拖拽手柄：贴上/下边框整行热区，hover 显示居中 grip 条 */
+.composer .rsz { position: absolute; left: 0; right: 0; height: 9px; cursor: ns-resize; z-index: 6; }
+.composer .rsz.top { top: -2px; }
+.composer .rsz.bottom { bottom: -2px; }
+.composer .rsz::after {
+  content: ''; position: absolute; left: 50%; transform: translateX(-50%);
+  width: 42px; height: 3px; border-radius: 2px; background: transparent; transition: background 0.15s;
+}
+.composer .rsz.top::after { top: 3px; }
+.composer .rsz.bottom::after { bottom: 3px; }
+.composer .rsz:hover::after { background: var(--text-faint); }
 .composer textarea:focus { border: none; }
 .composer textarea:disabled { opacity: 0.6; }
 /* 工具栏：位于输入框上方，底部分隔线与输入区衔接（替代原 composer-bar） */
