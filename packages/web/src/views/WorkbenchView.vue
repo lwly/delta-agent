@@ -693,6 +693,32 @@ watch(showMemory, (open) => {
         </span>
       </div>
 
+      <!-- 导航区（对齐 WorkBuddy 侧栏布局）：模式 / 模型 / 记忆 / 配置 / 用量 / 定时 / 回放 -->
+      <nav class="side-nav">
+        <div class="nav-item" title="执行模式在会话创建时确定，切换将以该模式新建对话">
+          <span class="ni-ico">⚡</span>
+          <select class="nav-select" :value="chat.sessionMeta?.mode || 'react'" @change="onModeSwitch(($event.target as HTMLSelectElement).value as 'react' | 'plan' | 'multi')">
+            <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
+          </select>
+        </div>
+        <div class="nav-item" title="模型偏好（对新建对话生效）">
+          <span class="ni-ico">🤖</span>
+          <select class="nav-select" :value="chat.sessionMeta?.model || preferredModel" @change="onModelChange">
+            <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta?.model || '默认模型' }}</option>
+            <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </div>
+        <button class="nav-item" @click="showMemory = true">
+          <span class="ni-ico">🧠</span>记忆<span v-if="memoryPendingCount > 0" class="nav-badge">{{ memoryPendingCount }}</span>
+        </button>
+        <button class="nav-item" @click="showProviders = true"><span class="ni-ico">⚙️</span>配置</button>
+        <button class="nav-item" @click="showUsage = true"><span class="ni-ico">📊</span>用量</button>
+        <button class="nav-item" @click="showCron = true"><span class="ni-ico">⏰</span>定时任务</button>
+        <router-link class="nav-item" :class="{ disabled: !chat.sessionId }" :title="chat.sessionId ? '会话回放' : '先打开一个会话'" :to="chat.sessionId ? `/replay/${chat.sessionId}` : ''" :disabled="!chat.sessionId" @click.prevent="!chat.sessionId && $event.preventDefault()">
+          <span class="ni-ico">🎬</span>回放
+        </router-link>
+      </nav>
+
       <div class="sidebar-actions">
         <button class="btn-sm" @click="showNewProject = true">＋ 新项目</button>
         <button class="btn-sm primary" :disabled="!ws.activeProjectId" @click="newSession()">＋ 新对话</button>
@@ -757,7 +783,13 @@ watch(showMemory, (open) => {
       </div>
 
       <div class="sidebar-footer">
-        <div class="footer-row"><span>Token（今日）</span><span class="footer-val">{{ todayLabel }} / 2M</span></div>
+        <div class="footer-row" :title="`今日 token ${todayLabel} / ${DAILY_TOKEN_BUDGET / 10000}k（展示口径）`">
+          <span>Token（今日）</span>
+          <span class="footer-budget">
+            <span class="budget-bar"><span class="budget-fill" :class="{ warn: todayPct >= 80 }" :style="{ width: `${Math.max(2, todayPct)}%` }" /></span>
+            <span class="footer-val">{{ todayLabel }} / 2M</span>
+          </span>
+        </div>
         <div class="footer-row"><span>回收站</span><span class="footer-val link" @click="showTrash = true">{{ ws.trash.length }} 项</span></div>
         <div class="footer-row"><span>平台</span><span class="footer-val">{{ platform }}</span></div>
       </div>
@@ -774,36 +806,10 @@ watch(showMemory, (open) => {
       </div>
 
       <template v-else>
-        <!-- 顶栏 -->
+        <!-- 顶栏（功能入口已收进左侧导航，仅保留面包屑） -->
         <div class="topbar">
           <div class="crumb">
             y-zero-agent <span class="dim">/</span> {{ activeProjectName }} <span class="dim">/</span> {{ chat.sessionMeta.title }}
-          </div>
-          <div class="mode-switch" title="执行模式在会话创建时确定，点击将以该模式新建对话">
-            <button
-              v-for="m in MODES"
-              :key="m.value"
-              class="mode-btn"
-              :class="[m.cls, { active: chat.sessionMeta?.mode === m.value }]"
-              @click="onModeSwitch(m.value)"
-            >
-              <span class="mode-ico">{{ m.ico }}</span>{{ m.label }}
-            </button>
-          </div>
-          <select class="model-select" :value="chat.sessionMeta.model || preferredModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
-            <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta.model || '默认模型' }}</option>
-            <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
-          <button class="cfg-op badge-btn" @click="showMemory = true">
-            🧠 记忆<span v-if="memoryPendingCount > 0" class="badge">{{ memoryPendingCount }}</span>
-          </button>
-          <button class="cfg-op" @click="showProviders = true">⚙ 配置</button>
-          <button class="cfg-op" @click="showUsage = true">📊 用量</button>
-          <button class="cfg-op" @click="showCron = true">⏰ 定时</button>
-          <router-link class="cfg-op replay" :to="`/replay/${chat.sessionId}`" title="会话回放">🎬 回放</router-link>
-          <div class="budget-pill" :title="`今日 token ${todayLabel} / ${DAILY_TOKEN_BUDGET / 10000}k（展示口径）`">
-            <span class="budget-bar"><span class="budget-fill" :class="{ warn: todayPct >= 80 }" :style="{ width: `${Math.max(2, todayPct)}%` }" /></span>
-            <span>{{ todayPct }}%</span>
           </div>
         </div>
 
@@ -1109,6 +1115,31 @@ watch(showMemory, (open) => {
 .brand-name { font-weight: 600; font-size: 14px; }
 .brand-sub { font-size: 10.5px; color: var(--text-faint); }
 
+/* ══════════ 侧栏导航区（对齐 WorkBuddy：图标+文字整行项） ══════════ */
+.side-nav {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px 10px 10px; border-bottom: 1px solid var(--border);
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 10px; border: none; border-radius: 8px;
+  background: transparent; color: var(--text-dim); font-size: 13px;
+  cursor: pointer; text-align: left; text-decoration: none;
+  transition: background 0.12s, color 0.12s;
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.nav-item .ni-ico { width: 20px; flex: none; text-align: center; font-size: 14px; }
+.nav-select {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  color: inherit; font-size: 13px; cursor: pointer; font-family: inherit;
+}
+.nav-select option { background: var(--bg-elevated); color: var(--text); }
+.nav-badge {
+  margin-left: auto; background: var(--orange); color: #fff; font-size: 9px;
+  border-radius: 8px; padding: 1px 6px; font-weight: 700;
+}
+.nav-item.disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+
 .sidebar-actions { padding: 4px 12px 8px; display: flex; gap: 8px; }
 .btn-sm {
   flex: 1; padding: 7px 0; border-radius: 7px;
@@ -1203,7 +1234,8 @@ watch(showMemory, (open) => {
 .wt-badge { flex: none; font-size: 11px; line-height: 1; }
 
 .sidebar-footer { border-top: 1px solid var(--border); padding: 10px 14px; font-size: 11.5px; color: var(--text-faint); }
-.footer-row { display: flex; justify-content: space-between; padding: 2.5px 0; }
+.footer-row { display: flex; justify-content: space-between; align-items: center; padding: 2.5px 0; }
+.footer-budget { display: flex; align-items: center; gap: 7px; }
 .footer-val { font-family: var(--mono); color: var(--text-dim); }
 .footer-val.link { cursor: pointer; }
 .footer-val.link:hover { color: var(--accent); }
@@ -1231,38 +1263,7 @@ watch(showMemory, (open) => {
 }
 .crumb { font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .crumb .dim { color: var(--text-faint); margin: 0 6px; }
-.mode-switch {
-  display: flex; background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 8px; padding: 3px; margin-left: auto;
-}
-.mode-btn {
-  padding: 5px 11px; border-radius: 6px; border: none;
-  background: transparent; color: var(--text-dim); font-size: 12px; cursor: pointer;
-  transition: all 0.15s; display: flex; align-items: center; gap: 5px; white-space: nowrap;
-}
-.mode-btn:hover { color: var(--text); }
-.mode-btn.active { background: var(--bg-hover); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
-.mode-btn.active.react .mode-ico { color: var(--green); }
-.mode-btn.active.plan .mode-ico { color: var(--orange); }
-.mode-btn.active.multi .mode-ico { color: var(--purple); }
-.mode-ico { font-size: 12px; }
-.model-select { padding: 5px 9px; font-size: 12px; font-family: var(--mono); max-width: 190px; }
-.cfg-op {
-  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: pointer;
-  transition: all 0.12s; text-decoration: none; position: relative; white-space: nowrap;
-}
-.cfg-op:hover { background: var(--bg-hover); color: var(--text); }
-.badge {
-  position: absolute; top: -5px; right: -5px;
-  background: var(--orange); color: #fff; font-size: 9px; border-radius: 8px;
-  padding: 1px 5px; font-weight: 700;
-}
-.budget-pill {
-  display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 8px;
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  font-size: 11.5px; font-family: var(--mono); color: var(--text-dim);
-}
+/* 预算条（原顶栏 budget-pill 移至侧栏 footer） */
 .budget-bar { width: 64px; height: 5px; background: #30363d; border-radius: 3px; overflow: hidden; }
 .budget-fill { display: block; height: 100%; background: var(--green); border-radius: 3px; transition: width 0.4s; }
 .budget-fill.warn { background: var(--orange); }
