@@ -693,19 +693,12 @@ watch(showMemory, (open) => {
         </span>
       </div>
 
-      <!-- 导航区（对齐 WorkBuddy 侧栏布局）：模式 / 模型 / 记忆 / 配置 / 用量 / 定时 / 回放 -->
+      <!-- 导航区（对齐 WorkBuddy 侧栏布局）：记忆 / 配置 / 用量 / 定时 -->
       <nav class="side-nav">
         <div class="nav-item" title="执行模式在会话创建时确定，切换将以该模式新建对话">
           <span class="ni-ico">⚡</span>
           <select class="nav-select" :value="chat.sessionMeta?.mode || 'react'" @change="onModeSwitch(($event.target as HTMLSelectElement).value as 'react' | 'plan' | 'multi')">
             <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
-          </select>
-        </div>
-        <div class="nav-item" title="模型偏好（对新建对话生效）">
-          <span class="ni-ico">🤖</span>
-          <select class="nav-select" :value="chat.sessionMeta?.model || preferredModel" @change="onModelChange">
-            <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta?.model || '默认模型' }}</option>
-            <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <button class="nav-item" @click="showMemory = true">
@@ -714,9 +707,6 @@ watch(showMemory, (open) => {
         <button class="nav-item" @click="showProviders = true"><span class="ni-ico">⚙️</span>配置</button>
         <button class="nav-item" @click="showUsage = true"><span class="ni-ico">📊</span>用量</button>
         <button class="nav-item" @click="showCron = true"><span class="ni-ico">⏰</span>定时任务</button>
-        <router-link class="nav-item" :class="{ disabled: !chat.sessionId }" :title="chat.sessionId ? '会话回放' : '先打开一个会话'" :to="chat.sessionId ? `/replay/${chat.sessionId}` : ''" :disabled="!chat.sessionId" @click.prevent="!chat.sessionId && $event.preventDefault()">
-          <span class="ni-ico">🎬</span>回放
-        </router-link>
       </nav>
 
       <div class="sidebar-actions">
@@ -806,11 +796,12 @@ watch(showMemory, (open) => {
       </div>
 
       <template v-else>
-        <!-- 顶栏（功能入口已收进左侧导航，仅保留面包屑） -->
+        <!-- 顶栏：面包屑 + 回放（右侧） -->
         <div class="topbar">
           <div class="crumb">
             y-zero-agent <span class="dim">/</span> {{ activeProjectName }} <span class="dim">/</span> {{ chat.sessionMeta.title }}
           </div>
+          <router-link class="cfg-op replay" :to="`/replay/${chat.sessionId}`" title="会话回放">🎬 回放</router-link>
         </div>
 
         <!-- 消息流 -->
@@ -1043,8 +1034,12 @@ watch(showMemory, (open) => {
               </button>
               <div class="ac-tip">↑↓ 选择 · Enter / Tab 确认 · Esc 关闭</div>
             </div>
-            <!-- 底部操作区：暂停/停止/发送（仅运行态按钮 + 发送，右对齐） -->
+            <!-- 底部操作区：模型选择（右下角，对齐 WorkBuddy）+ 暂停/停止/发送 -->
             <div class="composer-actions">
+              <select class="composer-model" :value="chat.sessionMeta.model || preferredModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
+                <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta.model || '默认模型' }}</option>
+                <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
               <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
               <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
               <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
@@ -1263,6 +1258,14 @@ watch(showMemory, (open) => {
 }
 .crumb { font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .crumb .dim { color: var(--text-faint); margin: 0 6px; }
+.cfg-op {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: pointer;
+  transition: all 0.12s; text-decoration: none; white-space: nowrap;
+}
+.cfg-op:hover { background: var(--bg-hover); color: var(--text); }
+/* 回放固定在顶栏最右 */
+.cfg-op.replay { margin-left: auto; }
 /* 预算条（原顶栏 budget-pill 移至侧栏 footer） */
 .budget-bar { width: 64px; height: 5px; background: #30363d; border-radius: 3px; overflow: hidden; }
 .budget-fill { display: block; height: 100%; background: var(--green); border-radius: 3px; transition: width 0.4s; }
@@ -1475,21 +1478,29 @@ watch(showMemory, (open) => {
 /* 权限选择器：yolo 高亮警示（全部放行状态一眼可辨） */
 .perm-select.yolo { color: var(--orange); border-color: var(--orange); background: var(--orange-soft); font-weight: 600; }
 .send-btn {
-  margin-left: auto; padding: 7px 20px; border: none; border-radius: 8px;
+  padding: 7px 20px; border: none; border-radius: 8px;
   background: linear-gradient(135deg, #58a6ff, #4c8dff);
   color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
   display: flex; align-items: center; gap: 7px; transition: opacity 0.15s;
 }
 .send-btn:hover { opacity: 0.88; }
 .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 输入框右下角模型选择（对齐 WorkBuddy composer）：推到右侧群组最左 */
+.composer-model {
+  margin-left: auto; max-width: 200px; padding: 5px 6px;
+  background: transparent; border: none; outline: none;
+  color: var(--text-dim); font-size: 12px; font-family: var(--mono);
+  cursor: pointer; border-radius: 6px; transition: background 0.12s, color 0.12s;
+}
+.composer-model:hover { background: var(--bg-hover); color: var(--text); }
+.composer-model option { background: var(--bg-elevated); color: var(--text); }
 .stop-btn {
-  margin-left: auto; padding: 7px 20px; border: 1px solid var(--red);
+  padding: 7px 20px; border: 1px solid var(--red);
   border-radius: 8px; background: var(--red-soft); color: var(--red);
   font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px;
 }
-/* PASI-9：暂停按钮（与停止并排，主间距由停止的 margin-left:auto 提供） */
-.stop-btn.pause { margin-left: auto; border-color: var(--orange); background: var(--orange-soft); color: var(--orange); }
-.stop-btn.pause + .stop-btn { margin-left: 0; }
+/* PASI-9：暂停按钮（右移群组由 composer-model 的 auto 提供） */
+.stop-btn.pause { border-color: var(--orange); background: var(--orange-soft); color: var(--orange); }
 .kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text-faint); }
 /* 发送按钮内的快捷键块：蓝底上用纯白，避免暗色块看起来像渲染异常 */
 .send-btn .kbd { color: #fff; border-color: rgba(255, 255, 255, 0.6); font-size: 10px; }
