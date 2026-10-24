@@ -695,12 +695,6 @@ watch(showMemory, (open) => {
 
       <!-- 导航区（对齐 WorkBuddy 侧栏布局）：记忆 / 配置 / 用量 / 定时 -->
       <nav class="side-nav">
-        <div class="nav-item" title="执行模式在会话创建时确定，切换将以该模式新建对话">
-          <span class="ni-ico">⚡</span>
-          <select class="nav-select" :value="chat.sessionMeta?.mode || 'react'" @change="onModeSwitch(($event.target as HTMLSelectElement).value as 'react' | 'plan' | 'multi')">
-            <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
-          </select>
-        </div>
         <button class="nav-item" @click="showMemory = true">
           <span class="ni-ico">🧠</span>记忆<span v-if="memoryPendingCount > 0" class="nav-badge">{{ memoryPendingCount }}</span>
         </button>
