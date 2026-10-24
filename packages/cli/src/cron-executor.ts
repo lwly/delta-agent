@@ -15,10 +15,25 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CronExecutor, CronExecutorResult } from '@y-zero/core';
+import type { CronExecutor, CronExecutorResult, CronJob } from '@y-zero/core';
 
 /** 单次运行超时（默认 30 分钟） */
 export const DEFAULT_CRON_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * 任务字段 → `yzero run` 子进程参数（纯函数，executor 与单测共用）。
+ * F-22b：任务级权限透传（沿用 F-23 resolvePermissionMode 语义）——
+ *  - yolo → `--permission yolo --yolo` 双 flag（缺一会被降级告警）；
+ *  - plan → `--permission plan`；
+ *  - default / 缺省 → 不传任何 permission flag（沿用 CLI 默认）。
+ */
+export function buildCronSpawnArgs(job: Pick<CronJob, 'prompt' | 'maxCostUsd' | 'permission'>): string[] {
+  const args = ['run', '-p', job.prompt, '--json'];
+  if (job.maxCostUsd !== undefined) args.push('--max-cost', String(job.maxCostUsd));
+  if (job.permission === 'yolo') args.push('--permission', 'yolo', '--yolo');
+  else if (job.permission === 'plan') args.push('--permission', 'plan');
+  return args;
+}
 
 /** 结果预览截断长度（避免 cron.json 膨胀） */
 const RESULT_PREVIEW_MAX = 500;
@@ -45,8 +60,7 @@ export function createSpawnExecutor(opts: SpawnExecutorOptions = {}): CronExecut
       return { status: 'error', exitCode: null, error: `CLI 入口不存在：${cliEntry}（请先构建 @y-zero/cli）` };
     }
 
-    const args = ['run', '-p', job.prompt, '--json'];
-    if (job.maxCostUsd !== undefined) args.push('--max-cost', String(job.maxCostUsd));
+    const args = buildCronSpawnArgs(job);
 
     return await new Promise<CronExecutorResult>((resolve) => {
       let stdout = '';

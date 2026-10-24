@@ -14,6 +14,7 @@
  */
 import { nextRun } from './parse.js';
 import {
+  isInValidWindow,
   loadCronJobs,
   saveCronJobs,
   type CronJob,
@@ -94,6 +95,16 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
   const ran: string[] = [];
   for (const job of candidates) {
     const dueAt = job.nextRunAt ? new Date(Date.parse(job.nextRunAt)) : now;
+    // ① F-22b 有效期窗口检查：以计划时刻 dueAt 判定；手动补跑（onlyJobId）不受限。
+    //    窗口外 → 静默跳过（不执行、不写运行记录），从 dueAt 推进 nextRunAt 保持 cron 相位。
+    if (!opts.onlyJobId && !isInValidWindow(job, dueAt)) {
+      job.nextRunAt = nextRunSafe(job.cron, dueAt);
+      job.updatedAt = now.toISOString();
+      saveCronJobs(jobs, opts.homeDir);
+      log(`⏭ ${job.name} 在有效期窗口外，跳过本次调度`);
+      continue;
+    }
+    // ② 既有执行流程：写锁 → executor → 运行记录 → 推进 nextRunAt
     const startedAt = new Date();
     log(`⏰ 定时任务到期：${job.name}（${job.cron}）`);
     // 写锁防并发（与 daemon / 手动补跑互斥）

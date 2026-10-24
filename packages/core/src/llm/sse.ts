@@ -9,12 +9,17 @@ import type { StreamEvent } from '@y-zero/shared';
  */
 export async function* parseSse(
   body: ReadableStream<Uint8Array>,
+  opts?: { idleTimeoutMs?: number },
 ): AsyncGenerator<{ event?: string; data: string }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let eventName: string | undefined;
   let dataLines: string[] = [];
+
+  // 空闲超时：上游挂死（连接不关也不发数据）时 reader.read() 永远 pending，
+  // 引擎会永久卡死（abort 也无法穿透）。用 timer 竞争 read，超时抛错由上层重试/报错。
+  const idleTimeoutMs = opts?.idleTimeoutMs ?? 0;
 
   const flush = function* (): Generator<{ event?: string; data: string }> {
     if (dataLines.length > 0) {
@@ -27,7 +32,21 @@ export async function* parseSse(
   };
 
   while (true) {
-    const { done, value } = await reader.read();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let onTimeout: (() => void) | undefined;
+    const idle = idleTimeoutMs > 0
+      ? new Promise<never>((_, reject) => {
+          onTimeout = () => reject(new Error(`SSE idle timeout (${idleTimeoutMs}ms without data)`));
+          timeout = setTimeout(onTimeout, idleTimeoutMs);
+        })
+      : null;
+    let chunk: { done: boolean; value?: Uint8Array };
+    try {
+      chunk = idle ? await Promise.race([reader.read(), idle]) : await reader.read();
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+    const { done, value } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 

@@ -57,12 +57,13 @@ function insertUsage(
 // ── v3 迁移三路径 ──────────────────────────────────────────────────────────
 
 describe('v3 迁移（F-31 usage 补 model/created_at）', () => {
-  it('空库：直接建到 v3，新列与索引齐备', async () => {
+  it('空库：直接建到最新版本，新列与索引齐备', async () => {
     const file = await tmpFile('fresh.db');
     const svc = new SessionService(file);
     try {
       expect(svc.store.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
-      expect(LATEST_SCHEMA_VERSION).toBe(3);
+      // F-37 起版本升到 4（v4 = worktree 绑定列；本组断言 v3 列仍齐备）
+      expect(LATEST_SCHEMA_VERSION).toBe(4);
       const cols = usageColumns(svc.store.db);
       expect(cols).toContain('model');
       expect(cols).toContain('created_at');
@@ -96,7 +97,8 @@ describe('v3 迁移（F-31 usage 补 model/created_at）', () => {
     }
     const svc = new SessionService(file);
     try {
-      expect(svc.store.schemaVersion).toBe(3);
+      // v3 之后追加了 v4（F-37 worktree 绑定），升级落点为最新版本
+      expect(svc.store.schemaVersion).toBe(4);
       const rows = svc.store.db
         .prepare('SELECT session_id, turn, model, created_at FROM usage ORDER BY session_id, turn')
         .all() as Array<{ session_id: string; turn: number; model: string; created_at: string | null }>;
@@ -138,7 +140,7 @@ describe('v3 迁移（F-31 usage 补 model/created_at）', () => {
     svc1.close();
     const svc2 = new SessionService(file);
     try {
-      expect(svc2.store.schemaVersion).toBe(3);
+      expect(svc2.store.schemaVersion).toBe(4);
       const after = svc2.usage.summary();
       expect(after.totals).toEqual(before.totals);
       expect(after.byModel.map((r) => r.model)).toEqual(before.byModel.map((r) => r.model));

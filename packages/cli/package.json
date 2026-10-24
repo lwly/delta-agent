@@ -5,12 +5,14 @@
   "bin": {
     "yzero": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepack": "node ../../scripts/copy-web-dist.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node -e \"process.exit(0)\"",
+    "test": "vitest run",
+    "prepack": "node ../../scripts/copy-web-dist.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {
@@ -23,8 +25,9 @@
     "react": "^18.3.1"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12",
     "@types/node": "^22.8.0",
-    "typescript": "^5.6.3"
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
   }
 }

@@ -132,6 +132,113 @@ describe('F-22 /api/cron 端点', () => {
   });
 });
 
+describe('F-22b /api/cron 增量（workspaces / 新字段校验 / null 清除 / max_cost 口径）', () => {
+  it('GET 返回 workspaces：serve 启动目录优先 + 既有任务 cwd 按首次出现去重', async () => {
+    await api('POST', '/api/cron', { name: 'w1', cron: '@daily', prompt: 'p', cwd: tmp });
+    await api('POST', '/api/cron', { name: 'w2', cron: '@daily', prompt: 'p', cwd: tmp }); // 重复 cwd
+    await api('POST', '/api/cron', { name: 'w3', cron: '@daily', prompt: 'p', cwd: os.tmpdir() });
+    const r = await api('GET', '/api/cron');
+    const ws = r.json.workspaces as string[];
+    expect(r.status).toBe(200);
+    expect(ws[0]).toBe(process.cwd()); // serve 启动目录优先
+    expect(ws).toContain(tmp);
+    expect(ws).toContain(os.tmpdir());
+    expect(ws.filter((w) => w === tmp)).toHaveLength(1); // 去重
+  });
+
+  it('POST 新字段：permission 与有效期落库并以 snake_case 回显（camelCase 兼容）', async () => {
+    const r = await api('POST', '/api/cron', {
+      name: 'perm',
+      cron: '@daily',
+      prompt: 'p',
+      cwd: tmp,
+      permission: 'yolo',
+      valid_from: '2026-01-01T00:00:00.000Z',
+      valid_until: '2026-12-31T23:59:59.000Z',
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.permission).toBe('yolo');
+    expect(r.json.valid_from).toBe('2026-01-01T00:00:00.000Z');
+    expect(r.json.valid_until).toBe('2026-12-31T23:59:59.000Z');
+    // camelCase 双写法兼容（存量调用方容错）
+    const c = await api('POST', '/api/cron', {
+      name: 'camel',
+      cron: '@daily',
+      prompt: 'p',
+      cwd: tmp,
+      validFrom: '2026-01-01T00:00:00.000Z',
+      validUntil: '2026-12-31T23:59:59.000Z',
+    });
+    expect(c.status).toBe(200);
+    expect(c.json.valid_from).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('非法 permission / 非 ISO 日期 / start>end → 400 带可读 message', async () => {
+    const base = { name: 'bad', cron: '@daily', prompt: 'p', cwd: tmp };
+    const badPerm = await api('POST', '/api/cron', { ...base, permission: 'sudo' });
+    expect(badPerm.status).toBe(400);
+    expect(badPerm.json.error).toContain('permission must be one of');
+
+    const badDate = await api('POST', '/api/cron', { ...base, name: 'bad2', valid_from: 'not-a-date' });
+    expect(badDate.status).toBe(400);
+    expect(badDate.json.error).toContain('must be a valid ISO date');
+
+    const badRange = await api('POST', '/api/cron', {
+      ...base,
+      name: 'bad3',
+      valid_from: '2026-12-31T00:00:00.000Z',
+      valid_until: '2026-01-01T00:00:00.000Z',
+    });
+    expect(badRange.status).toBe(400);
+    expect(badRange.json.error).toContain('valid_from must be <= valid_until');
+
+    // PATCH 同样校验
+    const add = await api('POST', '/api/cron', { name: 'patchbase', cron: '@daily', prompt: 'p', cwd: tmp });
+    const id = String(add.json.id);
+    expect((await api('PATCH', `/api/cron/${id}`, { permission: 'root' })).status).toBe(400);
+    expect((await api('PATCH', `/api/cron/${id}`, { valid_until: 'junk' })).status).toBe(400);
+  });
+
+  it('PATCH null 清除 permission/valid_from/valid_until；undefined 不动', async () => {
+    const add = await api('POST', '/api/cron', {
+      name: 'clearable',
+      cron: '@daily',
+      prompt: 'p',
+      cwd: tmp,
+      permission: 'plan',
+      valid_from: '2026-01-01T00:00:00.000Z',
+      valid_until: '2026-12-31T23:59:59.000Z',
+    });
+    const id = String(add.json.id);
+    // undefined = 不动
+    const untouched = await api('PATCH', `/api/cron/${id}`, { prompt: 'p2' });
+    expect(untouched.json.permission).toBe('plan');
+    expect(untouched.json.valid_from).toBeTruthy();
+    // null = 清除（恢复长期有效 / 默认权限）
+    const cleared = await api('PATCH', `/api/cron/${id}`, { permission: null, valid_from: null, valid_until: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.json.permission).toBeUndefined();
+    expect(cleared.json.valid_from).toBeUndefined();
+    expect(cleared.json.valid_until).toBeUndefined();
+    const disk = loadCronJobs(home).jobs.find((j) => j.id === id)!;
+    expect(disk.permission).toBeUndefined();
+    expect(disk.validFrom).toBeUndefined();
+    expect(disk.validUntil).toBeUndefined();
+  });
+
+  it('max_cost_usd snake_case 生效（既有口径修复：服务端双读）', async () => {
+    const add = await api('POST', '/api/cron', { name: 'cost', cron: '@daily', prompt: 'p', cwd: tmp, max_cost_usd: 0.5 });
+    expect(add.status).toBe(200);
+    expect(add.json.max_cost_usd).toBe(0.5); // 修复前：读 camelCase 导致 Web 设置的上限从不生效
+    const id = String(add.json.id);
+    const patched = await api('PATCH', `/api/cron/${id}`, { max_cost_usd: 1.5 });
+    expect(patched.json.max_cost_usd).toBe(1.5);
+    // camelCase 仍兼容
+    const patched2 = await api('PATCH', `/api/cron/${id}`, { maxCostUsd: 2.5 });
+    expect(patched2.json.max_cost_usd).toBe(2.5);
+  });
+});
+
 describe('F-22 /api/cron 未配置执行器', () => {
   it('POST :id/run → 400', async () => {
     const service = new SessionService(path.join(tmp, 'db2.sqlite'));

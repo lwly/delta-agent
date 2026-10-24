@@ -45,6 +45,12 @@ export interface CronJob {
   enabled: boolean;
   /** 单次运行费用预算（USD），缺省用 CLI 默认 */
   maxCostUsd?: number;
+  /** F-22b 任务级权限模式：缺省 'default'（标准确认）。yolo 写入前由 Web 端二次确认 */
+  permission?: 'plan' | 'default' | 'yolo';
+  /** F-22b 有效期起点（ISO）；缺省 = 长期有效（无下界） */
+  validFrom?: string;
+  /** F-22b 有效期终点（ISO）；缺省 = 长期有效（无上界）。Web 端提交「当日」时落 23:59:59 */
+  validUntil?: string;
   createdAt: string;
   updatedAt: string;
   /** 下次到期时间（ISO 字符串，本地时区语义；缺失时视为到期待计算） */
@@ -75,6 +81,26 @@ export interface LoadedCronStore {
 
 /** 运行历史保留条数 */
 export const MAX_RUN_HISTORY = 20;
+
+/** 任务级权限模式枚举（Web 下拉与 API 校验共用口径） */
+export const CRON_PERMISSIONS = ['plan', 'default', 'yolo'] as const;
+
+/**
+ * 到期时刻是否落在有效期窗口内（含两端）。缺省字段 = 无界。
+ * 纯函数：runner 调度过滤与单测共用；窗口判定基准是 dueAt（计划到期时刻），不是 now。
+ */
+export function isInValidWindow(job: Pick<CronJob, 'validFrom' | 'validUntil'>, dueAt: Date): boolean {
+  const t = dueAt.getTime();
+  if (job.validFrom !== undefined) {
+    const from = Date.parse(job.validFrom);
+    if (!Number.isNaN(from) && t < from) return false;
+  }
+  if (job.validUntil !== undefined) {
+    const until = Date.parse(job.validUntil);
+    if (!Number.isNaN(until) && t > until) return false;
+  }
+  return true;
+}
 /** runningSince 残留超过该时长视为上次进程崩溃（默认 24h） */
 export const STALE_RUNNING_MS = 24 * 60 * 60 * 1000;
 
@@ -137,6 +163,12 @@ export interface AddCronJobInput {
   cwd: string;
   enabled?: boolean;
   maxCostUsd?: number;
+  /** F-22b 权限模式；缺省 'default' */
+  permission?: 'plan' | 'default' | 'yolo';
+  /** F-22b 有效期起点（ISO）；缺省长期有效 */
+  validFrom?: string;
+  /** F-22b 有效期终点（ISO）；缺省长期有效 */
+  validUntil?: string;
   /** 从该时间起计算首次 nextRunAt；缺省 new Date() */
   from?: Date;
 }
@@ -167,6 +199,9 @@ export function addCronJob(input: AddCronJobInput, homeDir: string = os.homedir(
     cwd,
     enabled: input.enabled ?? true,
     ...(input.maxCostUsd !== undefined ? { maxCostUsd: input.maxCostUsd } : {}),
+    ...(input.permission !== undefined ? { permission: input.permission } : {}),
+    ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}),
+    ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}),
     createdAt: now,
     updatedAt: now,
     ...(next ? { nextRunAt: next.toISOString() } : {}),
@@ -177,10 +212,26 @@ export function addCronJob(input: AddCronJobInput, homeDir: string = os.homedir(
   return job;
 }
 
-/** 更新任务的可编辑字段（name/cron/prompt/cwd/enabled/maxCostUsd）；返回更新后的任务。 */
+/** 更新任务的补丁（F-22b：permission/validFrom/validUntil 支持 null = 清除恢复缺省；undefined = 不动） */
+export interface CronJobPatch {
+  name?: string;
+  cron?: string;
+  prompt?: string;
+  cwd?: string;
+  enabled?: boolean;
+  maxCostUsd?: number;
+  /** null = 清除（恢复默认权限）；undefined = 不动 */
+  permission?: 'plan' | 'default' | 'yolo' | null;
+  /** null = 清除（恢复长期有效）；undefined = 不动 */
+  validFrom?: string | null;
+  /** null = 清除（恢复长期有效）；undefined = 不动 */
+  validUntil?: string | null;
+}
+
+/** 更新任务的可编辑字段（name/cron/prompt/cwd/enabled/maxCostUsd/permission/有效期）；返回更新后的任务。 */
 export function updateCronJob(
   idOrName: string,
-  patch: Partial<Pick<CronJob, 'name' | 'cron' | 'prompt' | 'cwd' | 'enabled' | 'maxCostUsd'>>,
+  patch: CronJobPatch,
   homeDir: string = os.homedir(),
 ): CronJob {
   const { jobs, warnings, corrupt } = loadCronJobs(homeDir);
@@ -209,6 +260,19 @@ export function updateCronJob(
     if (patch.enabled) job.nextRunAt = nextRun(job.cron, new Date())?.toISOString();
   }
   if (patch.maxCostUsd !== undefined) job.maxCostUsd = patch.maxCostUsd;
+  // F-22b：null = 清除字段（存储 JSON 缺省即清除态，不落 null）；undefined = 不动
+  if (patch.permission !== undefined) {
+    if (patch.permission === null) delete job.permission;
+    else job.permission = patch.permission;
+  }
+  if (patch.validFrom !== undefined) {
+    if (patch.validFrom === null) delete job.validFrom;
+    else job.validFrom = patch.validFrom;
+  }
+  if (patch.validUntil !== undefined) {
+    if (patch.validUntil === null) delete job.validUntil;
+    else job.validUntil = patch.validUntil;
+  }
   job.updatedAt = new Date().toISOString();
   saveCronJobs(jobs, homeDir);
   return job;
@@ -259,6 +323,9 @@ export function cronJobToJson(j: CronJob): Record<string, unknown> {
     cwd: j.cwd,
     enabled: j.enabled,
     ...(j.maxCostUsd !== undefined ? { max_cost_usd: j.maxCostUsd } : {}),
+    ...(j.permission ? { permission: j.permission } : {}),
+    ...(j.validFrom ? { valid_from: j.validFrom } : {}),
+    ...(j.validUntil ? { valid_until: j.validUntil } : {}),
     created_at: j.createdAt,
     updated_at: j.updatedAt,
     ...(j.nextRunAt ? { next_run_at: j.nextRunAt } : {}),
@@ -277,6 +344,10 @@ function normalizeJob(raw: unknown): CronJob | undefined {
   if (typeof r.id !== 'string' || typeof r.name !== 'string') return undefined;
   if (typeof r.cron !== 'string' || typeof r.prompt !== 'string' || typeof r.cwd !== 'string') return undefined;
   if (typeof r.createdAt !== 'string' || typeof r.updatedAt !== 'string') return undefined;
+  // F-22b 字段级降级：单字段非法只丢弃该字段（按缺省语义处理），不丢整条任务
+  const permission = (r as { permission?: unknown }).permission;
+  const validFrom = (r as { validFrom?: unknown }).validFrom;
+  const validUntil = (r as { validUntil?: unknown }).validUntil;
   return {
     id: r.id,
     name: r.name,
@@ -285,6 +356,13 @@ function normalizeJob(raw: unknown): CronJob | undefined {
     cwd: r.cwd,
     enabled: r.enabled !== false,
     ...(typeof r.maxCostUsd === 'number' ? { maxCostUsd: r.maxCostUsd } : {}),
+    // permission ∉ 枚举 → 丢弃（按 'default' 处理）
+    ...(typeof permission === 'string' && (CRON_PERMISSIONS as readonly string[]).includes(permission)
+      ? { permission: permission as CronJob['permission'] }
+      : {}),
+    // 非 ISO 可解析字符串 → 丢弃（按长期有效处理）
+    ...(typeof validFrom === 'string' && !Number.isNaN(Date.parse(validFrom)) ? { validFrom } : {}),
+    ...(typeof validUntil === 'string' && !Number.isNaN(Date.parse(validUntil)) ? { validUntil } : {}),
     ...(typeof r.nextRunAt === 'string' ? { nextRunAt: r.nextRunAt } : {}),
     ...(typeof r.runningSince === 'string' ? { runningSince: r.runningSince } : {}),
     createdAt: r.createdAt,

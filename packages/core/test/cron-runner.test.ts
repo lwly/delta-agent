@@ -148,6 +148,99 @@ describe('F-22 runDueCronJobs', () => {
   });
 });
 
+describe('F-22b 有效期窗口判定（调度触发）', () => {
+  // addDueJob：cron '30 8 * * *'，from 2026-09-01 08:00 → nextRunAt/dueAt = 2026-09-01 08:30
+  const DUE = new Date(2026, 8, 1, 8, 30, 0, 0);
+
+  it('窗口外（validUntil 已过）：静默跳过——不执行、无运行记录、nextRunAt 从 dueAt 推进保持相位', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'expired', { validUntil: new Date(DUE.getTime() - 1000).toISOString() });
+    const calls: Array<{ name: string }> = [];
+    const logs: string[] = [];
+    const r = await runDueCronJobs({
+      executor: executorOf([okResult()], calls),
+      homeDir: home,
+      now: NOW,
+      logger: (l) => logs.push(l),
+    });
+    expect(r.ran).toEqual([]);
+    expect(calls).toHaveLength(0);
+    const job = loadCronJobs(home).jobs[0]!;
+    expect(job.lastRun).toBeUndefined();
+    expect(job.runs).toHaveLength(0);
+    // 从 dueAt（而非 now）推进 → 保持 cron 相位：下一次命中 = 2026-09-02 08:30
+    expect(job.nextRunAt).toBe(new Date(2026, 8, 2, 8, 30).toISOString());
+    expect(logs.some((l) => l.includes('窗口外'))).toBe(true);
+  });
+
+  it('窗口未开始（validFrom 在 dueAt 之后）：同样静默跳过并推进', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'notyet', { validFrom: new Date(DUE.getTime() + 1000).toISOString() });
+    const calls: Array<{ name: string }> = [];
+    const r = await runDueCronJobs({ executor: executorOf([okResult()], calls), homeDir: home, now: NOW });
+    expect(r.ran).toEqual([]);
+    expect(loadCronJobs(home).jobs[0]!.lastRun).toBeUndefined();
+    expect(loadCronJobs(home).jobs[0]!.nextRunAt).toBe(new Date(2026, 8, 2, 8, 30).toISOString());
+  });
+
+  it('恰在边界时刻 = 窗口内（validUntil == dueAt / validFrom == dueAt，含两端）', async () => {
+    // validUntil 恰等于 dueAt → 执行
+    const home1 = tmpHome();
+    addDueJob(home1, 'edge-until', { validUntil: DUE.toISOString() });
+    const calls1: Array<{ name: string }> = [];
+    await runDueCronJobs({ executor: executorOf([okResult()], calls1), homeDir: home1, now: NOW });
+    expect(calls1).toHaveLength(1);
+
+    // validFrom 恰等于 dueAt → 执行
+    const home2 = tmpHome();
+    addDueJob(home2, 'edge-from', { validFrom: DUE.toISOString() });
+    const calls2: Array<{ name: string }> = [];
+    await runDueCronJobs({ executor: executorOf([okResult()], calls2), homeDir: home2, now: NOW });
+    expect(calls2).toHaveLength(1);
+  });
+
+  it('窗口内正常执行，nextRunAt 推进保持既有语义', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'inwin', {
+      validFrom: new Date(2026, 7, 1).toISOString(),
+      validUntil: new Date(2026, 8, 1, 8, 30).toISOString(), // == dueAt（边界内）
+      permission: 'yolo',
+    });
+    const calls: Array<{ name: string }> = [];
+    await runDueCronJobs({ executor: executorOf([okResult()], calls), homeDir: home, now: NOW });
+    expect(calls).toHaveLength(1);
+    const job = loadCronJobs(home).jobs[0]!;
+    expect(job.lastRun!.status).toBe('completed');
+    expect(job.nextRunAt).toBe(new Date(2026, 9, 1, 8, 30).toISOString()); // 从 NOW 推进（既有语义）
+  });
+
+  it('手动补跑（onlyJobId）不受有效期窗口限制：窗口外仍执行且不推进 nextRunAt', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'manual', { validUntil: new Date(2025, 0, 1).toISOString() }); // 很久以前
+    const calls: Array<{ name: string; trigger: string }> = [];
+    await runDueCronJobs({
+      executor: executorOf([okResult()], calls),
+      homeDir: home,
+      now: NOW,
+      onlyJobId: 'manual',
+      trigger: 'manual',
+    });
+    expect(calls).toEqual([{ name: 'manual', trigger: 'manual' }]);
+    const job = loadCronJobs(home).jobs[0]!;
+    expect(job.lastRun!.trigger).toBe('manual');
+    expect(job.nextRunAt).toBe(new Date(2026, 8, 1, 8, 30).toISOString()); // 保持原值
+  });
+
+  it('旧文件（无新字段）= 长期有效：行为与 F-22 完全一致', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'legacy'); // 不设任何窗口字段
+    const calls: Array<{ name: string }> = [];
+    const r = await runDueCronJobs({ executor: executorOf([okResult()], calls), homeDir: home, now: NOW });
+    expect(r.ran).toEqual(['legacy']);
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('F-22 startCronScheduler', () => {
   it('tick 到期执行，stop 后不再执行', async () => {
     const home = tmpHome();
