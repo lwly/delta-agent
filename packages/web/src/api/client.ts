@@ -259,6 +259,12 @@ export interface CronJobView {
   cwd: string;
   enabled: boolean;
   max_cost_usd?: number;
+  /** F-22b 任务级权限模式；缺省视为 default */
+  permission?: 'plan' | 'default' | 'yolo';
+  /** F-22b 有效期起点（ISO）；缺省长期有效 */
+  valid_from?: string;
+  /** F-22b 有效期终点（ISO）；缺省长期有效 */
+  valid_until?: string;
   created_at: string;
   updated_at: string;
   next_run_at?: string;
@@ -274,6 +280,32 @@ export interface CronJobInput {
   cwd: string;
   max_cost_usd?: number;
   enabled?: boolean;
+  /** F-22b 权限模式；缺省 default */
+  permission?: 'plan' | 'default' | 'yolo';
+  /** F-22b 有效期起点（ISO）；缺省长期有效 */
+  valid_from?: string;
+  /** F-22b 有效期终点（ISO）；缺省长期有效 */
+  valid_until?: string;
+}
+
+/** PATCH /api/cron/:id 补丁：permission/valid_from/valid_until 支持 null = 清除（恢复缺省语义） */
+export interface CronJobPatch {
+  name?: string;
+  cron?: string;
+  prompt?: string;
+  cwd?: string;
+  max_cost_usd?: number;
+  enabled?: boolean;
+  permission?: 'plan' | 'default' | 'yolo' | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+}
+
+/** GET /api/cron 响应（F-22b：workspaces = serve 启动目录 + 既有任务 cwd 去重，供表单下拉） */
+export interface CronListResponse {
+  jobs: CronJobView[];
+  warnings: Array<{ message: string }>;
+  workspaces: string[];
 }
 
 /** Composer「/ 技能」候选：skill 元数据（不含正文内容） */
@@ -396,12 +428,11 @@ export const api = {
     return request<UsageSessions>('GET', `/api/usage/sessions${qs ? `?${qs}` : ''}`);
   },
 
-  // cron（F-22 定时任务面板）
-  cronList: () => request<{ jobs: CronJobView[]; warnings: Array<{ message: string }> }>('GET', '/api/cron'),
+  // cron（F-22 定时任务面板；F-22b WorkBuddy 化改版）
+  cronList: () => request<CronListResponse>('GET', '/api/cron'),
   cronGet: (id: string) => request<CronJobView>('GET', `/api/cron/${id}`),
   cronAdd: (input: CronJobInput) => request<CronJobView>('POST', '/api/cron', input),
-  cronUpdate: (id: string, patch: Partial<Pick<CronJobInput, 'name' | 'cron' | 'prompt' | 'cwd' | 'max_cost_usd'> & { enabled: boolean }>) =>
-    request<CronJobView>('PATCH', `/api/cron/${id}`, patch),
+  cronUpdate: (id: string, patch: CronJobPatch) => request<CronJobView>('PATCH', `/api/cron/${id}`, patch),
   cronRemove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/cron/${id}`),
   cronRun: (id: string) => request<{ ok: boolean; running: boolean }>('POST', `/api/cron/${id}/run`),
 };

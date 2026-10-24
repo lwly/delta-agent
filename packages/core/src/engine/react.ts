@@ -12,6 +12,7 @@ import { compact, shouldCompact, type CompressorDeps } from '../context/compress
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
 import type { RegistryLike } from './roles.js';
+import { sanitizeHistory } from '../llm/sanitize.js';
 
 export interface RunContext {
   sessionId: string;
@@ -82,7 +83,8 @@ export async function* runReAct(
   userInput: string,
   images?: MessageImage[],
 ): AsyncIterable<AgentEvent> {
-  const messages: ChatMessage[] = [...history];
+  // 历史完整性修复：丢弃悬空 tool_calls / 孤儿 tool 消息（中断留下的断裂历史会被网关 400）
+  const messages: ChatMessage[] = sanitizeHistory(history);
   const first: ChatMessage = { role: 'user', content: userInput };
   if (images && images.length > 0) first.images = images; // F-25 多模态附件
   push(messages, first);

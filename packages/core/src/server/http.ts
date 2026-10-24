@@ -100,6 +100,44 @@ const MIME: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+/**
+ * F-22b：解析 /api/cron 请求体中的新字段（permission / valid_from / valid_until）。
+ * 兼容 camelCase（validFrom / validUntil，存量调用方容错）；PATCH 语义下 null = 清除。
+ * 校验失败返回 { ok: false, error }（映射为 400），合法返回规范化后的补丁字段。
+ */
+type CronFieldsResult =
+  | { ok: false; error: string }
+  | { ok: true; permission?: 'plan' | 'default' | 'yolo' | null; validFrom?: string | null; validUntil?: string | null };
+
+function parseCronPermissionAndValidity(body: Record<string, unknown>): CronFieldsResult {
+  const permission = body.permission;
+  if (permission !== undefined && permission !== null) {
+    const mode = String(permission);
+    if (mode !== 'plan' && mode !== 'default' && mode !== 'yolo') {
+      return { ok: false, error: 'permission must be one of: plan / default / yolo' };
+    }
+  }
+  // null 是有意义的清除语义，不能用 ?? 兜底（?? 会把 null 视为空值落到 camelCase 分支）
+  const rawFrom = body.valid_from !== undefined ? body.valid_from : body.validFrom;
+  const rawUntil = body.valid_until !== undefined ? body.valid_until : body.validUntil;
+  for (const v of [rawFrom, rawUntil]) {
+    if (v !== undefined && v !== null && (typeof v !== 'string' || Number.isNaN(Date.parse(v)))) {
+      return { ok: false, error: 'valid_from / valid_until must be a valid ISO date' };
+    }
+  }
+  if (rawFrom != null && rawUntil != null && Date.parse(rawFrom as string) > Date.parse(rawUntil as string)) {
+    return { ok: false, error: 'valid_from must be <= valid_until' };
+  }
+  return {
+    ok: true,
+    ...(permission !== undefined
+      ? { permission: permission === null ? null : (String(permission) as 'plan' | 'default' | 'yolo') }
+      : {}),
+    ...(rawFrom !== undefined ? { validFrom: rawFrom === null ? null : String(rawFrom) } : {}),
+    ...(rawUntil !== undefined ? { validUntil: rawUntil === null ? null : String(rawUntil) } : {}),
+  };
+}
+
 export function createWebServer(opts: ServeOptions): http.Server {
   const service = opts.service;
   const hub = opts.hub;
@@ -522,10 +560,18 @@ export function createWebServer(opts: ServeOptions): http.Server {
         const cronHome = opts.cronHomeDir;
         const cronJobs = (): ReturnType<typeof loadCronJobs>['jobs'] => loadCronJobs(cronHome).jobs;
         const id = parts[2];
-        // GET /api/cron → 全量清单（含 warnings，供面板提示配置异常）
+        // GET /api/cron → 全量清单（含 warnings 供面板提示配置异常；workspaces 供表单工作空间下拉）
         if (method === 'GET' && !id) {
           const { jobs, warnings } = loadCronJobs(cronHome);
-          return json(res, 200, { jobs: jobs.map(cronJobToJson), warnings });
+          // F-22b 工作空间候选：serve 启动目录优先 + 既有任务 cwd 按首次出现去重（服务端一次算好）
+          const workspaces: string[] = [];
+          const pushWorkspace = (dir: string): void => {
+            const abs = path.resolve(dir);
+            if (!workspaces.includes(abs)) workspaces.push(abs);
+          };
+          pushWorkspace(process.cwd());
+          for (const j of jobs) pushWorkspace(j.cwd);
+          return json(res, 200, { jobs: jobs.map(cronJobToJson), warnings, workspaces });
         }
         // GET /api/cron/:id → 单任务（运行中轮询用）
         if (method === 'GET' && id) {
@@ -539,6 +585,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const cron = String(body.cron ?? '').trim();
           const prompt = String(body.prompt ?? '');
           if (!name || !cron || !prompt.trim()) return err(res, 400, 'name / cron / prompt are required');
+          // F-22b 新字段校验（permission 枚举 / ISO 日期 / start<=end），失败 400
+          const fields = parseCronPermissionAndValidity(body);
+          if (!fields.ok) return err(res, 400, fields.error);
+          // 既有口径修复：Web 端发送 snake_case max_cost_usd，服务端双读兼容 camelCase
+          const maxCostRaw = body.max_cost_usd ?? body.maxCostUsd;
           try {
             const job = addCronJob(
               {
@@ -547,7 +598,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
                 prompt,
                 cwd: String(body.cwd ?? process.cwd()),
                 enabled: body.enabled === false ? false : true,
-                ...(body.maxCostUsd !== undefined && Number(body.maxCostUsd) > 0 ? { maxCostUsd: Number(body.maxCostUsd) } : {}),
+                ...(maxCostRaw !== undefined && Number(maxCostRaw) > 0 ? { maxCostUsd: Number(maxCostRaw) } : {}),
+                // F-22b：POST 中 null 视为未提供（缺省 = default / 长期有效）
+                ...(fields.permission ? { permission: fields.permission } : {}),
+                ...(fields.validFrom ? { validFrom: fields.validFrom } : {}),
+                ...(fields.validUntil ? { validUntil: fields.validUntil } : {}),
               },
               cronHome,
             );
@@ -557,9 +612,13 @@ export function createWebServer(opts: ServeOptions): http.Server {
           }
         }
         if (id) {
-          // PATCH /api/cron/:id → 编辑（enabled / cron / prompt / cwd / name / maxCostUsd）
+          // PATCH /api/cron/:id → 编辑（enabled / cron / prompt / cwd / name / maxCostUsd / permission / 有效期）
           if (method === 'PATCH') {
             const body = await readBody(req);
+            // F-22b 新字段校验；null = 清除（恢复默认权限 / 长期有效）
+            const fields = parseCronPermissionAndValidity(body);
+            if (!fields.ok) return err(res, 400, fields.error);
+            const maxCostRaw = body.max_cost_usd ?? body.maxCostUsd;
             try {
               const job = updateCronJob(
                 id,
@@ -569,7 +628,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
                   ...(body.prompt !== undefined ? { prompt: String(body.prompt) } : {}),
                   ...(body.cwd !== undefined ? { cwd: String(body.cwd) } : {}),
                   ...(body.name !== undefined ? { name: String(body.name) } : {}),
-                  ...(body.maxCostUsd !== undefined ? { maxCostUsd: Number(body.maxCostUsd) } : {}),
+                  ...(maxCostRaw !== undefined ? { maxCostUsd: Number(maxCostRaw) } : {}),
+                  ...(fields.permission !== undefined ? { permission: fields.permission } : {}),
+                  ...(fields.validFrom !== undefined ? { validFrom: fields.validFrom } : {}),
+                  ...(fields.validUntil !== undefined ? { validUntil: fields.validUntil } : {}),
                 },
                 cronHome,
               );

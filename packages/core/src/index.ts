@@ -503,14 +503,17 @@ export {
   updateCronJob,
   removeCronJob,
   findCronJob,
+  isInValidWindow,
   MAX_RUN_HISTORY,
   STALE_RUNNING_MS,
+  CRON_PERMISSIONS,
   type CronJob,
   type CronRunRecord,
   type CronStoreFile,
   type CronStoreWarning,
   type LoadedCronStore,
   type AddCronJobInput,
+  type CronJobPatch,
 } from './cron/store.js';
 export {
   runDueCronJobs,

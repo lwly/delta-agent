@@ -1,23 +1,25 @@
 <script setup lang="ts">
 // 工作台主页（对齐 prototype/index.html 高保真原型）：
 // 左侧「项目 × 会话」树形侧边栏 + 主区对话流（工具卡片/事件卡/审批卡）+ 底部输入区
-// 记忆 / 模型配置 / 用量 / 回收站 / 检索均为弹窗；回放走独立路由 /replay/:sessionId
+// 模型配置（记忆/配置/用量已迁移至独立设置页 /settings）；设置入口固定在侧栏底部（Token 用量条上方），角标保留待确认记忆提示；
+// 定时任务为工作台子路由 /cron（侧栏常驻，主区按路由切换）；回收站 / 检索仍为弹窗；回放走独立路由 /replay/:sessionId
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
 import { api, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
-import MemoryModal from '../components/MemoryModal.vue';
-import ProvidersModal from '../components/ProvidersModal.vue';
-import UsageModal from '../components/UsageModal.vue';
-import CronModal from '../components/CronModal.vue';
 import TrashModal from '../components/TrashModal.vue';
 import SearchModal from '../components/SearchModal.vue';
 import GitStatusBar from '../components/GitStatusBar.vue';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
+const route = useRoute();
+
+/** 是否处于定时任务子路由：主区渲染 <router-view>，对话流/输入区不渲染 */
+const isCronRoute = computed(() => route.path.startsWith('/cron'));
 
 // ── 侧边栏状态 ──────────────────────────────────────────────
 const expanded = ref<Set<string>>(new Set());
@@ -30,10 +32,6 @@ const showNewProject = ref(false);
 const showRemove = ref(false);
 const removeTarget = ref<{ kind: 'project' | 'session'; id: string; name: string } | null>(null);
 const removeConfirmName = ref('');
-const showMemory = ref(false);
-const showProviders = ref(false);
-const showUsage = ref(false);
-const showCron = ref(false);
 const showTrash = ref(false);
 const showSearch = ref(false);
 
@@ -674,9 +672,6 @@ watch(
     }
   },
 );
-watch(showMemory, (open) => {
-  if (!open) void refreshMemoryBadge();
-});
 </script>
 
 <template>
@@ -693,14 +688,9 @@ watch(showMemory, (open) => {
         </span>
       </div>
 
-      <!-- 导航区（对齐 WorkBuddy 侧栏布局）：记忆 / 配置 / 用量 / 定时 -->
+      <!-- 导航区（顶部）：仅保留定时任务；设置入口已挪至侧栏底部（sidebar-footer 上方） -->
       <nav class="side-nav">
-        <button class="nav-item" @click="showMemory = true">
-          <span class="ni-ico">🧠</span>记忆<span v-if="memoryPendingCount > 0" class="nav-badge">{{ memoryPendingCount }}</span>
-        </button>
-        <button class="nav-item" @click="showProviders = true"><span class="ni-ico">⚙️</span>配置</button>
-        <button class="nav-item" @click="showUsage = true"><span class="ni-ico">📊</span>用量</button>
-        <button class="nav-item" @click="showCron = true"><span class="ni-ico">⏰</span>定时任务</button>
+        <router-link class="nav-item" to="/cron"><span class="ni-ico">⏰</span>定时任务</router-link>
       </nav>
 
       <div class="sidebar-actions">
@@ -766,6 +756,13 @@ watch(showMemory, (open) => {
         </p>
       </div>
 
+      <!-- 底部入口：设置（含待确认记忆角标），贴近 footer 上方、位于 Token 用量条之上 -->
+      <nav class="side-nav bottom">
+        <router-link class="nav-item" to="/settings">
+          <span class="ni-ico">⚙️</span>设置<span v-if="memoryPendingCount > 0" class="nav-badge">{{ memoryPendingCount }}</span>
+        </router-link>
+      </nav>
+
       <div class="sidebar-footer">
         <div class="footer-row" :title="`今日 token ${todayLabel} / ${DAILY_TOKEN_BUDGET / 10000}k（展示口径）`">
           <span>Token（今日）</span>
@@ -781,8 +778,11 @@ watch(showMemory, (open) => {
 
     <!-- ══════════ 主区域 ══════════ -->
     <main class="main">
-      <!-- 空态：未选择会话 -->
-      <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
+      <!-- 定时任务子路由：主区整块交给 CronView（侧栏常驻），对话流 / 输入区不渲染 -->
+      <router-view v-if="isCronRoute" />
+      <template v-else>
+        <!-- 空态：未选择会话 -->
+        <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
         <div class="hero-logo">y0</div>
         <h1>y-zero-agent</h1>
         <p>从左侧选择一个对话，或新建对话开始你的任务。</p>
@@ -1049,6 +1049,7 @@ watch(showMemory, (open) => {
           <GitStatusBar />
         </div>
       </template>
+      </template>
     </main>
 
     <!-- ══════════ 弹窗 ══════════ -->
@@ -1076,10 +1077,6 @@ watch(showMemory, (open) => {
       </template>
     </ModalShell>
 
-    <MemoryModal v-if="showMemory" @close="showMemory = false" />
-    <ProvidersModal v-if="showProviders" @close="showProviders = false" />
-    <UsageModal v-if="showUsage" @close="showUsage = false" />
-    <CronModal v-if="showCron" @close="showCron = false" />
     <TrashModal v-if="showTrash" @close="showTrash = false" />
     <SearchModal v-if="showSearch" @close="showSearch = false" @open-session="openSession" />
   </div>
@@ -1128,6 +1125,10 @@ watch(showMemory, (open) => {
   border-radius: 8px; padding: 1px 6px; font-weight: 700;
 }
 .nav-item.disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+/* 底部导航区：设置入口贴底（滚动区之后、sidebar-footer 之前）。
+   sidebar 为 flex column 且 sidebar-scroll 已 flex:1，此处按正常文档流自然贴底；
+   分隔线交给下方 footer 的 border-top，故去掉顶部导航自带的 border-bottom。 */
+.side-nav.bottom { border-bottom: none; padding: 4px 10px 8px; }
 
 .sidebar-actions { padding: 4px 12px 8px; display: flex; gap: 8px; }
 .btn-sm {
