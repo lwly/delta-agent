@@ -5,3 +5,7 @@ dist/
 coverage/
 *.log
 .DS_Store
+# 测试/工具产生的临时产物（本机删除守卫拦截时无法清理，勿纳入版本库）
+.tmp-test/
+.tmp-sqlite/
+*.timestamp-*.mjs
