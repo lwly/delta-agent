@@ -7,6 +7,9 @@ import { useRoute, useRouter } from 'vue-router';
 import MemoryPanel from '../components/settings/MemoryPanel.vue';
 import ProvidersPanel from '../components/settings/ProvidersPanel.vue';
 import UsagePanel from '../components/settings/UsagePanel.vue';
+import SkillsPanel from '../components/settings/SkillsPanel.vue';
+import SkillHubPanel from '../components/settings/SkillHubPanel.vue';
+import McpPanel from '../components/settings/McpPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -15,6 +18,9 @@ const router = useRouter();
 const SECTIONS = [
   { key: 'memory', ico: '🧠', label: '记忆' },
   { key: 'providers', ico: '⚙️', label: '配置' },
+  { key: 'skills', ico: '🧩', label: 'Skills' },
+  { key: 'hub', ico: '🛒', label: 'Skill Hub' },
+  { key: 'mcp', ico: '🔌', label: 'MCP' },
   { key: 'usage', ico: '📊', label: '用量' },
 ] as const;
 
@@ -61,6 +67,9 @@ function switchTab(key: SectionKey) {
       <main class="content">
         <MemoryPanel v-if="activeTab === 'memory'" />
         <ProvidersPanel v-else-if="activeTab === 'providers'" />
+        <SkillsPanel v-else-if="activeTab === 'skills'" />
+        <SkillHubPanel v-else-if="activeTab === 'hub'" />
+        <McpPanel v-else-if="activeTab === 'mcp'" />
         <UsagePanel v-else-if="activeTab === 'usage'" />
       </main>
     </div>
