@@ -1,5 +1,5 @@
 /**
- * 三级覆盖合并器：builtin < project(.y-zero/) < session(runtime)
+ * 三级覆盖合并器：builtin < project(.delta/) < session(runtime)
  * 规则（technical-design.md §5）：
  *   - 字符串 section：后者整体覆盖
  *   - 对象：深度合并

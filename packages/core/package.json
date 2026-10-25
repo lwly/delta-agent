@@ -1,5 +1,5 @@
 {
-  "name": "@y-zero/core",
+  "name": "@delta/core",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@y-zero/shared": "workspace:*",
+    "@delta/shared": "workspace:*",
     "ajv": "^8.17.1",
     "better-sqlite3": "^11.5.0",
     "fflate": "^0.8.3"

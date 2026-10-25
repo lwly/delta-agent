@@ -3,7 +3,7 @@
  *
  * 目录来源：
  *   - 内置 seed catalog（skill-hub-catalog.ts，随包发布，始终可用）
- *   - 远程 registry（<configHome>/.y-zero/skill-hub.json 配置的 sources，
+ *   - 远程 registry（<configHome>/.delta/skill-hub.json 配置的 sources，
  *     每次列表请求实时 fetch，10s 超时，单个源失败不阻塞其他源）
  *
  * 去重口径：同名条目只保留第一个出现的（builtin 优先，其后按 sources 配置顺序），
@@ -18,6 +18,7 @@
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import { parseFrontmatter } from '../skills/loader.js';
+import { FILES, userConfigDir } from '../paths.js';
 import { listLayerSkills, skillLayerDirs, validateConfigName, type SkillLayers } from './config-store.js';
 import { SEED_SKILLS, findBuiltinHubEntry, type HubEntry } from './skill-hub-catalog.js';
 
@@ -54,10 +55,10 @@ export interface HubSnapshot {
 /** 远程 registry 拉取超时（ms） */
 const FETCH_TIMEOUT_MS = 10_000;
 
-// ── sources 配置文件（<configHome>/.y-zero/skill-hub.json）──────────────────
+// ── sources 配置文件（<configHome>/.delta/skill-hub.json）──────────────────
 
 function hubSourcesFile(configHome: string): string {
-  return path.join(configHome, '.y-zero', 'skill-hub.json');
+  return path.join(userConfigDir(configHome), FILES.skillHub);
 }
 
 /**

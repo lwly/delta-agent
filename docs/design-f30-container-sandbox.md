@@ -12,7 +12,7 @@
 
 本特性是**纯增量**，只动「命令在哪里跑」这一件事，分四层落地：
 
-1. **配置层**（`sandbox/config.ts`）：两级 JSON（`~/.y-zero/sandbox.json` < `.y-zero/sandbox.json`）逐字段 merge + 会话/单次覆盖，非法值降级告警、敏感键硬拒、`enforce` 只能更严。
+1. **配置层**（`sandbox/config.ts`）：两级 JSON（`~/.delta/sandbox.json` < `.delta/sandbox.json`）逐字段 merge + 会话/单次覆盖，非法值降级告警、敏感键硬拒、`enforce` 只能更严。
 2. **探测层**（`sandbox/docker-cli.ts` + `sandbox/probe.ts`）：**可注入的命令执行端口 `DockerCli`** + `docker version --format {{.Server.Version}}` 的四类原因判定 + 30s 会话缓存 + 单飞（single-flight）。
 3. **执行层**（`sandbox/args.ts` + `sandbox/executor.ts` + `sandbox/runtime.ts`）：参数组装器产出**有序 argv 数组**，`LocalExecutor` / `DockerExecutor` 两个实现，`SandboxRuntime` 负责降级决策编排。
 4. **接线层**：`exec.ts` 的两个工具改调后端；`ToolContext.sandbox` 可选注入；三端（CLI/TUI/Web/headless）各自注入 runtime 并提供降级确认与通知出口。
@@ -467,7 +467,7 @@ export function normalizeSandboxLayer(
 - **告警通道**（三条，缺一不可）：
   1. `ResolvedSandboxConfig.warnings/errors` 结构化返回；
   2. 入口在启动时各打一行 `console.error`：`⚠ sandbox 配置（project）: fallback 非法值 "sometimes"，已用默认 deny`；
-  3. `yzero sandbox status` 的 `warnings/errors` 段（同一数据源）。
+  3. `delta sandbox status` 的 `warnings/errors` 段（同一数据源）。
 
 ### 3.4 `enforce` 的「只能更严」判定（可测纯函数）
 
@@ -522,7 +522,7 @@ const SENSITIVE_KEYS = [
 | 条件 | 处理 |
 |------|------|
 | `realRoot` 是文件系统根（`/`、`C:\`） | 硬拒：「容器会把整个文件系统挂进 /workspace」 |
-| `realRoot` === `realpath(os.homedir())` | 硬拒：「home 目录包含 `~/.ssh` 与 `~/.y-zero`，隔离失效；请在具体项目目录运行，或 `--sandbox local`」 |
+| `realRoot` === `realpath(os.homedir())` | 硬拒：「home 目录包含 `~/.ssh` 与 `~/.delta`，隔离失效；请在具体项目目录运行，或 `--sandbox local`」 |
 | `realRoot` === `realpath(os.tmpdir())` | 硬拒：同上（共享临时目录会挂进他人的临时文件） |
 | `path.join(realRoot, 'docker.sock')` 存在（含符号链接）或 `realRoot` 路径字符串含 `docker.sock` | 硬拒：「挂 docker.sock = 容器内 root ≈ 宿主 root」 |
 
@@ -617,7 +617,7 @@ export function containerWorkdir(relativeCwd: string): string;
 /** 跨平台挂载源：win32 把 `\` 归一为 `/`、盘符大写；含 , " 换行 → throw */
 export function normalizeMountSource(p: string, platform?: NodeJS.Platform): string;
 
-/** yzero-<sid 前 8 位>-<随机 6 位>（crypto.randomBytes(3).toString('hex')） */
+/** delta-<sid 前 8 位>-<随机 6 位>（crypto.randomBytes(3).toString('hex')） */
 export function containerName(sessionId: string, rand?: string): string;
 
 /** `-e NAME=VALUE` → `-e NAME=***`（--debug 打印前的兜底打码） */
@@ -632,10 +632,10 @@ export function redactArgv(argv: string[]): string[];
 |---|-----------|------|------|
 | 1 | `run` | 固定 | 否 |
 | 2 | `--rm` | `keepContainer === false` | 是（`keepContainer`） |
-| 3 | `--name` `<name>` | `yzero-<sid8>-<rand6>` | 否 |
-| 4 | `--label` `yzero.session=<sid>` | 会话 id | 否 |
-| 5 | `--label` `yzero.project=<pid>` | 项目 id | 否 |
-| 6 | `--label` `yzero.created=<ISO>` | `new Date().toISOString()` | 否 |
+| 3 | `--name` `<name>` | `delta-<sid8>-<rand6>` | 否 |
+| 4 | `--label` `delta.session=<sid>` | 会话 id | 否 |
+| 5 | `--label` `delta.project=<pid>` | 项目 id | 否 |
+| 6 | `--label` `delta.created=<ISO>` | `new Date().toISOString()` | 否 |
 | 7 | `--read-only` | `readOnlyRoot` | 是 |
 | 8 | `--cap-drop` `ALL` | 硬编码 | **否** |
 | 9 | `--security-opt` `no-new-privileges` | 硬编码 | **否** |
@@ -658,12 +658,12 @@ export function redactArgv(argv: string[]): string[];
 示例（可直接作为测试快照）：
 
 ```jsonc
-["run","--rm","--name","yzero-1a2b3c4d-9f8e7d",
- "--label","yzero.session=1a2b3c4d-….","--label","yzero.project=…","--label","yzero.created=2026-10-23T02:10:11.000Z",
+["run","--rm","--name","delta-1a2b3c4d-9f8e7d",
+ "--label","delta.session=1a2b3c4d-….","--label","delta.project=…","--label","delta.created=2026-10-23T02:10:11.000Z",
  "--read-only","--cap-drop","ALL","--security-opt","no-new-privileges",
  "--network","none",
  "--memory","2048m","--memory-swap","2048m","--cpus","2","--pids-limit","512",
- "--mount","type=bind,source=/Users/dev/work/project/y-zero-agent,target=/workspace",
+ "--mount","type=bind,source=/Users/dev/work/project/delta-agent,target=/workspace",
  "--tmpfs","/tmp","--tmpfs","/home/node",
  "--user","1000:1000",
  "-e","LANG=C.UTF-8","-e","TZ=Asia/Shanghai",
@@ -753,10 +753,10 @@ async run(command: string, opts: RunOptions): Promise<SandboxExecResult> {
 ### 6.4 `gc` 与残留
 
 ```ts
-// 列出：docker ps -a --filter label=yzero.created --format {{.Names}}
+// 列出：docker ps -a --filter label=delta.created --format {{.Names}}
 // 清理：逐条 cli.exec(['rm','-f', name])（并发 4 条，失败跳过并计数）
 async gc(): Promise<{ removed: number; names: string[] }>;
-async listContainers(): Promise<string[]>;   // 前缀过滤兜底：name ^yzero-
+async listContainers(): Promise<string[]>;   // 前缀过滤兜底：name ^delta-
 ```
 
 - `status()`：探测 + `listContainers()`；`residues.length > 0` → 展示 + 一行 `gc` 提示。
@@ -772,7 +772,7 @@ async listContainers(): Promise<string[]>;   // 前缀过滤兜底：name ^yzero
 | `code === 127` | `[sandbox] 命令在镜像 ${image} 中不存在（容器内只有 node/pnpm/npm 等）。如需该命令：换 sandbox.image，或本次用 --sandbox local` |
 | `code === 137` | `[sandbox] 疑似超出内存上限（${memoryMb}MB）被 OOM kill；可调 sandbox.memoryMb` |
 | `code === 126` | `[sandbox] 权限不足（只读根文件系统或 --user 限制）；调试可临时设 readOnlyRoot=false` |
-| `network==='none'` 且 `stderr` 匹配 `/ENOTFOUND\|ECONNREFUSED\|EAI_AGAIN\|network\|registry\|getaddrinfo/i` | `[sandbox] network=none 下网络不可达。若该命令确需联网：加 --sandbox-network bridge，或设置 .y-zero/sandbox.json {"network":"bridge"}` |
+| `network==='none'` 且 `stderr` 匹配 `/ENOTFOUND\|ECONNREFUSED\|EAI_AGAIN\|network\|registry\|getaddrinfo/i` | `[sandbox] network=none 下网络不可达。若该命令确需联网：加 --sandbox-network bridge，或设置 .delta/sandbox.json {"network":"bridge"}` |
 
 > 「安装类命令」的预判拦截**不做**（PRD F-30.7 明确：预判会误杀离线本地包）。只在**失败后**按 stderr 关键字补 hint。
 
@@ -835,7 +835,7 @@ runtime.run()
 
 - 决策映射：`allow` / `allow_session` → 允许本次及本会话本地执行（`degradeApproved = true`）；`reject` → deny；`edit` → 忽略（降级卡无参数可编辑）。
 - **不复用 `ctx.confirm` 的原因**：`allow_session` 在 registry 里会触发 `perms.allowSession('run_command')`，把「允许降级」误记成「本会话免确认执行命令」——这是权限语义污染（D9）。
-- 无 `confirmDegrade` 注入（例如 `yzero serve` 未接 Web 交互）→ 等价 deny，绝不静默降级。
+- 无 `confirmDegrade` 注入（例如 `delta serve` 未接 Web 交互）→ 等价 deny，绝不静默降级。
 
 ### 7.4 错误文案（三条信息缺一不可，`buildUnavailableMessage()` 纯函数）
 
@@ -852,12 +852,12 @@ export function buildUnavailableMessage(input: {
 [sandbox] Docker 不可用：daemon 未运行（docker version 退出码 1）
   命令未执行——容器隔离在本次不可用，已按 fallback=deny 拒绝。
   下一步任选其一：
-    1) 启动 Docker Desktop 后重试（可用 yzero sandbox status 复查）
-    2) 本次临时改用本地执行：yzero run ... --sandbox local
-    3) 长期允许降级并询问：.y-zero/sandbox.json → {"fallback":"ask"}
+    1) 启动 Docker Desktop 后重试（可用 delta sandbox status 复查）
+    2) 本次临时改用本地执行：delta run ... --sandbox local
+    3) 长期允许降级并询问：.delta/sandbox.json → {"fallback":"ask"}
 ```
 
-`enforced=true`（项目策略强制容器）时，第 2/3 条改为一条真正可执行的替代项：`2) 联系项目维护者调整 .y-zero/sandbox.json（enforce:true 下会话无法降级）`，绝不给出「设置 fallback:'ask'」这种在 enforce 下必然被拒的假动作。
+`enforced=true`（项目策略强制容器）时，第 2/3 条改为一条真正可执行的替代项：`2) 联系项目维护者调整 .delta/sandbox.json（enforce:true 下会话无法降级）`，绝不给出「设置 fallback:'ask'」这种在 enforce 下必然被拒的假动作。
 
 ---
 
@@ -913,7 +913,7 @@ export interface SandboxMeta {
 ```ts
 // DockerExecutorOptions.onDebugArgv → 入口打印：
 // [sandbox] docker 参数向量：
-//   ["run","--rm","--name","yzero-…","--mount","type=bind,source=/…,target=/workspace", …,"-e","TZ=Asia/Shanghai",…]
+//   ["run","--rm","--name","delta-…","--mount","type=bind,source=/…,target=/workspace", …,"-e","TZ=Asia/Shanghai",…]
 ```
 
 - **设计上不可能泄漏 Key**：env 透传使用 `-e NAME`（只给名字，值由 docker CLI 子进程的 env 继承），因此 argv 里天然没有密钥值。
@@ -926,15 +926,15 @@ export interface SandboxMeta {
 
 | 入口 | 调用链 | 落点文件 | 优先级 |
 |------|--------|----------|--------|
-| `yzero`（TUI 启动） | `loadSandboxConfig` → `createSandboxRuntime({interactive:true, confirmDegrade:→ConfirmCard, onNotice:→addItem})` → `App props.sandbox` → `RunContext.toolContext.sandbox` | `cli/src/index.ts`（构造）→ `cli/src/ui/app.tsx`（注入 + 徽标 + `/sandbox`）→ `cli/src/ui/confirm.tsx`（`variant` 裁剪 + 徽标行） | P0 |
-| `yzero run`（headless） | 同上但 `interactive:false, confirmDegrade:undefined` → `runHeadless({…, sandboxState})` → `buildHeadlessReport` 附 `sandbox` 段 | `cli/src/headless-run.ts` → `core/src/headless.ts` | P0 |
-| `yzero sandbox status\|pull\|gc\|enable\|disable` | `loadSandboxConfig` → `runtime.status/pull/gc` → `formatSandboxStatus()` | `cli/src/sandbox.ts`（**新增**）→ `cli/src/index.ts`（注册 + `KNOWN_SUBCOMMANDS`） | P0（status/pull 在 PRD 里 status=P0、pull/gc/enable=P1，本期一并做，成本已摊在 T02） |
-| `yzero --sandbox docker …` | root/`run` 子命令 flag → `SandboxSessionOverrides` → `checkEnforce` | `cli/src/index.ts`（flag 声明 + 违例 exit 1） | P0 |
+| `delta`（TUI 启动） | `loadSandboxConfig` → `createSandboxRuntime({interactive:true, confirmDegrade:→ConfirmCard, onNotice:→addItem})` → `App props.sandbox` → `RunContext.toolContext.sandbox` | `cli/src/index.ts`（构造）→ `cli/src/ui/app.tsx`（注入 + 徽标 + `/sandbox`）→ `cli/src/ui/confirm.tsx`（`variant` 裁剪 + 徽标行） | P0 |
+| `delta run`（headless） | 同上但 `interactive:false, confirmDegrade:undefined` → `runHeadless({…, sandboxState})` → `buildHeadlessReport` 附 `sandbox` 段 | `cli/src/headless-run.ts` → `core/src/headless.ts` | P0 |
+| `delta sandbox status\|pull\|gc\|enable\|disable` | `loadSandboxConfig` → `runtime.status/pull/gc` → `formatSandboxStatus()` | `cli/src/sandbox.ts`（**新增**）→ `cli/src/index.ts`（注册 + `KNOWN_SUBCOMMANDS`） | P0（status/pull 在 PRD 里 status=P0、pull/gc/enable=P1，本期一并做，成本已摊在 T02） |
+| `delta --sandbox docker …` | root/`run` 子命令 flag → `SandboxSessionOverrides` → `checkEnforce` | `cli/src/index.ts`（flag 声明 + 违例 exit 1） | P0 |
 | TUI `/sandbox` | `runtime.status()` → system 行 | `cli/src/ui/app.tsx`（`handleCommand` case） | P0 |
 | Web `GET /api/sandbox/status?refresh=1` | `ServeOptions.sandbox.status()` | `core/src/server/http.ts` + `cli/src/index.ts`（serve 构造 provider） | P1 |
 | Web `POST /api/sandbox/pull` | `ServeOptions.sandbox.pull(image)` | 同上 | P1 |
 | Web 设置区块 / 会话徽标 | `web/src/api/client.ts` 新方法；`SettingsView.vue` 区块；`ChatView.vue` 头部徽标 | `web/src/api/client.ts`、`web/src/views/SettingsView.vue`、`web/src/views/ChatView.vue` | P1（本期只给接线点，不做完整 UI） |
-| `yzero serve` 会话内执行 | `SessionHubDeps.sandbox?: SandboxFactory` → 每次运行造 runtime（与 `BudgetManager`/`PermissionState` 同位置） | `core/src/server/hub.ts` | P0（徽标/降级卡） |
+| `delta serve` 会话内执行 | `SessionHubDeps.sandbox?: SandboxFactory` → 每次运行造 runtime（与 `BudgetManager`/`PermissionState` 同位置） | `core/src/server/hub.ts` | P0（徽标/降级卡） |
 
 **Commander 注意（踩过的坑，别踩回去）**：
 
@@ -949,8 +949,8 @@ program
   .option('--sandbox-fallback <mode>', 'F-30 降级策略：deny | ask | local')
   .option('--sandbox-debug', 'F-30 打印 docker 参数向量（env 打码）');
 
-// run 子命令重复声明同名 flag（enablePositionalOptions 保证 `yzero run "任务" --sandbox docker` 归 run 解析）
-// KNOWN_SUBCOMMANDS 必须补 'sandbox'，否则 `yzero sandbox status` 会被裸任务路由改写成 `yzero run sandbox status`
+// run 子命令重复声明同名 flag（enablePositionalOptions 保证 `delta run "任务" --sandbox docker` 归 run 解析）
+// KNOWN_SUBCOMMANDS 必须补 'sandbox'，否则 `delta sandbox status` 会被裸任务路由改写成 `delta run sandbox status`
 const KNOWN_SUBCOMMANDS = new Set(['run','models','memory','migrate','search','serve','hooks','evals','usage','sandbox','help']);
 ```
 
@@ -992,8 +992,8 @@ const KNOWN_SUBCOMMANDS = new Set(['run','models','memory','migrate','search','s
 | `packages/core/test/sandbox-plan.test.ts` | **新增** | §7.2 表逐格（9 行）+ 文案要素 |
 | `packages/core/test/sandbox-executor.test.ts` | **新增** | `DockerExecutor` 超时/中断/清理序列/gc/pull 失败 |
 | `packages/core/test/sandbox-exec.test.ts` | **新增** | `run_command`/`run_tests` 接线、Z1 golden、AC-30-4 无 docker 调用 |
-| `packages/core/test/sandbox-docker.integration.test.ts` | **新增** | `YZERO_TEST_DOCKER=1` 才跑的真实容器用例 |
-| `scripts/smoke.mjs` | 修改 | 补 1 例：`yzero sandbox status` 在无 daemon 时输出含「daemon 未运行」且退出码 0 |
+| `packages/core/test/sandbox-docker.integration.test.ts` | **新增** | `DELTA_TEST_DOCKER=1` 才跑的真实容器用例 |
+| `scripts/smoke.mjs` | 修改 | 补 1 例：`delta sandbox status` 在无 daemon 时输出含「daemon 未运行」且退出码 0 |
 | `scripts/smoke-web.mjs` | 修改 | 补 1 例：`GET /api/sandbox/status` 200 + 字段齐全 |
 
 ---
@@ -1070,7 +1070,7 @@ sequenceDiagram
 
 ## 12. 任务列表（5 个，按依赖排序）
 
-> 粒度标准：一个人一次能写完并自测（≤6 个文件、可独立跑 `pnpm --filter @y-zero/core test <file>`）。T04/T05 相互独立，可并行。
+> 粒度标准：一个人一次能写完并自测（≤6 个文件、可独立跑 `pnpm --filter @delta/core test <file>`）。T04/T05 相互独立，可并行。
 
 | Task | 任务名 | Source Files | 依赖 | 优先级 |
 |------|--------|--------------|------|--------|
@@ -1100,17 +1100,17 @@ sequenceDiagram
   - **接线**：注入 fake runtime 时 `run_command` 与 `run_tests` 三条分支（package.json / pytest.ini / Cargo.toml，用 tmp 目录 fixture）**都**落到 `runtime.run`（计数断言 = 1）。
   - **denied**：`runtime.run` 返回 `{denied:true, diagnostic}` → `result.content === diagnostic`（不走 `trimOutput`）。
   - **meta**：`explicit=true` → `meta.sandbox.mode === 'docker'`；`explicit=false && mode==='local'` → `meta === undefined`。
-  - 既有全量 `pnpm --filter @y-zero/core test` 全绿（`permissions.test.ts` / `registry.test.ts` 不回归）。
+  - 既有全量 `pnpm --filter @delta/core test` 全绿（`permissions.test.ts` / `registry.test.ts` 不回归）。
 
 - **T04**
   - TUI：`/sandbox` 输出含「mode / 镜像 / daemon 状态 / 残留数」；工具卡片在 `meta.sandbox.mode==='docker'` 时带 `[docker]`，否则与今日渲染一致（快照对比）；`variant='sandbox_degrade'` 的确认卡只有 2 个选项。
   - hub：`SessionHubDeps.sandbox` 未注入 → `toolContext.sandbox === undefined`（零影响）；注入后 `onNotice` 经 SSE 推出 `sandbox_notice`；降级卡走 `POST /confirm` 回填后 `degradeApproved` 生效（同一会话第二次调用不再询问）。
   - headless：`fallback:'ask'` + 不可用 → 行为与 `deny` 完全一致（同一断言两跑）；`sandbox` 段在显式启用时存在、默认时缺省；`usage.cost_usd` 与未启用完全一致（AC-30-10 后半）。
-  - **R5**：`yzero run "x" --sandbox docker` + 无 daemon → 退出码 1、stderr 含判定依据与 ≥2 个动作、**不启动引擎**（用 `--json` 断言 stdout 为空）。
+  - **R5**：`delta run "x" --sandbox docker` + 无 daemon → 退出码 1、stderr 含判定依据与 ≥2 个动作、**不启动引擎**（用 `--json` 断言 stdout 为空）。
 
 - **T05**
-  - `yzero sandbox status` 在 daemon 停止时准确报 `daemon_down` + `mode` 来源 + `enforce` 状态 + 残留数（AC-30-6 / US-30-6 推荐行）；`sandbox enable/disable` 只改 `mode`，保留文件内其它字段（写前读、tmp+rename 原子写）。
-  - `yzero sandbox gc` 清空残留并报数量；无残留 → 友好空态。
+  - `delta sandbox status` 在 daemon 停止时准确报 `daemon_down` + `mode` 来源 + `enforce` 状态 + 残留数（AC-30-6 / US-30-6 推荐行）；`sandbox enable/disable` 只改 `mode`，保留文件内其它字段（写前读、tmp+rename 原子写）。
+  - `delta sandbox gc` 清空残留并报数量；无残留 → 友好空态。
   - `POST /api/sandbox/pull` 与 `sandbox status` **同一数据源**（同一 `SandboxStatusProvider`），字段一致。
   - `pnpm smoke:web` 通过（含新增 1 例）；`node scripts/smoke.mjs` 通过（含新增 1 例）。
   - Web 面板 P1：状态卡 + 「检测 Docker」「预热镜像」按钮可用；不引入新依赖（纯 CSS）。
@@ -1137,7 +1137,7 @@ graph LR
 | 随机容器名 | `node:crypto`（`randomBytes`） |
 | 路径/平台归一 | `node:path`、`node:os`、`process.platform` |
 | 配置 JSON | `node:fs` + `JSON.parse`（对齐 `hooks/manager.ts`） |
-| 测试 | 现有 `vitest`（`describe.skipIf(!process.env.YZERO_TEST_DOCKER)`） |
+| 测试 | 现有 `vitest`（`describe.skipIf(!process.env.DELTA_TEST_DOCKER)`） |
 
 对照否决项：`dockerode`（直连 `/var/run/docker.sock`，把 daemon 攻击面搬进进程，且 pull 进度/tty 语义需要自己拼）→ 不可接受；`testcontainers`（重型、自带 node 版本约束、只用于测试却要进 devDependencies 并影响 CI 时长）→ 收益不抵成本。
 
@@ -1153,12 +1153,12 @@ graph LR
 | 降级链决策表 + 文案 | 否（纯函数） | `sandbox-plan.test.ts` | 14（9 行表 + 5 文案） | AC-30-5, AC-30-6 |
 | 执行器清理/gc/pull 失败 | 否（`FakeDockerCli` 记录调用序列） | `sandbox-executor.test.ts` | 14 | AC-30-7 |
 | 工具接线（Z1 golden / 三分支 / meta） | 否（fake runtime） | `sandbox-exec.test.ts` | 12 | AC-30-1, AC-30-4, AC-30-12(hints) |
-| 真实容器（pwd/`ls ~`/env/127/137/126/超时无残留） | **是**（`YZERO_TEST_DOCKER=1`） | `sandbox-docker.integration.test.ts` | 8（默认全 skip） | AC-30-2, AC-30-3, AC-30-7, AC-30-12 |
+| 真实容器（pwd/`ls ~`/env/127/137/126/超时无残留） | **是**（`DELTA_TEST_DOCKER=1`） | `sandbox-docker.integration.test.ts` | 8（默认全 skip） | AC-30-2, AC-30-3, AC-30-7, AC-30-12 |
 | 端到端冒烟 | 否 | `scripts/smoke.mjs`（+1）、`scripts/smoke-web.mjs`（+1） | 2 | US-30-4, US-30-6 |
 
 - 合计：**约 106 例纯单测 + 8 例可选集成**（无 daemon 机器上 8 例 skip，总耗时增量 <2s）。
 - 单测铁律：任何会走到 `DockerExecutor` 的用例**必须**注入 `FakeDockerCli`；用一条全局断言「测试结束后 `realDockerCli` 从未被调用」来防漏（在 `test/helpers/fake-docker.ts` 暴露 `__realCliCalls` 计数 + `afterEach` 断言 0）。
-- 本地跑测：`NODE_OPTIONS= pnpm --filter @y-zero/core test`（F-31 §9 已知的 WorkBuddy `NODE_OPTIONS` shim 问题）。
+- 本地跑测：`NODE_OPTIONS= pnpm --filter @delta/core test`（F-31 §9 已知的 WorkBuddy `NODE_OPTIONS` shim 问题）。
 
 ---
 
@@ -1173,7 +1173,7 @@ graph LR
 7. **不进用量口径**：`session/usage.ts`、`BudgetManager`、`usage.*` 零改动；容器信息只走 `meta.sandbox`、`sandbox_notice`、`--json.sandbox`。
 8. **配置容错**：坏 JSON / 非法值 ⇒ 降级 + warning，永不 throw（除非命中 §3.5 硬拒或 §3.4 enforce 违例）。
 9. **文案标准**：任何「不可用/拒绝」都必须含三段：**判定依据 + 后果 + ≥2 个可执行动作**（`buildUnavailableMessage` 单点生成，禁止各处手写）。
-10. **时区/时间**：`label yzero.created`、`meta.ms` 用本地时钟；容器内 `TZ` 取宿主 `process.env.TZ`，缺省 `Intl.DateTimeFormat().resolvedOptions().timeZone`，再缺省 `UTC`。
+10. **时区/时间**：`label delta.created`、`meta.ms` 用本地时钟；容器内 `TZ` 取宿主 `process.env.TZ`，缺省 `Intl.DateTimeFormat().resolvedOptions().timeZone`，再缺省 `UTC`。
 
 ---
 
@@ -1183,7 +1183,7 @@ graph LR
 |---|---|---|---|
 | **R1** | **PRD F-30.1 声称「现有 22 例 exec 单测」，实际仓库里 `run_command`/`run_tests` **没有任何真实执行用例**（`registry.test.ts` 12 例只覆盖注册与确认流；`permissions.test.ts` 只把字符串当输入）。 | AC-30-1 的「逐字符一致」缺乏既有基线，「不回归」无从验证 | 基线改由 T03 新建：用确定性命令（`echo yz-shell-ok` / `false`）在 `ctx.sandbox === undefined` 下断言 `result.content` 的**完整字符串**（含 `[exit code: N]` 尾巴）与改造前手抄值逐字符相等；并在 PR 描述里贴出改造前后两次运行的实际输出对比。AC-30-1 的可验证性由这一条承担 |
 | **R2** | PRD F-30.4 写「`mounts` 若包含 `docker.sock` 或工作区外源路径 → 整体拒绝加载」，但 §6 与 §2.3 明确「挂载不可配、不做任意挂载点配置」——`mounts` 字段到底存不存在自相矛盾 | 若实现 `mounts`，等于自己开了 PRD 明令禁止的配置面 | **不提供 `mounts` 字段**。把 §4.4 的安全语义落到两处：① §3.5 的 `SENSITIVE_KEYS`（写了 `mounts`/`volumes`/`privileged` 等 → 该层硬拒）；② §3.5 的 `assertSafeWorkspaceRoot`（工作区本身是 `/`、home、tmpdir、含 `docker.sock` → 拒绝执行）。语义等价、攻击面更小 |
-| **R3** | PRD F-30.6 的反例列表（`/`、`~`、`/var/run/docker.sock`）是以「用户可配 mounts」为前提写的；本特性不可配 mounts，但**用户可以在 `~` 或 `/tmp` 里启动 yzero**——此时 `projectRoot` 本身就是危险挂载源 | 隔离承诺失效：`~` 挂进去就等于暴露 `~/.ssh`、`~/.y-zero/models.json`（正是 PRD 背景里最担心的东西） | **新增硬拒**（PRD 未明说，我加）：`realRoot` 为文件系统根 / home 本身 / `os.tmpdir()` / 含 `docker.sock` → 拒绝容器执行并给出「请在具体项目目录运行，或 `--sandbox local`」的文案。属于加强隔离、不削弱可用性（逃生路径明确） |
+| **R3** | PRD F-30.6 的反例列表（`/`、`~`、`/var/run/docker.sock`）是以「用户可配 mounts」为前提写的；本特性不可配 mounts，但**用户可以在 `~` 或 `/tmp` 里启动 delta**——此时 `projectRoot` 本身就是危险挂载源 | 隔离承诺失效：`~` 挂进去就等于暴露 `~/.ssh`、`~/.delta/models.json`（正是 PRD 背景里最担心的东西） | **新增硬拒**（PRD 未明说，我加）：`realRoot` 为文件系统根 / home 本身 / `os.tmpdir()` / 含 `docker.sock` → 拒绝容器执行并给出「请在具体项目目录运行，或 `--sandbox local`」的文案。属于加强隔离、不削弱可用性（逃生路径明确） |
 | **R4** | AC-30-1「逐字节一致、无额外延迟」与 G2「100% 的 exec 调用都带执行环境标识」彼此冲突 | 二者不可同时字面满足 | 用 `runtime.explicit` 裁决：**默认用户（无任何沙箱配置）不显示徽标、不产出 meta、JSON 不多字段**（保 AC-30-1 与 G3「未启用感知不到」）；一旦存在配置或 flag，三端 100% 带标识（保 G2）。文档同步在 CLI `--help` 与 `sandbox status` 里说明 |
 | **R5** | PRD §5.2 与 US-30-5 对「显式 `--sandbox docker` 且不可用」的退出码给了两个值（「配置错误 1 或 2」） | CI 判定不稳定 | 定为 **1**：这是「环境/配置错误」（与 F-29「1 = provider 未配置、会话不存在等引擎启动前错误」同族），**在任何工具执行前由入口判定并退出**（前置探测），绝不进入引擎。mid-run 才降级为 deny 的情况**不改退出码**（工具失败 ≠ 任务失败，对齐 F-29），但 `--json.sandbox.denied_runs > 0` 供 CI 判定 |
 | **R6** | `env` 名称白名单标为 P1，但实现成本极低（`-e NAME` 形态还要额外做打码） | 若延到 P2，「凭据不泄漏」只剩「零继承」 | **本期实现**：只透传宿主确实存在的变量，且用 `-e NAME`（值不进 argv）→ 顺便让 `--debug` 的参数向量天然无密钥 |
@@ -1197,7 +1197,7 @@ graph LR
 ### 待明确（需产品/主理人后续确认，不阻塞本期实现）
 
 1. `sandbox status` 的**输出格式**是否需要 `--json`（当前设计只做人类可读 + 内部 `SandboxStatus` 结构；Web 直接消费结构体，CLI 暂不加 `--json`）。成本极低，若需要可在 T05 顺带加。
-2. `yzero sandbox enable` 写**全局**还是可 `--project` 写项目（PRD §4.10 只提「改写全局配置」）。当前按 PRD 只写全局；若团队想要「把项目策略提交进仓库」，应手工编辑 `.y-zero/sandbox.json`（避免工具替用户改仓库文件）。
+2. `delta sandbox enable` 写**全局**还是可 `--project` 写项目（PRD §4.10 只提「改写全局配置」）。当前按 PRD 只写全局；若团队想要「把项目策略提交进仓库」，应手工编辑 `.delta/sandbox.json`（避免工具替用户改仓库文件）。
 3. 一次性网络放行（P1）、`cacheVolume`（P2）、命令级 override（P2）均已在设计中预留位（`tmpfs`/`env` 同构的配置面、`onNotice` 通道、`SandboxSessionOverrides` 可扩展），本期不实现。
 
 ## 17. §19 方案 C 补充：Seatbelt 主后端（2026-10-23 决策）

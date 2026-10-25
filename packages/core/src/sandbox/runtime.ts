@@ -47,7 +47,7 @@ export interface SandboxRuntimeDeps {
   cli?: DockerCli;
   /** seatbelt 执行端口（测试注入 FakeDockerCli 同形状）。缺省 realSeatbeltCli */
   seatbeltCli?: DockerCli;
-  /** seatbelt profile 落盘根目录（测试注入；缺省 os.tmpdir()/yzero-sbx） */
+  /** seatbelt profile 落盘根目录（测试注入；缺省 os.tmpdir()/delta-sbx） */
   profileRoot?: string;
   /**
    * 降级确认**独立通道**（D9）：不复用 ctx.confirm，避免 allow_session 污染
@@ -404,7 +404,7 @@ export class SandboxRuntime implements SandboxExecutor {
       if (names.length > 0) {
         this.notice({
           kind: 'gc_suggest',
-          detail: `发现 ${names.length} 个残留容器（上次运行未正常退出），建议执行 yzero sandbox gc`,
+          detail: `发现 ${names.length} 个残留容器（上次运行未正常退出），建议执行 delta sandbox gc`,
         });
       }
     } catch {

@@ -1,9 +1,9 @@
 {
-  "name": "@y-zero/cli",
+  "name": "@delta/cli",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "yzero": "./dist/index.js"
+    "delta": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -16,8 +16,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@y-zero/core": "workspace:*",
-    "@y-zero/shared": "workspace:*",
+    "@delta/core": "workspace:*",
+    "@delta/shared": "workspace:*",
     "commander": "^12.1.0",
     "ink": "^5.1.0",
     "ink-select-input": "^6.0.0",

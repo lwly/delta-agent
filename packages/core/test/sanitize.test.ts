@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage, ToolCall } from '@y-zero/shared';
+import type { ChatMessage, ToolCall } from '@delta/shared';
 import { sanitizeHistory } from '../src/llm/sanitize.js';
 
 const user = (content: string): ChatMessage => ({ role: 'user', content });

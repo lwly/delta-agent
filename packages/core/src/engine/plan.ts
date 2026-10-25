@@ -4,7 +4,7 @@
  * - topoLayers: Kahn 分层拓扑，层内可并行
  * - skipDownstream: 失败节点的全部后继标 skipped
  */
-import type { Plan, TaskNode } from '@y-zero/shared';
+import type { Plan, TaskNode } from '@delta/shared';
 
 export class PlanValidationError extends Error {
   constructor(message: string) {

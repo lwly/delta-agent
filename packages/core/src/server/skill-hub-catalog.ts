@@ -31,7 +31,7 @@ export const SEED_SKILLS: HubEntry[] = [
     description: '按结构化清单对当前改动做代码审查，输出分级问题报告（阻塞/建议/风格）',
     category: '代码质量',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['review', '审查', 'code review', '帮我看看代码'],
     toolsAllowlist: ['read_file', 'grep_search', 'glob_search', 'list_dir'],
     body: `# 代码审查清单
@@ -87,7 +87,7 @@ export const SEED_SKILLS: HubEntry[] = [
     description: '按 Conventional Commits 规范生成约定式提交信息，自动判断 type 与 scope',
     category: '提交协作',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['commit', '提交信息', 'commit message'],
     toolsAllowlist: ['run_command', 'read_file', 'grep_search'],
     body: `# 约定式提交（Conventional Commits）
@@ -147,7 +147,7 @@ removeSession 只清了 DB 记录，hub 侧 subscribe 缓存仍持有回调。
     description: '为指定模块编写单元测试：分析分支覆盖、构造边界用例、遵循既有测试风格',
     category: '测试',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['test', '单测', '写测试', 'unit test'],
     toolsAllowlist: ['read_file', 'glob_search', 'grep_search', 'write_file', 'run_tests'],
     body: `# 单元测试编写流程
@@ -184,7 +184,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '在保证行为不变的前提下执行安全重构：识别坏味道、小步快跑、每步可验证',
     category: '代码质量',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['refactor', '重构', '优化结构'],
     toolsAllowlist: ['read_file', 'edit_file', 'write_file', 'grep_search', 'glob_search', 'run_command', 'run_tests'],
     body: `# 安全重构流程
@@ -222,7 +222,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '设计或评审 REST API：资源建模、状态码、错误结构、分页与版本化规范',
     category: '设计',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['api', '接口设计', 'REST', 'api design'],
     toolsAllowlist: ['read_file', 'glob_search', 'grep_search', 'write_file'],
     body: `# REST API 设计规范
@@ -271,7 +271,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '系统化定位 Bug：从复现到根因的最短路径，输出定位链与修复建议',
     category: '测试',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['bug', '排查', '定位问题', 'triage'],
     toolsAllowlist: ['read_file', 'grep_search', 'glob_search', 'run_command', 'run_tests'],
     body: `# Bug 定位流程（复现 → 二分 → 根因）
@@ -305,7 +305,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '审查 SQL 与表结构变更：索引、锁、注入、迁移安全，逐项给出依据',
     category: '代码质量',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['sql', '数据库', 'sql review', '慢查询'],
     toolsAllowlist: ['read_file', 'grep_search', 'glob_search', 'run_command'],
     body: `# SQL 审查清单
@@ -340,7 +340,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '撰写面向读者的项目文档：README/API 说明/指南，强调可运行示例',
     category: '文档',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['docs', '文档', '写文档', 'readme'],
     toolsAllowlist: ['read_file', 'glob_search', 'write_file', 'run_command'],
     body: `# 技术文档撰写指南
@@ -382,7 +382,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: '性能问题排查：先测量后优化，CPU/内存/IO/渲染四象限定位法',
     category: '性能',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['性能', '慢', '优化', 'perf'],
     toolsAllowlist: ['read_file', 'grep_search', 'run_command', 'run_tests'],
     body: `# 性能排查流程
@@ -422,7 +422,7 @@ it('<条件> 时 <期望行为>（<为什么>）', async () => { ... });
     description: 'Git 协作工作流：分支策略、rebase/merge 选择、冲突解决与紧急回滚',
     category: '提交协作',
     version: '1.0.0',
-    author: 'y-zero-agent',
+    author: 'delta-agent',
     triggers: ['git', '分支', '合并', 'rebase'],
     toolsAllowlist: ['run_command', 'read_file'],
     body: `# Git 工作流速查

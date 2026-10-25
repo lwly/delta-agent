@@ -16,7 +16,7 @@ import type {
   Plan,
   ToolCall,
   ToolResult,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import { SessionStore } from '../src/session/store.js';
 import { TaskStore, emptyCheckpoint } from '../src/session/tasks.js';
 import {

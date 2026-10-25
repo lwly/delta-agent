@@ -1,6 +1,6 @@
 /**
  * F-17 语义检索：OpenAI 兼容 `/embeddings` 客户端 + 配置解析。
- * - 显式 env（YZERO_EMBEDDING_*）> 各厂商 env Key（DASHSCOPE/OPENAI）> 存储配置（~/.y-zero/models.json）
+ * - 显式 env（DELTA_EMBEDDING_*）> 各厂商 env Key（DASHSCOPE/OPENAI）> 存储配置（~/.delta/models.json）
  * - 解析失败/无 Key 返回 undefined（调用方降级为纯全文检索），不抛错。
  */
 import { loadModelsFile, modelsConfigPath, decryptKeyDetailed } from './keychain.js';
@@ -57,12 +57,12 @@ export class EmbeddingClient {
  * `modelsFile` 覆盖存储位置（DI / 测试用）。
  */
 export function resolveEmbedding(opts?: { modelsFile?: string }): EmbeddingClient | undefined {
-  const explicit = process.env.YZERO_EMBEDDING_API_KEY;
+  const explicit = process.env.DELTA_EMBEDDING_API_KEY;
   if (explicit) {
     return new EmbeddingClient({
       apiKey: explicit,
-      baseUrl: process.env.YZERO_EMBEDDING_BASE_URL ?? 'https://api.openai.com/v1',
-      model: process.env.YZERO_EMBEDDING_MODEL ?? 'text-embedding-3-small',
+      baseUrl: process.env.DELTA_EMBEDDING_BASE_URL ?? 'https://api.openai.com/v1',
+      model: process.env.DELTA_EMBEDDING_MODEL ?? 'text-embedding-3-small',
     });
   }
   if (process.env.DASHSCOPE_API_KEY) {
@@ -70,17 +70,17 @@ export function resolveEmbedding(opts?: { modelsFile?: string }): EmbeddingClien
     return new EmbeddingClient({
       apiKey: process.env.DASHSCOPE_API_KEY,
       baseUrl: qwen.baseUrl!,
-      model: process.env.YZERO_EMBEDDING_MODEL ?? qwen.model,
+      model: process.env.DELTA_EMBEDDING_MODEL ?? qwen.model,
     });
   }
   if (process.env.OPENAI_API_KEY) {
     return new EmbeddingClient({
       apiKey: process.env.OPENAI_API_KEY,
       baseUrl: 'https://api.openai.com/v1',
-      model: process.env.YZERO_EMBEDDING_MODEL ?? VENDOR_EMBEDDING.openai!.model,
+      model: process.env.DELTA_EMBEDDING_MODEL ?? VENDOR_EMBEDDING.openai!.model,
     });
   }
-  // env miss → 存储配置（`yzero models add` 保存的 openai 兼容厂商）
+  // env miss → 存储配置（`delta models add` 保存的 openai 兼容厂商）
   try {
     const data = loadModelsFile(opts?.modelsFile ?? modelsConfigPath());
     for (const p of data.providers) {
@@ -92,7 +92,7 @@ export function resolveEmbedding(opts?: { modelsFile?: string }): EmbeddingClien
       return new EmbeddingClient({
         apiKey: d.plain,
         baseUrl: p.baseUrl ?? emb.baseUrl ?? 'https://api.openai.com/v1',
-        model: process.env.YZERO_EMBEDDING_MODEL ?? emb.model,
+        model: process.env.DELTA_EMBEDDING_MODEL ?? emb.model,
       });
     }
   } catch {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 import {
   partition,
   foldToolResults,

@@ -5,7 +5,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { ConfirmDecision, ToolCall } from '@y-zero/shared';
+import type { ConfirmDecision, ToolCall } from '@delta/shared';
 import { SessionStore } from '../src/session/store.js';
 import { FileChangeStore, countLineDelta, MAX_SNAPSHOT_BYTES } from '../src/session/changes.js';
 import { ToolRegistry } from '../src/tools/registry.js';

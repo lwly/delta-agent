@@ -6,7 +6,7 @@
  * - 任务落库（租约 + 心跳），崩溃后可恢复
  * - checkpoint 幂等：文件变更清单执行期落库，重试/恢复时跳过已完成步骤
  */
-import type { AgentEvent, Plan, TaskNode } from '@y-zero/shared';
+import type { AgentEvent, Plan, TaskNode } from '@delta/shared';
 import type { RunContext } from './react.js';
 import { runSubTask } from './subtask.js';
 import { HEARTBEAT_MS, LEASE_MS } from '../session/tasks.js';

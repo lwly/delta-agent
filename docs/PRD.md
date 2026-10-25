@@ -1,7 +1,7 @@
-# y-zero-agent 产品需求文档（PRD）
+# delta-agent 产品需求文档（PRD）
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 状态：待评审
-> 产品名称：y-zero-agent —— AI 编程命令行工具（AI Coding Agent）
+> 产品名称：delta-agent —— AI 编程命令行工具（AI Coding Agent）
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### 1.1 一句话定位
 
-y-zero-agent 是一个基于 TypeScript 开发的 AI Coding Agent，以 CLI 为核心入口、Vue Web 控制台为可视化前端，支持 **ReAct / Plan-and-Execute / Multi-Agent** 三种执行模式，通过 MCP 协议动态扩展工具能力，帮助开发者在终端与浏览器中完成编码、调试、重构等软件工程任务。
+delta-agent 是一个基于 TypeScript 开发的 AI Coding Agent，以 CLI 为核心入口、Vue Web 控制台为可视化前端，支持 **ReAct / Plan-and-Execute / Multi-Agent** 三种执行模式，通过 MCP 协议动态扩展工具能力，帮助开发者在终端与浏览器中完成编码、调试、重构等软件工程任务。
 
 ### 1.2 背景与机会
 
@@ -72,7 +72,7 @@ y-zero-agent 是一个基于 TypeScript 开发的 AI Coding Agent，以 CLI 为�
 ### 3.1 功能架构总览
 
 ```
-y-zero-agent
+delta-agent
 ├── A. Agent 执行核心
 │   ├── A1 ReAct 主循环引擎（含预算管理、自动上下文压缩）
 │   ├── A2 Plan-and-Execute 模式
@@ -108,11 +108,11 @@ y-zero-agent
 | F-04a | 大模型配置管理 | Provider 配置增删改查：名称、类型（anthropic / openai-compatible / deepseek / qwen…）、Base URL、API Key、默认模型、参数（temperature / max_tokens / top_p）；Key 经系统钥匙串或本地加密文件存储、界面不回显；保存前连通性测试；支持配置启停与排序（决定下拉列表顺序）；CLI `agent models` 与 Web 设置页双入口 |
 | F-05 | ToolCall 分片累积解析 | 流式 delta 中 tool_call 分片按 index 累积拼接，结束时统一校验 JSON；兼容不同厂商分片格式差异 |
 | F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；✅ 记忆里程碑再加 save_memory / recall_memory 至 15 个（2026-10-22 交付）；✅ F-26 子代理工具再加 task 至 16 个（2026-10-22 交付） |
-| F-06a | 三层记忆系统 | L1 短期（会话消息列表）；L2 长期动态记忆（SQLite：SHA256 去重 → 配额检查 → FIFO+importance 淘汰的写入管线；词汇覆盖率 72%+重要性 12%+置信度 8%+时间衰减 6%+访问频率 2% 的召回评分）；L3 长期静态记忆（MEMORY.md/.y-zero/agent.md，团队共享、git 版本追踪）；工具再扩展 +2（save_memory / recall_memory，至 15 个）；自动提炼默认开启（可关闭），候选进"待确认"队列防记忆污染；Web 提供记忆管理面板（查看/编辑/停用/待确认）。详见 docs/memory-design.md |
+| F-06a | 三层记忆系统 | L1 短期（会话消息列表）；L2 长期动态记忆（SQLite：SHA256 去重 → 配额检查 → FIFO+importance 淘汰的写入管线；词汇覆盖率 72%+重要性 12%+置信度 8%+时间衰减 6%+访问频率 2% 的召回评分）；L3 长期静态记忆（MEMORY.md/.delta/agent.md，团队共享、git 版本追踪）；工具再扩展 +2（save_memory / recall_memory，至 15 个）；自动提炼默认开启（可关闭），候选进"待确认"队列防记忆污染；Web 提供记忆管理面板（查看/编辑/停用/待确认）。详见 docs/memory-design.md |
 | F-07 | MCP 动态扩展 | stdio + SSE 两种 MCP transport；`agent mcp add/list/remove`；MCP 工具与内置工具统一注册 |
 | F-08 | 多工具并行执行 | 模型单轮返回多个 tool_call 时并行执行（Promise.allSettled），结果按序回填 |
 | F-09 | 7 层系统提示词组装 | 见 §3.4；启动时组装一次，工具/技能变更时增量重组装；静态段（人格/准则/项目/工具）hash 缓存复用并对齐 Provider prompt cache 前缀，动态段（时间/模型/记忆/Skill 索引）每轮注入，模式提示词（Plan/ReAct/Team）最后追加。详见 docs/prompt-design.md |
-| F-10 | 三级覆盖机制 | 内置默认 < 项目级（`.y-zero/` 目录） < 对话级（运行时覆盖），逐层 merge |
+| F-10 | 三级覆盖机制 | 内置默认 < 项目级（`.delta/` 目录） < 对话级（运行时覆盖），逐层 merge |
 | F-11 | 多项目 × 多对话 | 项目注册/切换；项目下多对话；对话持久化（本地存储），可恢复继续 |
 | F-11a | 项目/会话移除 | 会话删除（CLI `agent session rm` + Web 右键/悬浮删除）默认软删除（回收站保留 30 天，可彻底清除）；项目移除需输入项目名二次确认，级联软删除其下会话；正在运行的会话先中止再删除；软删除数据不参与上下文与检索 |
 | F-12 | Vue Web 控制台 | 项目管理、对话管理、对话可视化（含工具调用卡片）、模型配置、记忆面板；**纯本地部署**：静态资源内嵌 CLI 包 + `agent serve` 本地 server（默认 127.0.0.1:7900） |
@@ -127,8 +127,8 @@ y-zero-agent
 | F-15 | Multi-Agent 模式 | 四角色闭环：编排器（纯调度）→ 规划者（产出 DAG，可按反馈调整）→ 执行者并行工作池（节点级隔离上下文）→ 检查者（质量检查，不通过返回规划者或重试，上限可配默认 2）；**完整角色集为四层十角色**（决策/执行/质量/协调层），MVP 实现核心五角色（Orchestrator/Planner/Worker/Reviewer/Verifier），Researcher/Writer/Tool Caller/Memory Keeper/Router 按任务类型动态启用。详见 docs/agent-modes-design.md §4——✅ 2026-10-23 增量交付（代码核验）：multi-agent 接入 F-14 计划确认流（规划后 approve / edit（validatePlan 校验，非法回退原计划）/ reject 取消执行；hub 与 TUI 双端接线，TUI 拒绝语义=取消本次任务）；编排层用量入账闭环（planner/classifier/reviewer/summarize 增 onUsage 回调 → settleUsage 统一 record 预算 + 发 usage 事件，worker 用量经泵截获累计，done.usage 真实反映整轮用量）；修复子任务内层 done/error/budget_exhausted 外传导致消费端误判运行结束的问题；单测 8 例（orchestrator.test.ts：审批四路 + 确认流故障降级 + 用量入账 + 生命周期过滤） |
 | F-15a | Worker Pool 并行调度 | 共享任务队列，多 worker 竞争领取（默认 4，可配 1–8）；审查失败任务回队首重新排队；节点状态以事件流推送 CLI/Web。详见 docs/agent-modes-design.md §5 |
 | F-15b | 后台任务可靠恢复 | 任务状态机（queued/running/completed/failed/canceled）持久化 SQLite；租约 60s + 心跳 15s 防重复执行；启动时扫描孤儿任务（租约过期）回队列重排；checkpoint 幂等重试。详见 docs/agent-modes-design.md §6 |
-| F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.y-zero/skills < 项目级 .y-zero/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |
-| F-17 | 对话检索 | 全文/语义搜索历史对话——✅ 2026-10-22 交付：SQLite FTS5 全文索引（中文 bigram 预分词，随写入同步 + 存量懒回填 + 硬删级联清理）+ 语义向量（OpenAI 兼容 /embeddings，Float32 BLOB 入库，余弦相似度，模型切换自动重建）；RRF 混合排序，embedding 不可用自动降级全文；`yzero search` 子命令 + TUI `/search` + `GET /api/search/messages` + Web 项目页消息命中列表（含片段与命中方式标注） |
+| F-16 | Skills 系统 | **三层覆盖**：内置 < 用户级 ~/.delta/skills < 项目级 .delta/skills（同名覆盖，离项目越近优先级越高）；包结构 SKILL.md + references/ + scripts/ 按需加载；**两阶段加载**：索引常驻 Prompt → `load_skill` 工具读取全文写入跨轮次缓冲区 → 下一轮注入生效（工具扩展至 14 个）；**匹配评分**：精确命中 +10000、名称×12、标签×6、描述×2，滑动窗口中文分词提高召回。详见 docs/agent-modes-design.md §7 |
+| F-17 | 对话检索 | 全文/语义搜索历史对话——✅ 2026-10-22 交付：SQLite FTS5 全文索引（中文 bigram 预分词，随写入同步 + 存量懒回填 + 硬删级联清理）+ 语义向量（OpenAI 兼容 /embeddings，Float32 BLOB 入库，余弦相似度，模型切换自动重建）；RRF 混合排序，embedding 不可用自动降级全文；`delta search` 子命令 + TUI `/search` + `GET /api/search/messages` + Web 项目页消息命中列表（含片段与命中方式标注） |
 | F-18 | 会话回放 | 以时间线回放一次任务的完整执行轨迹（含工具调用）——✅ 2026-10-22 交付：按 user 消息切分任务边界，GET /runs 与 /runs/:index，Web 回放页（任务列表 + 时间线 + 工具调用/结果按 callId 配对），CLI/Web 入口 |
 
 #### P2 —— 远期
@@ -138,20 +138,20 @@ y-zero-agent
 | F-19 | 远程会话同步 | 会话云端同步，多设备续接 |
 | F-20 | 团队协作 | 项目/会话共享，权限管理 |
 | F-21 | 插件市场 | MCP Server 与 Skill 的一键安装市场 |
-| F-22 | 定时任务/自动化 | Agent 任务的 cron 调度——✅ 2026-10-23 交付（代码核验）：core/cron 内核（5 字段 cron 解析 + nextRun 纯函数本地时区 / `~/.y-zero/cron.json` 存储（CRUD + tmp+rename 原子写 + 坏 JSON 拒写降级 + 运行历史 20 条滚动）/ 到期执行编排（runningSince 跨进程运行锁 + 崩溃残留 24h 自动解除 + 失败隔离 + 补跑语义）/ 常驻 tick 调度循环（busy 保护 + signal 停止））+ CLI `yzero cron list/add/remove/enable/disable/run/daemon`（daemon 支持 `--once` 配合系统 cron）+ 默认执行器 spawn `yzero run --json` 子进程完全隔离（超时 30min SIGTERM 记 timeout，输出解析失败收敛 error）；单测 36 例（parse 15 / store 9 / runner+scheduler 12）+ 隔离 HOME 端到端冒烟；✅ Web 调度面板（2026-10-23 增量）：/api/cron 端点组（清单/增改删/立即运行 202+锁轮询，cronHomeDir 注入隔离，snake_case 传输）+ 工作台「⏰ 定时」CronModal 弹窗（任务卡/新增/启停/删除二次确认/立即运行轮询/运行历史），与 CLI 共用 ~/.y-zero/cron.json 与 spawn 执行器，端点单测 6 例 + serve 冒烟；详见 docs/design-f22-cron.md |
+| F-22 | 定时任务/自动化 | Agent 任务的 cron 调度——✅ 2026-10-23 交付（代码核验）：core/cron 内核（5 字段 cron 解析 + nextRun 纯函数本地时区 / `~/.delta/cron.json` 存储（CRUD + tmp+rename 原子写 + 坏 JSON 拒写降级 + 运行历史 20 条滚动）/ 到期执行编排（runningSince 跨进程运行锁 + 崩溃残留 24h 自动解除 + 失败隔离 + 补跑语义）/ 常驻 tick 调度循环（busy 保护 + signal 停止））+ CLI `delta cron list/add/remove/enable/disable/run/daemon`（daemon 支持 `--once` 配合系统 cron）+ 默认执行器 spawn `delta run --json` 子进程完全隔离（超时 30min SIGTERM 记 timeout，输出解析失败收敛 error）；单测 36 例（parse 15 / store 9 / runner+scheduler 12）+ 隔离 HOME 端到端冒烟；✅ Web 调度面板（2026-10-23 增量）：/api/cron 端点组（清单/增改删/立即运行 202+锁轮询，cronHomeDir 注入隔离，snake_case 传输）+ 工作台「⏰ 定时」CronModal 弹窗（任务卡/新增/启停/删除二次确认/立即运行轮询/运行历史），与 CLI 共用 ~/.delta/cron.json 与 spawn 执行器，端点单测 6 例 + serve 冒烟；详见 docs/design-f22-cron.md |
 | F-23 | 权限模式体系 | 三级模式：`plan`（只读，禁写禁执行）/ `default`（写需确认）/ `yolo`（全放行，双重开启）；工具级 allowlist 规则 + "本会话不再询问"；Web/CLI 统一确认协议——✅ 已交付（代码核验 2026-10-22：PermissionState 三级模式 + allowlist + sessionAllowed 记忆） |
 | F-24 | 文件变更管理 | 每次写操作前自动快照（checkpoint）；会话级 diff 汇总；一键回滚到任意检查点；git 集成（建议分支/自动 commit 策略）——与 agent-modes-design §6 任务恢复 checkpoint 打通——✅ 已交付（代码核验 2026-10-22：FileChangeStore + `/changes` + `/rollback` + git suggest/auto 策略） |
-| F-25 | 多模态输入 | 消息支持图片附件（截图报错/UI 走查），视觉模型透传；图片 token 计价与压缩策略——✅ 2026-10-22 交付：`ChatMessage.images`（png/jpeg/gif/webp 魔数嗅探防伪造后缀）；压缩策略：单张 ≤4MB、单条 ≤5 张（超限拒绝并提示，不做有损重编码避免原生图像库依赖）；token 计价按「封顶面积/750」（长边 1568px 封顶，≈Anthropic 口径；无尺寸时按原始字节退化估算并封顶 1600）；Provider 透传：Anthropic content block（`image` + base64 source）/ OpenAI 兼容 content parts（`image_url` data URL，覆盖 openai/deepseek/qwen）；三端入口：CLI `/image <路径...>` 暂存随下一条消息发送、Headless `yzero run --image <path>`（可重复）、Web 聊天输入区 🖼 附件（前端预览/预检 + 服务端二次校验）；附件随 user 消息整体 JSON 落库（messages.content_json，无需 Schema 迁移）；预算/压缩自动计入图片 token；单测 18 例（嗅探/尺寸解析/计价/校验/双 Provider 映射/token 估算） |
+| F-25 | 多模态输入 | 消息支持图片附件（截图报错/UI 走查），视觉模型透传；图片 token 计价与压缩策略——✅ 2026-10-22 交付：`ChatMessage.images`（png/jpeg/gif/webp 魔数嗅探防伪造后缀）；压缩策略：单张 ≤4MB、单条 ≤5 张（超限拒绝并提示，不做有损重编码避免原生图像库依赖）；token 计价按「封顶面积/750」（长边 1568px 封顶，≈Anthropic 口径；无尺寸时按原始字节退化估算并封顶 1600）；Provider 透传：Anthropic content block（`image` + base64 source）/ OpenAI 兼容 content parts（`image_url` data URL，覆盖 openai/deepseek/qwen）；三端入口：CLI `/image <路径...>` 暂存随下一条消息发送、Headless `delta run --image <path>`（可重复）、Web 聊天输入区 🖼 附件（前端预览/预检 + 服务端二次校验）；附件随 user 消息整体 JSON 落库（messages.content_json，无需 Schema 迁移）；预算/压缩自动计入图片 token；单测 18 例（嗅探/尺寸解析/计价/校验/双 Provider 映射/token 估算） |
 | F-26 | 子代理即工具（Task 工具） | 主循环中模型可自主派生隔离子代理执行探索/搜索类任务，结果摘要回填主上下文（区别于 Multi-Agent 的引擎级编排）——✅ 2026-10-22 交付：`task` 内置工具（16 个）；子代理复用 ReAct 主循环（预算/压缩/自愈同源），上下文隔离（独立消息循环、历史不落主会话）、工具隔离（RestrictedRegistry 只读白名单 read/list/glob/grep/web_fetch/todo + plan 权限模式双保险）、成本隔离（独立 BudgetManager + 用量回写父预算保持会话费用口径完整）、深度上限（子代理不可再派生）；无确认流/无交互（ask 自动应答）；三端注入（TUI App / Web Hub / Headless run）；最终汇报截断 4000 字回填，meta 带 turns/tool_calls/usage；单测 7 例（回填、只读强制不落盘、未注入降级、深度上限、脚本耗尽） |
-| F-27 | Hook 系统 | 生命周期钩子：PreToolUse / PostToolUse / SessionStart / SessionEnd / Stop；用户注入自定义逻辑（保存前 lint、禁改 main、结束后跑测试）——✅ 2026-10-22 交付：配置 `~/.y-zero/hooks.json`（用户级）+ `.y-zero/hooks.json`（项目级，两级都执行用户先项目后），`{hooks:[{event,tool?,command,timeout_ms?}]}`；事件上下文以 JSON 写入钩子 stdin（event/session_id/project_id/tool/args/result）；退出码语义：PreToolUse exit 2=阻断（stderr 回传模型为 hook_blocked，调整方案引导）其余非 0 与超时=告警放行，PostToolUse/生命周期仅记录永不影响主流程；注册表接线（PreToolUse 在权限判定前、PostToolUse 旁路异步）；生命周期：TUI（挂载/每轮 finally/卸载）、Web Hub（会话首跑/每轮 finally）、Headless run（起止）三端触发；`yzero hooks` 查看配置；钩子输出观察口接 CLI stderr 告警；单测 17 例（加载合并/匹配/阻断/payload/超时/注册表集成） |
-| F-28 | Evals 评测体系 | 本地任务基准集；多 Provider 横向对比报告；提示词/压缩参数变更后的回归保护——✅ 2026-10-22 交付：内置基准集 `builtin-core`（5 用例：算术/文件读取/目录检索/纯文本禁工具/组合任务）+ 自定义 JSON 套件（`--suite`，`.y-zero/evals/suite.json` 自动发现）；确定性判分 7 种 checks（completed/result_contains/result_not_contains/tool_used/tool_used_any/tool_not_used/no_tools + max_turns/max_cost_usd 上限），无 LLM 评审保证回归对比可复现；复用 F-29 headless 内核逐用例隔离运行（独立会话/预算/权限状态）；`yzero evals list/run/baseline`——run 支持多 Provider 横评（`--provider a,b,c` → 对比表 + 综合最优标注，`--only/--tag` 过滤，`--output` 落 Markdown）；回归保护：`baseline --save` 存基线（.y-zero/evals/baseline.json，逐用例通过状态）+ `baseline --check` 逐用例对比（通过→失败即回归，退出码 1 供 CI 拦截；改进/新增/移除分别标注）；单测 19 例（判分/运行器/套件校验/报告/基线往返与回归检测）；顺带修复 CLI 根命令与子命令同名选项（--model/--provider/--db）被父级遮蔽丢失的问题（enablePositionalOptions） |
-| F-29 | Headless / SDK 形态 | 非交互运行 `agent -p "任务" --json`；退出码协议；结构化输出，供 CI 流水线与脚本集成——✅ 2026-10-22 交付：`yzero run "任务"`（裸任务 `yzero "任务"` 自动路由，`-p/--prompt` 等价）；`--json` 输出单份 snake_case JSON 报告（result/usage/tool_calls/todos/denied_confirmations/error/exit_code）；退出码协议 0 成功 / 1 配置错误 / 2 引擎致命错误 / 3 达最大轮次 / 4 预算耗尽 / 5 SIGINT 中断；非交互语义：高危确认自动拒绝（记录在案）、ask_user 自动应答、计划自动批准，写任务放行用 `--allow`/`--permission yolo`；`--output` 落文件、`--max-cost` 费用预算、`-r` 续会话、git auto 策略成功后自动提交；内核 `packages/core/src/headless.ts` 不触碰 stdio，可作 SDK 复用，单测覆盖 5 种状态 × 退出码映射 |
-| F-30 | 容器级沙箱 | `run_command` 可选沙箱执行模式，隔离高危命令（现有白名单+确认之外的增强）——**方案 C（2026-10-23 裁定）**：macOS 原生 Seatbelt（sandbox-exec）为主隔离后端，Docker 保留为可选后端；配置 `{"mode":"seatbelt"}` 即启用。已交付：内核（配置/探测/参数组装/执行器/降级编排 + SeatbeltExecutor）、headless sandbox 上报段、工具接线测试（Z1 golden 逐字符一致 + AC-30-4 逃逸零调用 + run_tests 历史口径锁定）、`yzero sandbox status/enable/disable/pull/gc` 子命令组（enable/disable 原子写只改 mode）、三端徽标（CLI 工具卡片 🛡 / Web 实时 SSE 徽标（历史回看不显示，R8）/ headless JSON sandbox 段）；挂起：Docker 集成测试（等有 Docker daemon 环境再补，单测已用 Fake 端口全覆盖） |
-| F-31 | 成本与用量报告 | 按项目/会话/模型的费用统计面板；预算分级告警（现有 session 级预算之上）——✅ 2026-10-23 交付（代码核验）：v3 迁移（usage 表补 model/created_at 并回填，session/migrations.ts）+ 聚合查询层 UsageStore（summary 按 totals/byProject/byModel 三路聚合 + bySession 逐会话明细，range today/7d/30d/all 归一化、软删除沉没成本口径，session/usage.ts）+ 双端点 GET /api/usage/summary、/api/usage/sessions（server/http.ts）+ Web 用量面板（范围切换/项目筛选/总览卡/三分组占比条，web UsageView.vue + /usage 路由）+ `yzero usage`（--range/--project 支持 id 或名称/--json 与 API 同构，cli/usage.ts）+ 预算分级告警 BudgetManager.takeAlert() 50/80/100 一次性状态机（record 后立即判定，react.ts 发 budget_alert）三端消费（TUI app.tsx / headless-run.ts / Web chat.ts）+ hub 逐轮落库带 model；单测 usage.test.ts 16 例 + budget takeAlert 7 例 + react 事件 3 例 + smoke-web 2 例；详见 docs/design-f31-cost-report.md |
-| F-32 | 模型路由 | 按任务难度自动选模型：分类/提炼/摘要用小模型，规划与执行用大模型；可配路由规则——✅ 2026-10-23 交付（代码核验）：ModelRouter（resolve(kind)/config，规则存 ~/.y-zero/models.json routing 字段，KNOWN_TASK_KINDS distill/classify/summarize + 任意扩展 kind，异常/缺配置一律返回 undefined 回退主模型，llm/router.ts）+ 规则存取 ProviderManager.getRouting/setRouting（写入校验 model 非空，与 provider CRUD 同文件互不覆盖，llm/manager.ts）+ hub 运行时接线 routeAux(kind)（provider 构建失败捕获回退，server/hub.ts），distill 接入点（done 分支记忆提炼走小模型；压缩/规划/执行按决议 #10 固定主模型不路由）+ CLI `models routing/routing-set/routing-remove/routing-on/routing-off` 五子命令（cli/src/index.ts）+ serve 装配；单测 router.test.ts 9 例（含规则容错与 ProviderManager CRUD 共存）；classify/summarize 运行时接入点与 Web 设置页路由卡片为设计预留位，详见 docs/design-f32-model-routing.md |
-| F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知）——✅ 2026-10-23 交付：DesktopNotifier（macOS osascript / Windows PowerShell BalloonTip / Linux notify-send，其它平台 no-op）+ 两级配置（~/.y-zero/notify.json < .y-zero/notify.json：enabled/onDone/onConfirm/minDurationMs 默认 30s 防噪）+ 三端接线（TUI App / Web SessionHub / Headless run）+ `yzero notify status/enable/disable/test`；旁路 fire-and-forget（detached spawn、10s 超时强杀、失败静默），引擎零改动；详见 docs/design-f33-desktop-notify.md |
-| F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认——✅ 2026-10-23 交付：ensureProject 带 `created` 标记三端自动触发（TUI/serve 后台、headless 同步）+ scanProjectLayout 只读扫描（限深限条、跳过噪声目录）+ 一次 LLM 调用生成草案（.y-zero/agent.md.draft / MEMORY.md.draft + 状态 .y-zero/onboarding.json）+ `yzero onboarding status/run/confirm/skip`（confirm 目标存在绝不覆盖，提示手工合并）；失败静默状态留 pending 可重试，`auto:false` 可关；详见 docs/design-f34-project-onboarding.md |
-| F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理）——✅ 2026-10-22 交付：`session/migrations.ts` 迁移列表（version/name/sql），版本号存 `PRAGMA user_version`，每迁移独立事务原子生效，SQL 强制幂等使空库与历史库收敛到最新；打开数据库自动执行，版本高于程序支持时拒绝打开防降级写坏；`yzero migrate` 核对版本与迁移历史；v1 baseline 核心表 + v2 F-17 检索索引 |
+| F-27 | Hook 系统 | 生命周期钩子：PreToolUse / PostToolUse / SessionStart / SessionEnd / Stop；用户注入自定义逻辑（保存前 lint、禁改 main、结束后跑测试）——✅ 2026-10-22 交付：配置 `~/.delta/hooks.json`（用户级）+ `.delta/hooks.json`（项目级，两级都执行用户先项目后），`{hooks:[{event,tool?,command,timeout_ms?}]}`；事件上下文以 JSON 写入钩子 stdin（event/session_id/project_id/tool/args/result）；退出码语义：PreToolUse exit 2=阻断（stderr 回传模型为 hook_blocked，调整方案引导）其余非 0 与超时=告警放行，PostToolUse/生命周期仅记录永不影响主流程；注册表接线（PreToolUse 在权限判定前、PostToolUse 旁路异步）；生命周期：TUI（挂载/每轮 finally/卸载）、Web Hub（会话首跑/每轮 finally）、Headless run（起止）三端触发；`delta hooks` 查看配置；钩子输出观察口接 CLI stderr 告警；单测 17 例（加载合并/匹配/阻断/payload/超时/注册表集成） |
+| F-28 | Evals 评测体系 | 本地任务基准集；多 Provider 横向对比报告；提示词/压缩参数变更后的回归保护——✅ 2026-10-22 交付：内置基准集 `builtin-core`（5 用例：算术/文件读取/目录检索/纯文本禁工具/组合任务）+ 自定义 JSON 套件（`--suite`，`.delta/evals/suite.json` 自动发现）；确定性判分 7 种 checks（completed/result_contains/result_not_contains/tool_used/tool_used_any/tool_not_used/no_tools + max_turns/max_cost_usd 上限），无 LLM 评审保证回归对比可复现；复用 F-29 headless 内核逐用例隔离运行（独立会话/预算/权限状态）；`delta evals list/run/baseline`——run 支持多 Provider 横评（`--provider a,b,c` → 对比表 + 综合最优标注，`--only/--tag` 过滤，`--output` 落 Markdown）；回归保护：`baseline --save` 存基线（.delta/evals/baseline.json，逐用例通过状态）+ `baseline --check` 逐用例对比（通过→失败即回归，退出码 1 供 CI 拦截；改进/新增/移除分别标注）；单测 19 例（判分/运行器/套件校验/报告/基线往返与回归检测）；顺带修复 CLI 根命令与子命令同名选项（--model/--provider/--db）被父级遮蔽丢失的问题（enablePositionalOptions） |
+| F-29 | Headless / SDK 形态 | 非交互运行 `agent -p "任务" --json`；退出码协议；结构化输出，供 CI 流水线与脚本集成——✅ 2026-10-22 交付：`delta run "任务"`（裸任务 `delta "任务"` 自动路由，`-p/--prompt` 等价）；`--json` 输出单份 snake_case JSON 报告（result/usage/tool_calls/todos/denied_confirmations/error/exit_code）；退出码协议 0 成功 / 1 配置错误 / 2 引擎致命错误 / 3 达最大轮次 / 4 预算耗尽 / 5 SIGINT 中断；非交互语义：高危确认自动拒绝（记录在案）、ask_user 自动应答、计划自动批准，写任务放行用 `--allow`/`--permission yolo`；`--output` 落文件、`--max-cost` 费用预算、`-r` 续会话、git auto 策略成功后自动提交；内核 `packages/core/src/headless.ts` 不触碰 stdio，可作 SDK 复用，单测覆盖 5 种状态 × 退出码映射 |
+| F-30 | 容器级沙箱 | `run_command` 可选沙箱执行模式，隔离高危命令（现有白名单+确认之外的增强）——**方案 C（2026-10-23 裁定）**：macOS 原生 Seatbelt（sandbox-exec）为主隔离后端，Docker 保留为可选后端；配置 `{"mode":"seatbelt"}` 即启用。已交付：内核（配置/探测/参数组装/执行器/降级编排 + SeatbeltExecutor）、headless sandbox 上报段、工具接线测试（Z1 golden 逐字符一致 + AC-30-4 逃逸零调用 + run_tests 历史口径锁定）、`delta sandbox status/enable/disable/pull/gc` 子命令组（enable/disable 原子写只改 mode）、三端徽标（CLI 工具卡片 🛡 / Web 实时 SSE 徽标（历史回看不显示，R8）/ headless JSON sandbox 段）；挂起：Docker 集成测试（等有 Docker daemon 环境再补，单测已用 Fake 端口全覆盖） |
+| F-31 | 成本与用量报告 | 按项目/会话/模型的费用统计面板；预算分级告警（现有 session 级预算之上）——✅ 2026-10-23 交付（代码核验）：v3 迁移（usage 表补 model/created_at 并回填，session/migrations.ts）+ 聚合查询层 UsageStore（summary 按 totals/byProject/byModel 三路聚合 + bySession 逐会话明细，range today/7d/30d/all 归一化、软删除沉没成本口径，session/usage.ts）+ 双端点 GET /api/usage/summary、/api/usage/sessions（server/http.ts）+ Web 用量面板（范围切换/项目筛选/总览卡/三分组占比条，web UsageView.vue + /usage 路由）+ `delta usage`（--range/--project 支持 id 或名称/--json 与 API 同构，cli/usage.ts）+ 预算分级告警 BudgetManager.takeAlert() 50/80/100 一次性状态机（record 后立即判定，react.ts 发 budget_alert）三端消费（TUI app.tsx / headless-run.ts / Web chat.ts）+ hub 逐轮落库带 model；单测 usage.test.ts 16 例 + budget takeAlert 7 例 + react 事件 3 例 + smoke-web 2 例；详见 docs/design-f31-cost-report.md |
+| F-32 | 模型路由 | 按任务难度自动选模型：分类/提炼/摘要用小模型，规划与执行用大模型；可配路由规则——✅ 2026-10-23 交付（代码核验）：ModelRouter（resolve(kind)/config，规则存 ~/.delta/models.json routing 字段，KNOWN_TASK_KINDS distill/classify/summarize + 任意扩展 kind，异常/缺配置一律返回 undefined 回退主模型，llm/router.ts）+ 规则存取 ProviderManager.getRouting/setRouting（写入校验 model 非空，与 provider CRUD 同文件互不覆盖，llm/manager.ts）+ hub 运行时接线 routeAux(kind)（provider 构建失败捕获回退，server/hub.ts），distill 接入点（done 分支记忆提炼走小模型；压缩/规划/执行按决议 #10 固定主模型不路由）+ CLI `models routing/routing-set/routing-remove/routing-on/routing-off` 五子命令（cli/src/index.ts）+ serve 装配；单测 router.test.ts 9 例（含规则容错与 ProviderManager CRUD 共存）；classify/summarize 运行时接入点与 Web 设置页路由卡片为设计预留位，详见 docs/design-f32-model-routing.md |
+| F-33 | 桌面通知 | 长任务完成、需人工确认时系统级通知（macOS 通知中心 / Windows 通知）——✅ 2026-10-23 交付：DesktopNotifier（macOS osascript / Windows PowerShell BalloonTip / Linux notify-send，其它平台 no-op）+ 两级配置（~/.delta/notify.json < .delta/notify.json：enabled/onDone/onConfirm/minDurationMs 默认 30s 防噪）+ 三端接线（TUI App / Web SessionHub / Headless run）+ `delta notify status/enable/disable/test`；旁路 fire-and-forget（detached spawn、10s 超时强杀、失败静默），引擎零改动；详见 docs/design-f33-desktop-notify.md |
+| F-34 | 项目 onboarding | 新项目首次启动自动扫描：生成项目摘要、目录结构、初始静态记忆，引导确认——✅ 2026-10-23 交付：ensureProject 带 `created` 标记三端自动触发（TUI/serve 后台、headless 同步）+ scanProjectLayout 只读扫描（限深限条、跳过噪声目录）+ 一次 LLM 调用生成草案（.delta/agent.md.draft / MEMORY.md.draft + 状态 .delta/onboarding.json）+ `delta onboarding status/run/confirm/skip`（confirm 目标存在绝不覆盖，提示手工合并）；失败静默状态留 pending 可重试，`auto:false` 可关；详见 docs/design-f34-project-onboarding.md |
+| F-35 | Schema migration | SQLite 版本升级的数据迁移机制（migrations 目录 + 版本号管理）——✅ 2026-10-22 交付：`session/migrations.ts` 迁移列表（version/name/sql），版本号存 `PRAGMA user_version`，每迁移独立事务原子生效，SQL 强制幂等使空库与历史库收敛到最新；打开数据库自动执行，版本高于程序支持时拒绝打开防降级写坏；`delta migrate` 核对版本与迁移历史；v1 baseline 核心表 + v2 F-17 检索索引 |
 | F-36 | CLI TUI 细节 | diff 彩色渲染、任务进度条、流式输出光标、主题适配——✅ 2026-10-23 交付：行级 diff 生成（core diffLines LCS + compactDiff 上下文折叠/截断，超大文件降级占位，单测 8 例）+ DiffView 彩色渲染（edit/write 工具结果自动附 diff，取 FileChangeStore 快照；edit_file 确认卡新旧内容彩色对照）+ 运行状态行动态化（盲文 spinner + 当前轮次 + 有限 maxTurns 进度条 + tokens/费用）+ todo_write 后即时 N/M 进度 + 流式光标（assistant/thinking 尾部 ▋，运行结束收起）+ thinking_delta 可见（暗色流式块，不入库）+ 主题集中（ui/theme.ts 语义色 token + 图标常量，NO_COLOR 全色降级，零新增依赖）；详见 docs/design-f36-cli-tui.md |
 | F-37 | git 分支切换 + Worktree 会话级隔离 | 底栏三段式「项目名 + 当前分支 + Worktree 开关」（TUI `/branch`、`/worktree` 与 Web 底栏双端一致）：分支选择为**会话内 checkout**（影响当前会话工作根，非全局切换）；勾选 Worktree 自动 `git worktree add` 独立目录（仓库外 `../<repo>.worktrees/<sessionId8>`）并切换会话工作根，可随时切回主工作区；核心逻辑落 core WorktreeManager 双端复用；运行中禁切、脏工作区禁 checkout、沙箱/权限/沙箱根随工作根联动、GitPolicy 与 F-24 变更管理跟随当前工作根；详见 docs/prd-f37-git-worktree.md |
 
@@ -194,7 +194,7 @@ L7 Session         对话级临时指令（运行时覆盖）
 | 级别 | 来源 | 位置 | 可覆盖层 |
 |------|------|------|----------|
 | L1 内置级 | 包内默认模板 | `packages/core/prompts/` | — |
-| L2 项目级 | `.y-zero/agent.md`、`.y-zero/settings.json` | 项目根目录 | L3–L6 |
+| L2 项目级 | `.delta/agent.md`、`.delta/settings.json` | 项目根目录 | L3–L6 |
 | L3 对话级 | 运行时参数 / Web 控制台设置 | 会话配置 | L5–L7 |
 
 合并规则：同名 section 深度合并，数组取并集，L1 安全基线不可被覆盖；最终组装结果在 debug 模式可导出审查。
@@ -236,11 +236,11 @@ Web 控制台
 
 | 里程碑 | 范围 | 交付物 |
 |--------|------|--------|
-| M1（4 周） | Agent 核心：ReAct 引擎 + 预算 + 压缩 + 11 工具 + 单 Provider + ink TUI 确认卡 | CLI 可用（命令名 `yzero`） |
+| M1（4 周） | Agent 核心：ReAct 引擎 + 预算 + 压缩 + 11 工具 + 单 Provider + ink TUI 确认卡 | CLI 可用（命令名 `delta`） |
 | M2（3 周） | 接入层：4 家 Provider SSE（Anthropic / OpenAI 兼容 / DeepSeek / Qwen）+ ToolCall 分片解析 + MCP 扩展 + 并行工具 | 多模型 + MCP |
 | M3（3 周） | 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段按需加载/匹配评分（内置 commit-review / test-fix / project-summarize） | 提示词架构 ✅ 2026-10-22 交付（5 commits，141 tests） |
 | M4（4 周） | Web 控制台：多项目多对话 + 对话可视化 + 设置中心 + 记忆面板 | Vue 前端 ✅ 2026-10-22 交付（7 任务/7 commits，167 tests + Web 冒烟 7/7；记忆面板为空态，接记忆里程碑；Plan/Multi-Agent 模式 UI 已预留） |
-| 记忆里程碑 | 三层记忆系统（F-06a）：L2 动态记忆 + save/recall 工具 + 自动提炼 + Web 面板 | ✅ 2026-10-22 交付：memories 表写入管线（SHA256 去重 → 配额 512 条 → FIFO+importance 淘汰 → 冲突 superseded）、召回评分（覆盖率 0.72/重要性 0.12/置信度 0.08/时间衰减 0.06/频率 0.02，阈值 0.25，召回即反馈）、save_memory/recall_memory 工具（15 个内置）、小模型自动提炼 0-3 条进待确认队列、Top-K 注入动态 Prompt、Web 记忆面板（列表/编辑/停用/回收站/采纳/召回预览）、CLI `yzero memory list/export/rm`（207 tests + Web 冒烟全绿） |
+| 记忆里程碑 | 三层记忆系统（F-06a）：L2 动态记忆 + save/recall 工具 + 自动提炼 + Web 面板 | ✅ 2026-10-22 交付：memories 表写入管线（SHA256 去重 → 配额 512 条 → FIFO+importance 淘汰 → 冲突 superseded）、召回评分（覆盖率 0.72/重要性 0.12/置信度 0.08/时间衰减 0.06/频率 0.02，阈值 0.25，召回即反馈）、save_memory/recall_memory 工具（15 个内置）、小模型自动提炼 0-3 条进待确认队列、Top-K 注入动态 Prompt、Web 记忆面板（列表/编辑/停用/回收站/采纳/召回预览）、CLI `delta memory list/export/rm`（207 tests + Web 冒烟全绿） |
 | M5（2 周） | Plan DAG 引擎 + Worker Pool + Reviewer 闭环 + 任务恢复 + 跨平台加固 | ✅ 2026-10-22 交付：Plan-and-Execute（简单任务检测 + Planner DAG + 拓扑分层并行）、Multi-Agent 闭环（Worker Pool 竞争领取 + Reviewer/Verifier 打回重试）、任务恢复（tasks 表 + 60s 租约 + 15s 心跳 + 孤儿扫描）、跨平台加固（ShellAdapter PS→cmd 降级 + CI matrix）；CLI `--mode` / Web 模式分发接通 |
 
 ---
@@ -254,7 +254,7 @@ Web 控制台
 | 3 | 确认策略默认值 | 高危工具（write_file / edit_file / run_command）默认**每次确认**；yolo 模式需双重开启（会话级 + 配置级） |
 | 4 | Multi-Agent 角色集 | 采用**四层十角色**体系（决策层 Orchestrator/Planner，执行层 Worker/Researcher/Writer/Tool Caller，质量层 Reviewer/Verifier，协调层 Memory Keeper/Router）；MVP 先实现核心五角色，其余按任务类型动态启用。详见 agent-modes-design.md §4 |
 | 5 | 商业形态 | **先自用，后续再开源**；开源前不设计云端增值/团队协作付费能力（F-19/F-20 维持 P2 不提前），代码按可开源标准编写（License 头、无硬编码密钥） |
-| 6 | CLI 命令名 / npm 包名 | **`yzero`**（2026-10-22 确认） |
+| 6 | CLI 命令名 / npm 包名 | **`delta`**（2026-10-22 确认） |
 | 7 | Token 预算层级 | **会话级为主**：默认 200k tokens / ¥5，超限可临时追加；任务级预算作为可选开关（默认关闭） |
 | 8 | 首发模型服务范围 | **全部 4 家**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付 |
 | 9 | CLI 确认交互形态 | **TUI 选择卡**（基于 ink）：方向键选择 允许 / 拒绝 / 编辑参数，M1 即实现 |

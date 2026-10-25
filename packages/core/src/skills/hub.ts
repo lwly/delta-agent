@@ -6,9 +6,9 @@
  *   下载：GET {base}/api/v1/download?slug=<slug>        → zip 包（SKILL.md 位于包根或单一顶层目录）
  *
  * hub 地址解析优先级（resolveSkillHubBase）：
- *   显式 flag > 环境变量 YZERO_SKILL_HUB_URL > ~/.y-zero/skill-hub.json 的 url 字段 > 官方默认
+ *   显式 flag > 环境变量 DELTA_SKILL_HUB_URL > ~/.delta/skill-hub.json 的 url 字段 > 官方默认
  *
- * 安装目标：user 层 `~/.y-zero/skills/<slug>/` 或项目层 `.y-zero/skills/<slug>/`，
+ * 安装目标：user 层 `~/.delta/skills/<slug>/` 或项目层 `.delta/skills/<slug>/`，
  * 装完即被三层加载器（loader.ts）识别，无需重启。
  *
  * 安全约束：
@@ -20,13 +20,14 @@ import { promises as fs, existsSync, mkdirSync, readFileSync, writeFileSync, ren
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { unzipSync } from 'fflate';
+import { FILES, userConfigDir } from '../paths.js';
 import { readSkillDir, type SkillLayer, type SkillMeta } from './loader.js';
 
 /** 官方 Skill Hub 默认地址 */
 export const DEFAULT_SKILL_HUB_BASE = 'https://api.skillhub.cn';
 
 /** 环境变量名：一次性覆盖 hub 地址（优先级高于配置文件） */
-export const SKILL_HUB_ENV = 'YZERO_SKILL_HUB_URL';
+export const SKILL_HUB_ENV = 'DELTA_SKILL_HUB_URL';
 
 /** 解压总量上限（64 MB）：超过即判定为 zip 炸弹，中止安装 */
 export const MAX_EXTRACT_BYTES = 64 * 1024 * 1024;
@@ -46,11 +47,11 @@ export interface HubSkillInfo {
   source?: string;
 }
 
-// ── 配置读写（~/.y-zero/skill-hub.json）────────────────────────────────────
+// ── 配置读写（~/.delta/skill-hub.json）────────────────────────────────────
 
 /** hub 配置文件路径（`skill hub set/get/reset` 与运行时解析共用，保证单点） */
 export function userSkillHubConfigPath(homeDir: string = os.homedir()): string {
-  return path.join(homeDir, '.y-zero', 'skill-hub.json');
+  return path.join(userConfigDir(homeDir), FILES.skillHub);
 }
 
 /**
@@ -108,7 +109,7 @@ export type SkillHubSource = 'flag' | 'env' | 'config' | 'default';
 
 /**
  * 解析生效的 hub base 地址。
- * 优先级：flag > 环境变量 YZERO_SKILL_HUB_URL > 配置文件 ~/.y-zero/skill-hub.json > 官方默认。
+ * 优先级：flag > 环境变量 DELTA_SKILL_HUB_URL > 配置文件 ~/.delta/skill-hub.json > 官方默认。
  * 非法 URL（非 http/https）一律抛错——地址错误应显式失败，而不是静默打到默认源。
  */
 export function resolveSkillHubBase(
@@ -193,7 +194,7 @@ function parseHubSkillInfo(raw: unknown): HubSkillInfo | null {
 export interface InstallHubSkillOptions {
   /** hub base 地址（必填，由调用方先 resolveSkillHubBase 解析） */
   base: string;
-  /** 安装目标目录（user 层 `~/.y-zero/skills` 或项目层 `<root>/.y-zero/skills`） */
+  /** 安装目标目录（user 层 `~/.delta/skills` 或项目层 `<root>/.delta/skills`） */
   targetDir: string;
   /** 同名目录已存在时是否覆盖（覆盖 = 删除旧目录后重装） */
   force?: boolean;

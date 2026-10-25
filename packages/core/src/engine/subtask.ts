@@ -3,10 +3,10 @@
  * 每个节点独立上下文：角色模板 + 总目标 + 本节点目标 + 上游结果摘要，
  * 复用 ReAct 主循环（预算/压缩/自愈同源），工具经角色白名单受限。
  */
-import type { AgentEvent, TaskNode, ToolCall, ToolResult } from '@y-zero/shared';
+import type { AgentEvent, TaskNode, ToolCall, ToolResult } from '@delta/shared';
 import { runReAct, type RunContext } from './react.js';
 import { roleSystemPrompt, RestrictedRegistry, type RegistryLike } from './roles.js';
-import type { TaskRole } from '@y-zero/shared';
+import type { TaskRole } from '@delta/shared';
 import { emptyCheckpoint, type TaskCheckpoint } from '../session/tasks.js';
 
 /** 产生文件变更的内置工具（checkpoint 跟踪对象）。 */

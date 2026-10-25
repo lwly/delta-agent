@@ -2,8 +2,8 @@
  * Skill 三层加载器（agent-modes-design.md §7.1/§7.2）
  *
  * 优先级（同名高层覆盖低层）：
- *   3（最高）项目级  .y-zero/skills/
- *   2        用户级  ~/.y-zero/skills/
+ *   3（最高）项目级  .delta/skills/
+ *   2        用户级  ~/.delta/skills/
  *   1（最低）内置    packages/core/skills/
  *
  * 包结构：SKILL.md（frontmatter + 主体指令）/ references/（按需读取）/ scripts/
@@ -11,6 +11,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 
 export type SkillLayer = 'builtin' | 'user' | 'project';
 
@@ -31,9 +32,9 @@ export interface SkillMeta {
 }
 
 export interface DiscoverOptions {
-  /** 项目根目录（扫描 <root>/.y-zero/skills/）；缺省跳过项目层 */
+  /** 项目根目录（扫描 <root>/.delta/skills/）；缺省跳过项目层 */
   projectRoot?: string;
-  /** 用户主目录（扫描 <home>/.y-zero/skills/）；缺省跳过用户层 */
+  /** 用户主目录（扫描 <home>/.delta/skills/）；缺省跳过用户层 */
   homeDir?: string;
   /** 内置 Skills 目录；缺省用包根 skills/ */
   builtinDir?: string;
@@ -53,8 +54,8 @@ export async function discoverSkills(
 ): Promise<{ skills: SkillMeta[]; errors: string[] }> {
   const layers: Array<{ layer: SkillLayer; dir?: string }> = [
     { layer: 'builtin', dir: opts.builtinDir ?? defaultBuiltinSkillsDir() },
-    { layer: 'user', dir: opts.homeDir ? path.join(opts.homeDir, '.y-zero', 'skills') : undefined },
-    { layer: 'project', dir: opts.projectRoot ? path.join(opts.projectRoot, '.y-zero', 'skills') : undefined },
+    { layer: 'user', dir: opts.homeDir ? path.join(userConfigDir(opts.homeDir), FILES.skillsDir) : undefined },
+    { layer: 'project', dir: opts.projectRoot ? path.join(projectConfigDir(opts.projectRoot), FILES.skillsDir) : undefined },
   ];
 
   const errors: string[] = [];

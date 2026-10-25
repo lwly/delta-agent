@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@delta/shared';
 import { SessionStore } from '../src/session/store.js';
 import {
   MemoryStore,

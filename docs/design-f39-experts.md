@@ -1,7 +1,7 @@
 # F-39 专家 / 专家团 —— 技术设计与任务分解
 
 > 日期：2026-10 ｜ 关联：`docs/prd-f39-experts.md`（14 章 / 25 条需求池 / 11 条待确认）｜ 风格沿用：`docs/design-f38-project-file-panel.md`（决策表 → 分层 → 数据结构 → 端到端 → 任务）
-> 交付面：`packages/core`（发现/解析/注入/白名单/委派）+ `packages/cli`（`--expert` / `/expert` / `yzero expert`）+ `packages/web`（Composer 面板、详情弹层、成员卡、设置页 Tab）
+> 交付面：`packages/core`（发现/解析/注入/白名单/委派）+ `packages/cli`（`--expert` / `/expert` / `delta expert`）+ `packages/web`（Composer 面板、详情弹层、成员卡、设置页 Tab）
 > **本文只做设计与任务分解，不含业务代码。**
 
 ---
@@ -118,8 +118,8 @@ PRD 只说「成员 md 正文绝不进主会话 Prompt」，未说明**主要风
 flowchart TD
     subgraph DISK["磁盘：三层专家库"]
         B["packages/core/experts<br/>builtin 只读"]
-        U["~/.y-zero/experts<br/>user"]
-        P["project/.y-zero/experts<br/>project"]
+        U["~/.delta/experts<br/>user"]
+        P["project/.delta/experts<br/>project"]
     end
 
     subgraph CORE_EXP["core/src/experts（新增）"]
@@ -145,7 +145,7 @@ flowchart TD
     end
 
     subgraph CLI["packages/cli"]
-        C1["--expert / yzero expert<br/>index.ts + expert.ts"]
+        C1["--expert / delta expert<br/>index.ts + expert.ts"]
         C2["/expert 选择卡<br/>ui/expert-card.tsx"]
         C3["底栏第 4 段<br/>ui/worktree-bar.tsx"]
         C4["单一构建函数调用方<br/>prompt.ts"]
@@ -192,7 +192,7 @@ flowchart TD
 ```
 
 **边界纪律**：
-- `experts/*` **不 import** `session/`、`server/`、`engine/`；只 import `@y-zero/shared`、`prompt/types.js`（类型）、`skills/loader.js`（`parseFrontmatter`）。发现器与渲染器因此可纯单测。
+- `experts/*` **不 import** `session/`、`server/`、`engine/`；只 import `@delta/shared`、`prompt/types.js`（类型）、`skills/loader.js`（`parseFrontmatter`）。发现器与渲染器因此可纯单测。
 - `tools/builtin/task.ts` **不 import** `experts/*`；成员运行时通过 `ToolContext.expertTeam`（结构类型，定义在 `tools/types.ts`）注入 → 无循环依赖、`task` 工具在非专家会话下零感知。
 - `cli/prompt.ts` 与 `core/server/hub.ts` **都调用** `core/experts/assemble-context.ts` 的 `buildAssembleContext()` → 双端唯一 Prompt 上下文来源。
 
@@ -318,15 +318,15 @@ export interface ExpertListItem {
 
 ```ts
 export interface ExpertStoreOptions {
-  /** 项目根（扫描 <root>/.y-zero/experts）；缺省跳过项目层 */
+  /** 项目根（扫描 <root>/.delta/experts）；缺省跳过项目层 */
   projectRoot?: string;
-  /** 用户主目录（扫描 <home>/.y-zero/experts）；缺省跳过用户层 */
+  /** 用户主目录（扫描 <home>/.delta/experts）；缺省跳过用户层 */
   homeDir?: string;
   /** 内置目录；缺省 defaultBuiltinExpertsDir() */
   builtinDir?: string;
   /** 单层包数上限，默认 200（超出截断并推 errors） */
   maxPerLayer?: number;
-  /** 停用清单（P1 读 ~/.y-zero/experts.json 的 disabled[]）；P0 恒为空 */
+  /** 停用清单（P1 读 ~/.delta/experts.json 的 disabled[]）；P0 恒为空 */
   disabled?: readonly string[];
 }
 
@@ -379,7 +379,7 @@ export async function discoverLayered<T>(opts: {
 }): Promise<LayeredOutcome<T>>;
 ```
 
-### 4.3 事件与运行时（`@y-zero/shared` + `tools/types.ts`）
+### 4.3 事件与运行时（`@delta/shared` + `tools/types.ts`）
 
 ```ts
 // packages/shared/src/types.ts —— AgentEvent 追加两个成员（不改既有成员）
@@ -439,7 +439,7 @@ export interface ToolContext {
   /** F-39：专家团运行时（仅 team 专家会话注入） */
   expertTeam?: ExpertTeamRuntime;
   /** F-39：事件发射器（task 工具发 expert_delegate_* 用；缺省 = 不发事件） */
-  emit?: (ev: import('@y-zero/shared').AgentEvent) => void;
+  emit?: (ev: import('@delta/shared').AgentEvent) => void;
 }
 ```
 
@@ -845,7 +845,7 @@ export function escapeReservedMarkers(text: string): string;           // <stati
 - **为什么把 agent md 的 mtime 也算进去**：详情页展示「提示词摘要」、注入用的是 md 正文；若只算目录 mtime，「改 md 正文不改文件名」不会失效，用户改完包重启前看到的还是旧人格 —— 这是最容易被当成 bug 报的行为。代价：最坏 ~1.4k 次 `stat`，NVMe 上 ~8–15ms，仍满足 ≤80ms（PRD §10，且这是**最坏**情形：3 层各 200 包、每包 6 个 md）。
 - **冷/热路径**：`list()` 先算 fingerprint → 与缓存相同则直接返回 `{experts, errors}` 浅拷贝；不同则全量重扫。
 - **单层 200 上限**：`readdir` 后按名称排序 → 取前 200 → 若 `entries.length > 200` 推 `errors.push(\`${layer}: 专家包数量超过上限 200，已截断（实际 ${n}）\`)`。
-- **同名覆盖**：依赖 `discoverLayered` 的遍历顺序（builtin → user → project）+ `byName.set` 后写覆盖。`shadowed` 保留低层项（`yzero expert list --verbose` 与设置页「已被 X 覆盖」显示用，不参与注入）。
+- **同名覆盖**：依赖 `discoverLayered` 的遍历顺序（builtin → user → project）+ `byName.set` 后写覆盖。`shadowed` 保留低层项（`delta expert list --verbose` 与设置页「已被 X 覆盖」显示用，不参与注入）。
 - **头像校验**：`fs.stat(avatarPath)` → 体积 ≤500KB 且扩展名 ∈ `{.png,.jpg,.jpeg,.webp}`，否则 `avatarPath = null` + `errors`。**不做像素探测**（§2.6-b）。
 - **`disabled[]`**（P1）：`list()` 末尾过滤；P0 传空数组，行为等价。
 
@@ -1183,7 +1183,7 @@ export function buildMemberSystemPrompt(
 | Web 消费 | `stores/chat.ts onEvent` 新增两个 case → 维护 `delegations: Map<callId, MemberCardState>`；`WorkbenchView` 在消息流内联渲染成员卡 | 与既有 `subtask_start/done` 的 notice 渲染不同：成员卡是**卡片**不是 notice（PRD F-39-9） |
 | CLI 消费 | `App` 收到 `expert_delegate_start` 时 push 一行 `◆ 委派 测试工程师 ▸ …`，`_done` 时原地更新为 `done 12.4s`；`d` 展开摘要 | 单行 + 原地更新，与 `worktree-bar` 同款 ink 写法 |
 | F-18 回放 | 回放读 `messages`；成员标识由 tool 消息的 content 前缀承载（D8）；回放页在该 tool 消息上渲染「由 X 执行」角标 | 无需改回放数据模型 |
-| 日志 | `promptSectionsLog` 自动包含 `expert` 段（因为它是普通 section）；`yzero expert list --verbose` 打印 `errors[]` | 零额外埋点 |
+| 日志 | `promptSectionsLog` 自动包含 `expert` 段（因为它是普通 section）；`delta expert list --verbose` 打印 `errors[]` | 零额外埋点 |
 
 **「由 X 执行」数据来源**：实时 = SSE `tool_result` 的 `result.meta.agent_name`（`task.ts` L170 回传）→ chat store 写入消息的 UI 本地字段 `agentName`；回放 = tool 消息 content 前缀正则 `/^〔专家团·(.+?)（/`。**两者都不是权威数据源之外的猜测**：`task.ts` 是唯一写入方。
 
@@ -1340,8 +1340,8 @@ async function onExpertSelect(item: ExpertListItem) {
 | 注册表收窄 | `start()` L555 之后 | `const registry = restrictRegistry(rawRegistry, allow)`；注意 MCP 注册发生在收窄**之前**（先 `registerInto` 再 wrap），否则 MCP 工具全被剔掉 |
 | Prompt | `cli/src/prompt.ts` L78-96 | `ctx()` 内改为调用 `buildAssembleContext({ projectName, projectInstructions, staticMemory, tools, skillIndex, loadedSkills, session, expertRecord })`；`expertRecord` 由 `AssemblePromptOptions.expert?: ExpertRecord` 传入 |
 | 预置技能 | `cli/src/prompt.ts` L103-122 返回前 | 若 `expertRecord.skills.length` → `await seedExpertSkills(skillsRuntime, expertRecord.skills)`，结果进 `debugReport` 的 warnings 展示（仅在 `--debug-prompt` 时打印） |
-| `yzero expert <sub>` | 新文件 `cli/src/expert.ts`（`expertListCommand / expertShowCommand / expertImportCommand / expertExportCommand / expertNewCommand`），`index.ts` 末尾 `program.command('expert')` 挂 5 个子命令（仿 `skill.js` 的写法） | `list` 输出对齐 PRD §8.6：`◆ name  profession  单人/团队  layer`；`--verbose` 追加 `errors[]` 与被覆盖项；`show` 文本卡（成员/工具/技能/提示词摘要前 8 行） |
-| TUI `/expert` | `cli/src/ui/app.tsx` 斜杠命令分派处 + 新文件 `cli/src/ui/expert-card.tsx`（仿 `branch-card.tsx`：`↑↓` 选、`Enter` 确认、`d` 详情、`Esc` 取消） | 有消息的会话改绑 → 拒绝 + 提示「专家绑定在会话创建时确定，请用 `yzero --expert <name>` 新开会话」（AC-15）；`/expert off` → 空会话就地 `setSessionExpert(null,null)` + 重组 Prompt（`rebuild()`）；运行中 → 提示「任务运行中，结束后再切换」 |
+| `delta expert <sub>` | 新文件 `cli/src/expert.ts`（`expertListCommand / expertShowCommand / expertImportCommand / expertExportCommand / expertNewCommand`），`index.ts` 末尾 `program.command('expert')` 挂 5 个子命令（仿 `skill.js` 的写法） | `list` 输出对齐 PRD §8.6：`◆ name  profession  单人/团队  layer`；`--verbose` 追加 `errors[]` 与被覆盖项；`show` 文本卡（成员/工具/技能/提示词摘要前 8 行） |
+| TUI `/expert` | `cli/src/ui/app.tsx` 斜杠命令分派处 + 新文件 `cli/src/ui/expert-card.tsx`（仿 `branch-card.tsx`：`↑↓` 选、`Enter` 确认、`d` 详情、`Esc` 取消） | 有消息的会话改绑 → 拒绝 + 提示「专家绑定在会话创建时确定，请用 `delta --expert <name>` 新开会话」（AC-15）；`/expert off` → 空会话就地 `setSessionExpert(null,null)` + 重组 Prompt（`rebuild()`）；运行中 → 提示「任务运行中，结束后再切换」 |
 | 底栏第 4 段 | `cli/src/ui/worktree-bar.tsx` 追加 prop `expertLabel?: string \| null` | 有专家时渲染 `◆ <displayName>`（`theme.toolOk`），无专家**不渲染该段**（不占位、不加分隔符）→ 三段式视觉不变 |
 | 成员事件行 | `cli/src/ui/app.tsx` 事件 switch 追加两个 case | `◆ 委派 测试工程师 ▸ 补 3 个边界用例 …` → 完成后原地变为 `◆ 委派 测试工程师 ▸ … done 12.4s`；`d` 展开摘要（与 `diff-view` 同款展开键位） |
 
@@ -1438,21 +1438,21 @@ async function onExpertSelect(item: ExpertListItem) {
 | **T03** | **专家段渲染 + Prompt 层扩展** | `core/src/prompt/types.ts`、`core/src/prompt/layers.ts`、`core/src/prompt/assembler.ts`、`core/src/prompt/debug.ts`、`core/src/experts/prompt.ts`(新)、`core/test/experts-prompt.test.ts`(新) | T01 | ① `LayerId` 含 `'expert'`，全包 `typecheck` 通过；② 无 expert 时 `formatPrompt` 输出与改动前**逐字节相同**（快照对比）；③ 有 expert 时段出现在 `<static>` 块内且位于 `## 可用工具` 之后、`<dynamic>` 之前；④ wrapper 与 PRD F-39-5④ 逐字一致；⑤ 12000 字正文 → 6000 + 「（专家说明已截断）」；6000 字整 → 不加后缀；⑥ `<static>`/`<dynamic>`/`# L1 Identity` 被转义，段结构仍是 8 段；⑦ 团队专家段只含成员 4 字段（断言不含成员 md 正文任一 20 字子串）；⑧ 同 ctx 两次 assemble 的 `fingerprint` 相等；⑨ `debugReport` 的 expert 段带 `source=expert:<name>` | ~180 行 + ~18 用例 |
 | **T04** | **白名单交集 + 预置技能装载（纯函数）** | `core/src/experts/policy.ts`(新)、`core/test/experts-policy.test.ts`(新) | T01 | ① `tools` 缺省 → `allow=null`（不收窄）；② 子集 → `allow` 为交集，`unknown` 收未知名，`restrictedCount/totalCount` 正确；③ `BUILTIN_TOOL_COUNT === Object.keys(TOOL_CAPABILITY).length === 16`；④ `restrictRegistry(base, null)` 返回 `base` 本身（零开销）；⑤ `restrictRegistry` 对越权调用返回 `error:'tool_not_allowed'` 且**不进 confirm**（复用 `RestrictedRegistry` 行为）；⑥ `seedExpertSkills` 5 个技能 → 只装 3 个 + warning；超 4k → 截断 + warning；不存在的技能 → 跳过 + warning，不抛错 | ~210 行 + ~14 用例 |
 | **T05** | **v5 迁移 + 会话绑定（无 UI）** | `core/src/session/migrations.ts`、`core/src/session/store.ts`、`core/src/session/service.ts`、`core/src/experts/session-binding.ts`(新)、`core/test/experts-binding.test.ts`(新) | T01 | ① 空库 → `user_version=5`，`sessions` 含两新列；② v4 旧库 → 迁移后旧行 `expert IS NULL`，`getSession` 返回 `expert:null`（零回归）；③ `createSession({expertType:'team', mode:'multi-agent'})` → 落库 `mode='react'`；④ `expertType:'agent'` → `mode` 原样；⑤ `expertType:'xxx'` → throw；⑥ `listSessions`/`searchSessions`/`getSession` 三处都返回新字段（断言不是 `undefined`）；⑦ `resolveBinding` 缺失包 → `{name:null, missing:'x'}` 不抛错；⑧ `pnpm -r build && typecheck` 通过 | ~230 行 + ~15 用例 |
-| **T06** | **Prompt 注入接线（单一构建函数 + 双端收敛）** | `core/src/experts/assemble-context.ts`(新)、`core/src/server/hub.ts`（`buildPrompt`）、`cli/src/prompt.ts`、`core/src/index.ts`、`core/test/experts-assemble.test.ts`(新) | T02, T03 | ① `buildAssembleContext()` 是 CLI 与 Web 的**唯一** ctx 构造入口（grep 断言两包不再各自拼 `AssembleContext` 字面量）；② 绑定只读专家的会话，`--debug-prompt` 输出含 `[expert]` 段与 `source=expert:code-architect`，且 `## 可用工具` 里**没有** `write_file`；③ 无专家会话 `--debug-prompt` 输出与改动前一致（除 version 与多一行空 expert 段被跳过）；④ Web：`hub.send` 连续两轮 `staticFingerprint` 相同（缓存稳定）；⑤ 包被删除 → 不注入不收窄，不抛错；⑥ 首轮自动 seed 预置技能（`yzero --expert product-manager --debug-prompt` 可见 L5 含技能正文；AC-12） | ~220 行 + ~12 用例 |
+| **T06** | **Prompt 注入接线（单一构建函数 + 双端收敛）** | `core/src/experts/assemble-context.ts`(新)、`core/src/server/hub.ts`（`buildPrompt`）、`cli/src/prompt.ts`、`core/src/index.ts`、`core/test/experts-assemble.test.ts`(新) | T02, T03 | ① `buildAssembleContext()` 是 CLI 与 Web 的**唯一** ctx 构造入口（grep 断言两包不再各自拼 `AssembleContext` 字面量）；② 绑定只读专家的会话，`--debug-prompt` 输出含 `[expert]` 段与 `source=expert:code-architect`，且 `## 可用工具` 里**没有** `write_file`；③ 无专家会话 `--debug-prompt` 输出与改动前一致（除 version 与多一行空 expert 段被跳过）；④ Web：`hub.send` 连续两轮 `staticFingerprint` 相同（缓存稳定）；⑤ 包被删除 → 不注入不收窄，不抛错；⑥ 首轮自动 seed 预置技能（`delta --expert product-manager --debug-prompt` 可见 L5 含技能正文；AC-12） | ~220 行 + ~12 用例 |
 | **T07** | **白名单执行接线（注册表收窄）** | `core/src/server/hub.ts`（`send`）、`cli/src/index.ts`（`start` 收窄）、`core/test/experts-e2e.test.ts`(新，含 AC-1/AC-2) | T04, T06 | ① 只读专家 + 默认权限：`write_file` 被拒，`ToolResult.error==='tool_not_allowed'`，模型下一轮收到该错误（AC-1）；② 同一专家 + `yolo`：**仍被拒**（AC-2）；③ L4 `可用工具` 段 = 收窄后清单（无被禁工具）；④ MCP 工具在收窄之后注册也不会漏（构造 mock registry 断言）；⑤ 非专家会话 `definitions()` 与改动前完全相同 | ~120 行 + ~8 用例 |
 | **T08** | **`task` 工具成员委派 + 事件** | `shared/src/types.ts`、`core/src/tools/types.ts`、`core/src/tools/builtin/task.ts`、`core/src/experts/team.ts`(新)、`core/test/task-expert-agent.test.ts`(新) | T01 | ① **不传 `agent`：`systemPrompt`/`permissions`/`confirm`/`askUser`/`meta` 与改动前逐字段相同**（快照断言，最高优先级）；② 传未知 agent → `unknown_agent`，错误文案含可选成员；③ 非团队会话传 agent → `unknown_agent` 且提示「未绑定专家团」；④ 命中成员：`expert_delegate_start` / `_done` 各发一次，payload 字段齐全，`usage` 已回写父预算；⑤ 第 9 次委派 → `delegation_limit`；⑥ 成员 `tools` 含 `write_file` 且父 `default` → 走父 `confirm`（可断言 mock 被调用）；父 `plan` → 被 `PermissionState` 拒且 `done.readonlyDegraded===true`；⑦ 成员上下文 `expertTeam===undefined`（不能再委派）；`depth` 仍拒绝二次派生；⑧ 成员 tool 消息 content 以 `〔专家团·` 开头 | ~320 行 + ~16 用例 |
 | **T09** | **HTTP 端点（5 个）** | `core/src/server/experts-routes.ts`(新)、`core/src/server/http.ts`、`core/src/index.ts`、`core/test/experts-api.test.ts`(新) | T02, T05 | ① `GET /api/experts` 返回 `{experts, errors}`，字段名 snake_case，团队带 `member_count`；项目作用域按 `projectId` 生效，不存在 → 404；② `GET /api/experts/:name` 返回完整详情（含 `tools`/`members`/`prompt_summary`）；未知 name → 404；③ `GET /api/experts/:name/avatar` → `{data_url:null}` 或 `data:image/png;base64,...`；④ `GET /api/sessions/:id/expert` → `{bound, missing, mode_forced}`，包删除后 `missing:true`；⑤ `POST /api/projects/:id/sessions` 带 `expert` → 落库两列且 team 时 `mode='react'`；未知 expert → 400；⑥ 所有端点都在静态托管分支**之前**分发（dist 存在时不被 SPA fallback 吞掉） | ~290 行 + ~14 用例 |
 | **T10** | **Web 数据层** | `web/src/api/client.ts`、`web/src/stores/experts.ts`(新)、`web/src/stores/chat.ts`、`web/src/utils/expertFilter.ts`(新)、`web/src/utils/expertFilter.test.ts`(新) | T09（契约以 §7.4 为准，可提前并行编码） | ① `filterExperts` 覆盖：name 前缀、displayName 中文、profession 中文、keywords、空查询全量、无命中空数组；② `sortExperts` 团队排同组末尾、其余按 displayName 拼音序（用 `localeCompare('zh')` 并记录跨环境差异）；③ `experts` store 有 `list/detail/avatar/loading/error` 五态 + `invalidate()`；④ `chat.open()` 拉 `getSessionExpert`，竞态防御（`sessionId` 变更即丢弃）；⑤ 两个委派事件 case 写入 `delegations`；⑥ `tool_result.meta.agent_name` → 消息 `agentName`；⑦ `pnpm -C packages/web typecheck` 通过；**⑧ `chat.notice()` 若被 `newSession()` 内部调用：`createSession` 抛错时**不推提示**且返回 `null`（断言 `notices.length` 不变、`error` 有值）** | ~380 行 + ~12 用例 |
 | **T11** | **Web 召唤面板 + composer 胶囊** | `web/src/components/ExpertPanel.vue`(新)、`web/src/components/ExpertComposerBadge.vue`(新)、`web/src/views/WorkbenchView.vue` | T10 | ① chip 出现在 `.composer-tools` **左组末尾**（`/mcp 扩展工具` 之后），既有 4 chip + 2 select 的 DOM/样式**零改动**（AC-19：`pnpm smoke:web` 通过）；② 面板复用 `.ac-panel` 定位/视觉令牌（`bottom: calc(100%+6px)` / `z-index:30` / `max-height:360px` / `--bg-elevated`），三段式结构（固定头搜索 + 滚动列表 36px + 固定底），**未改 `theme.css`**；三种关闭方式（`Esc` / 点面板外 / 再次点 chip）全通（AC-20）；③ **props/emits 契约符合 §6.8.1**（只接 `anchor`/`selected`，只发 `select`/`close`/`more`；组件内无 `api.*` 调用、无 `router` import、无 `chat` store 写入）；④ **七态齐备**（列表/搜索无结果/库为空/加载失败/**已选中 ✓**/**运行中**/**依赖缺失 ⚠**），全部内联，**无全局 toast**；⑤ 搜索去抖 120ms、`↑↓ Enter Esc` 可用、`@mousedown.prevent` 选中不丢焦点；⑥ 已选中行右侧绿 `✓`，再次点击**只关闭不新建会话**；⑦ 选中专家 → 新建会话并切换，原会话留在侧栏，**输入框草稿保留**（AC-23：`openSession()` 不清 `input`）；⑧ **召唤提示走既有 `chat.notice()`（对话区 `event-card`、常驻）**，10 条文案逐字符合 §6.8.4（AC-21：文案 + 新会话胶囊正确 + **原会话后端 `expert` 字段未被改写**）；⑨ 团队专家选中后模式 select 变「ReAct（专家团固定）」+ `disabled` + `title`（AC-22）；⑩ 胶囊**数据源为 `chat.sessionMeta.expert`**（无本地 ref 镜像，切会话/刷新一致）；胶囊 `✕` → 新建无专家会话（**P0 恒定新建，空会话也新建**；就地解绑归 P1）；**Web P0 不得出现任何 `PATCH /api/sessions/:id/expert` 调用**；**⑪ 召唤成功提示出现在对话区 `event-card`，刷新页面后**消失**（客户端态、不入库），但**胶囊仍在**（来自 `sessionMeta`）——两者不矛盾，不得为了"刷新后提示还在"把它落库** | ~520 行 |
 | **T12** | **Web 详情弹层 + 成员卡 + 工具卡标注** | `web/src/components/ExpertDetail.vue`(新)、`ExpertDetailBody.vue`(新)、`ExpertMemberCard.vue`(新)、`ToolCallCard.vue`、`web/src/views/WorkbenchView.vue` | T10 | ① Modal 520px，字段齐备（头像/展示名/职业/类型/来源层/描述/技能/工具白名单 + 「限制 N/16」/团队时成员块 lead 置顶/提示词折叠只读）；② **不展示**任何凭据或包绝对路径；③ 「召唤专家」主按钮可用；④ 成员卡 48px，四状态（running/ok/failed/readonly 降级角标）正确；⑤ 产出摘要 `line-clamp:2` + 点击展开；⑥ 工具卡右上角「由 X 执行」在实时与回放两种数据源下都正确；⑦ 主理人汇总消息带「汇总」徽标（AC-3 视觉部分） | ~480 行 |
-| **T13** | **CLI 全链路** | `cli/src/index.ts`、`cli/src/expert.ts`(新)、`cli/src/ui/expert-card.tsx`(新)、`cli/src/ui/worktree-bar.tsx`、`cli/src/ui/app.tsx`、`cli/src/headless-run.ts` | T07, T09 | ① `yzero --expert code-architect` 启动即绑定，底栏出现 `◆ 代码架构师`，无专家时不渲染该段；② `--expert not-exist` → 退出码 1 + stderr 列出全部可选（AC-16）；③ `yzero expert list` 5 项标 `builtin`，`--verbose` 显示 errors 与被覆盖项；`show software-dev-team` 输出成员/工具/技能/提示词摘要；④ 空会话 `/expert` 就地绑定、底栏更新；有消息的会话 `/expert` 被拒并给出正确提示（AC-15）；`/expert off` 空会话解绑；运行中 `/expert` 提示；⑤ `-r` 恢复绑定，包缺失 → 一行警告 + 正常对话（AC-9）；⑥ 委派过程渲染 `◆ 委派 <成员> ▸ … done Ns`，`d` 展开；⑦ 只读专家下 `write_file` 被拒（CLI 侧 AC-1） | ~600 行 |
-| **T14** | **首批内置专家 5 个包 + 团队 SOP 验收** | `core/experts/{code-architect,code-reviewer,test-engineer,product-manager,software-dev-team}/**` | T02（目录解析）、T08（团队验收） | ① 5 个包全部被 `ExpertStore` 成功解析，`yzero expert list` 列 5 项标 `builtin`（AC-12 前置）；② `code-architect` 白名单 5 项、`code-reviewer` 4 项纯只读（详情页「限制 4/16」）；③ `test-engineer` 含 `write_file/edit_file/run_command/run_tests`，在有权限会话下能真的写文件并走确认流；④ `product-manager` 的 `skills:["commit-review","project-summarize"]`（**已核验两技能存在**）首轮自动装载（AC-12）；⑤ `software-dev-team`：4 成员、lead 文件名 `software-dev-team-lead.md`（带团队前缀）、成员 ≤6；⑥ 端到端：团队会话产出 ≥2 个不同成员卡 + 主理人汇总（AC-3）；主理人尝试写文件被拒（AC-4）；⑦ 团队专家段 token ≤3200 | ~900 行内容 |
+| **T13** | **CLI 全链路** | `cli/src/index.ts`、`cli/src/expert.ts`(新)、`cli/src/ui/expert-card.tsx`(新)、`cli/src/ui/worktree-bar.tsx`、`cli/src/ui/app.tsx`、`cli/src/headless-run.ts` | T07, T09 | ① `delta --expert code-architect` 启动即绑定，底栏出现 `◆ 代码架构师`，无专家时不渲染该段；② `--expert not-exist` → 退出码 1 + stderr 列出全部可选（AC-16）；③ `delta expert list` 5 项标 `builtin`，`--verbose` 显示 errors 与被覆盖项；`show software-dev-team` 输出成员/工具/技能/提示词摘要；④ 空会话 `/expert` 就地绑定、底栏更新；有消息的会话 `/expert` 被拒并给出正确提示（AC-15）；`/expert off` 空会话解绑；运行中 `/expert` 提示；⑤ `-r` 恢复绑定，包缺失 → 一行警告 + 正常对话（AC-9）；⑥ 委派过程渲染 `◆ 委派 <成员> ▸ … done Ns`，`d` 展开；⑦ 只读专家下 `write_file` 被拒（CLI 侧 AC-1） | ~600 行 |
+| **T14** | **首批内置专家 5 个包 + 团队 SOP 验收** | `core/experts/{code-architect,code-reviewer,test-engineer,product-manager,software-dev-team}/**` | T02（目录解析）、T08（团队验收） | ① 5 个包全部被 `ExpertStore` 成功解析，`delta expert list` 列 5 项标 `builtin`（AC-12 前置）；② `code-architect` 白名单 5 项、`code-reviewer` 4 项纯只读（详情页「限制 4/16」）；③ `test-engineer` 含 `write_file/edit_file/run_command/run_tests`，在有权限会话下能真的写文件并走确认流；④ `product-manager` 的 `skills:["commit-review","project-summarize"]`（**已核验两技能存在**）首轮自动装载（AC-12）；⑤ `software-dev-team`：4 成员、lead 文件名 `software-dev-team-lead.md`（带团队前缀）、成员 ≤6；⑥ 端到端：团队会话产出 ≥2 个不同成员卡 + 主理人汇总（AC-3）；主理人尝试写文件被拒（AC-4）；⑦ 团队专家段 token ≤3200 | ~900 行内容 |
 
 ### 8.2 P1 —— 第二迭代
 
 | ID | 任务名 | 涉及文件 | 依赖 | 验收标准 | 预估改动量 |
 |---|---|---|---|---|---|
-| **T15** | **设置页专家 Tab + 导入/导出 zip + 创建引导** | `web/src/components/settings/ExpertsPanel.vue`(新)、`web/src/views/SettingsView.vue`、`core/src/experts/io.ts`(新)、`core/src/server/experts-routes.ts`（+4 端点）、`cli/src/expert.ts`（import/export/new） | T09, T13 | ① 三层分组、每行名称/职业/类型/来源/启用开关/目录/导出；内置层只有「查看」；被覆盖项灰字标注；② 「停止使用」写 `~/.y-zero/experts.json` 的 `disabled[]`，停用项不出现在召唤面板（AC 见 F-39-13）；③ 导入校验链 5 步（zip-slip → 64MB → 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project + 同名需 `--force`）；`../../evil.sh` 与 >64MB 均失败且临时目录被清理（AC-11）；④ 内置层不可被导入覆盖；⑤ 导出产出可复现 zip（含 `exportedAt`/`exportedBy`）；⑥ `yzero expert new --team` 生成骨架且前置拦截非法/重名 | ~700 行 + ~12 用例 |
+| **T15** | **设置页专家 Tab + 导入/导出 zip + 创建引导** | `web/src/components/settings/ExpertsPanel.vue`(新)、`web/src/views/SettingsView.vue`、`core/src/experts/io.ts`(新)、`core/src/server/experts-routes.ts`（+4 端点）、`cli/src/expert.ts`（import/export/new） | T09, T13 | ① 三层分组、每行名称/职业/类型/来源/启用开关/目录/导出；内置层只有「查看」；被覆盖项灰字标注；② 「停止使用」写 `~/.delta/experts.json` 的 `disabled[]`，停用项不出现在召唤面板（AC 见 F-39-13）；③ 导入校验链 5 步（zip-slip → 64MB → 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project + 同名需 `--force`）；`../../evil.sh` 与 >64MB 均失败且临时目录被清理（AC-11）；④ 内置层不可被导入覆盖；⑤ 导出产出可复现 zip（含 `exportedAt`/`exportedBy`）；⑥ `delta expert new --team` 生成骨架且前置拦截非法/重名 | ~700 行 + ~12 用例 |
 
 ### 8.3 依赖图
 
@@ -1522,15 +1522,15 @@ graph TD
 - 空库：v1 建表（**不含** expert 列）→ v5 `ALTER ADD`；
 - v4 历史库：跳过 v1–v4，只跑 v5；
 - v5 之后：`user_version = 5`，`LATEST_SCHEMA_VERSION = 5`；
-- 打开高于 5 的库：`migrate()` 抛「是否用更新版本的 yzero 打开过？」（既有保护，不动）。
+- 打开高于 5 的库：`migrate()` 抛「是否用更新版本的 delta 打开过？」（既有保护，不动）。
 
 ### 9.2 回滚策略
 
 | 场景 | 策略 |
 |---|---|
 | **代码回滚到 v4 版本** | 会触发 `migrate()` 的保护分支（`from=5 > LATEST=4`）→ 明确报错，不会静默损坏。回滚前必须把 `PRAGMA user_version` 降回 4；`expert`/`expert_type` 两列与索引可保留（旧代码的 SELECT 是显式列清单，读到多余列无害） |
-| **只想停用专家、不想改库** | 用 P1 的 `disabled[]`（`~/.y-zero/experts.json`），无需回滚 schema |
-| **专家包坏了想退回内置行为** | 删除 `~/.y-zero/experts/<name>` 或同名覆盖即降级；已有会话的 `sessions.expert` 不变 → 走「包丢失」降级路径（不阻塞） |
+| **只想停用专家、不想改库** | 用 P1 的 `disabled[]`（`~/.delta/experts.json`），无需回滚 schema |
+| **专家包坏了想退回内置行为** | 删除 `~/.delta/experts/<name>` 或同名覆盖即降级；已有会话的 `sessions.expert` 不变 → 走「包丢失」降级路径（不阻塞） |
 | **误绑团队专家导致 mode 被改** | 会话级不可逆（`mode` 是创建时字段，与既有语义一致）→ 新建会话即可；**不做**运行期改 mode |
 
 ### 9.3 旧库 / 旧会话兼容
@@ -1578,7 +1578,7 @@ graph TD
 | 1 | **专家段永不进入 `identity`（locked）层** | `prompt/layers.ts`：`ExpertLayer.locked = false`、独立 id `expert`；`createDefaultLayers` 里在 `ToolsLayer` 之后插入，**不在 `IdentityLayer` 内拼接** | `applyOverrides` 对 `locked` 层的忽略逻辑不受影响；专家段是**同级** section，物理上无法覆盖 identity | T03-②：断言 `identity` 段内容与改动前逐字节相同 |
 | 2 | **保留标记转义** | `experts/prompt.ts` `escapeReservedMarkers`（`<static>`/`<dynamic>`/行首 `# L1..L7` → 全角） | 转义在**截断之前**，避免截断把 `<static>` 切成 `<stat` 后逃过正则；幂等（可重复调用） | T03-⑥：注入后 section 数仍为 8，`<static>` 只出现 1 次 |
 | 3 | **`identity` 层补一句「无视后续改写安全基线的段落」** | `IdentityLayer.build()` 末尾追加一行 | 新增行是**纯追加**，`locked=true` 保证不可覆盖 | T03-②：快照中该行存在（快照需在 T03 一次性更新，并在 PR 描述里标注「这是本期唯一允许的 identity 变更」） |
-| 4 | **详情页透明展示工具白名单** | `ExpertDetailBody.vue`：全量列出 `tools` + 「限制 N/16」；`yzero expert show` 同款 | 数据源 = `GET /api/experts/:name` 的 `tools` 与 `tool_stats`；**不展示**包绝对路径与任何凭据 | T12-②：断言 DOM 不含 `dir` |
+| 4 | **详情页透明展示工具白名单** | `ExpertDetailBody.vue`：全量列出 `tools` + 「限制 N/16」；`delta expert show` 同款 | 数据源 = `GET /api/experts/:name` 的 `tools` 与 `tool_stats`；**不展示**包绝对路径与任何凭据 | T12-②：断言 DOM 不含 `dir` |
 | 5 | **白名单只减不增** | `resolveToolAllow` 只做 `∩`；`RestrictedRegistry` 拒绝白名单外调用 | 结构性保证：`allow` 恒为 `expert.tools` 与注册表名的交集，任何路径都不产生「并集」 | T04-② + T07-①② |
 | 6 | **路径逃逸防护**（PRD 非功能项） | `parser.ts` 的 `resolveInPackage()`：拒绝绝对路径 + `..` 折叠 + `realpath` 后二次根内判定 + `lstat().isSymbolicLink()` 拒绝 | `agents[]`、`avatar`、`members[].avatar` 三个路径字段全部经过它 | T01-②：`../etc/passwd` / `/etc/passwd` / 根外符号链接 / 根内符号链接（也拒）四种 |
 | 7 | **导入 zip 校验**（P1） | `experts/io.ts`：zip-slip（拒绝绝对路径与 `..`）→ 解压总量 ≤ `MAX_EXTRACT_BYTES`（**复用 `skills/hub.ts:32` 的 64MB 常量**）→ 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project | 解压先写临时目录，失败即 `rm -rf` | T15-③（AC-11） |
@@ -1596,7 +1596,7 @@ graph TD
 | Web「查看本次 Prompt」 | 复用同一 `buildDebugReport`（若 Web 侧已有该入口，直接受益；无则 P1） |
 | 日志 | `promptSectionsLog` 自动覆盖 expert 段（普通 section）；`hub.send` 启动时 `console.debug('[expert] bound=%s type=%s tools=%d/%d', ...)` |
 | 结构化错误 | `errors[]` 统一文案 `"<layer>/<name>: <原因>"`：缺 agents / name 非法 / 路径越界 / lead 不唯一 / 成员超限 / 嵌套团队 / 头像超限 / 未知工具 / 技能不存在 / 单层超 200 |
-| CLI | `yzero expert list`（表格）· `--verbose`（errors + 被覆盖项 + 段 token）· `yzero expert show <name>`（文本卡）· `yzero --expert <bad>` → stderr 列可选名 + 退出码 1 |
+| CLI | `delta expert list`（表格）· `--verbose`（errors + 被覆盖项 + 段 token）· `delta expert show <name>`（文本卡）· `delta --expert <bad>` → stderr 列可选名 + 退出码 1 |
 | 事件 | `expert_delegate_start` / `_done` 走 SSE（Web 成员卡）+ TUI 单行；**不落库**，但成员标识以 content 前缀进入 `messages`（D8）→ F-18 回放可见 |
 | 用户可见的一次性提示 | 「原绑定专家 X 已不存在，已按无专家运行」（chat notice / CLI stderr 一行）；「专家团固定使用 ReAct」（模式 select 的 `title`） |
 
@@ -1635,7 +1635,7 @@ graph TD
 | S5 | Web：团队会话模式 select disabled + title（AC-8） | 截图 |
 | S6 | CLI：`--expert` / `-r` 恢复 / `/expert` 三种路径 + 底栏徽标（AC-15/16/9） | 终端输出 |
 | S7 | 断网：面板/召唤/团队会话全部可用（AC-18） | 关 Wi-Fi 跑一遍 |
-| S8 | 性能：三层 200×3 包（脚本生成空包）→ `yzero expert list` 计时 ≤80ms（冷/热各一次） | `time` |
+| S8 | 性能：三层 200×3 包（脚本生成空包）→ `delta expert list` 计时 ≤80ms（冷/热各一次） | `time` |
 | **S9** | **AC-19 既有 6 入口零回归**：逐个点 `🖼 图片` / `@文件引用` / `/skill 技能` / `/mcp 扩展工具`（静态 span 不可点）/ 模式 select / 权限 select，行为与改动前逐一对照；再跑 `pnpm smoke:web` | 全部通过；`.composer-tools` 的 DOM 结构与 CSS 类名零变更 |
 | **S10** | **AC-20 面板同构 + 三种关闭**：面板与 `.ac-panel` 逐项对比（`bottom: calc(100%+6px)`、`z-index:30`、`max-height:360px`、`--bg-elevated`、圆角 10px、阴影）；`Esc` / 点面板外 / 再次点 chip 三种方式都能关闭且不残留 | 截图 + DevTools computed style 对比；`theme.css` git diff 为空 |
 | **S11** | **AC-21 提示与字段隔离**：召唤后对话区出现 `ℹ 已召唤「…」（已新建对话）` event-card；**顺序验证**：把 `chat.notice()` 临时挪到 `await openSession()` 之前 → 提示消失（复现陷阱），挪回后正常；**刷新页面 → 提示消失但胶囊仍在**（提示为客户端态、胶囊来自 `sessionMeta`）；新会话胶囊显示正确专家；**用 `GET /api/sessions/:oldId` 确认原会话的 `expert`/`expert_type` 与召唤前完全一致** | event-card 在 L1230 渲染位可见；刷新后 `notices` 为空而胶囊仍在；两次 API 响应 diff 为空 |

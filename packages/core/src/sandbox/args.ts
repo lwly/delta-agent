@@ -10,6 +10,7 @@
 import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { realpathOr } from './config.js';
+import { LABELS } from '../paths.js';
 import { SandboxPathError, type SandboxConfig } from './types.js';
 
 export interface DockerRunSpec {
@@ -39,9 +40,9 @@ export function buildDockerRunArgs(spec: DockerRunSpec): string[] {
 
   // 3-6 容器名与 label（label 是 gc/残留清理的锚点）
   argv.push('--name', spec.containerName);
-  argv.push('--label', `yzero.session=${spec.labels.session}`);
-  argv.push('--label', `yzero.project=${spec.labels.project}`);
-  argv.push('--label', `yzero.created=${spec.labels.created}`);
+  argv.push('--label', `${LABELS.session}=${spec.labels.session}`);
+  argv.push('--label', `${LABELS.project}=${spec.labels.project}`);
+  argv.push('--label', `${LABELS.created}=${spec.labels.created}`);
 
   // 7-9 加固基线（cap-drop / no-new-privileges 不可配）
   if (cfg.readOnlyRoot) argv.push('--read-only');
@@ -169,14 +170,14 @@ export function normalizeMountSource(p: string, platform: NodeJS.Platform = proc
 }
 
 /**
- * 容器名：`yzero-<sid 前 8 位>-<随机 6 位>`。
+ * 容器名：`delta-<sid 前 8 位>-<随机 6 位>`。
  * 随机位用 crypto.randomBytes(3).toString('hex')（零新依赖）；测试可注入 rand。
  */
 export function containerName(sessionId: string, rand?: string): string {
   const cleaned = String(sessionId ?? '').replace(/[^A-Za-z0-9]/g, '');
   const sid8 = cleaned.slice(0, 8) || 'session0';
   const suffix = rand ?? randomBytes(3).toString('hex');
-  return `yzero-${sid8}-${suffix}`;
+  return `delta-${sid8}-${suffix}`;
 }
 
 /**

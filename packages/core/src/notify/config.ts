@@ -1,12 +1,13 @@
 /**
  * F-33 桌面通知 —— 配置体系（设计 §3，样例沿用 F-30 sandbox/config.ts）：
- *  - 两级 JSON（`~/.y-zero/notify.json` < `.y-zero/notify.json`）逐字段覆盖
+ *  - 两级 JSON（`~/.delta/notify.json` < `.delta/notify.json`）逐字段覆盖
  *  - 非法值 ⇒ 降级默认 + warning，**永不 throw**（配置写错不该让 agent 起不来）
  *  - `updateUserNotifyEnabled`：CLI enable/disable 唯一写入口——写前读、只改 enabled、tmp+rename 原子写
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 import {
   DEFAULT_NOTIFY_CONFIG,
   NOTIFY_MERGE_FIELDS,
@@ -81,12 +82,12 @@ export function normalizeNotifyLayer(
 
 /** 全局配置文件路径（`notify enable/disable` 与 status 展示复用，保证单点）。 */
 export function userNotifyConfigPath(homeDir: string = os.homedir()): string {
-  return path.join(homeDir, '.y-zero', 'notify.json');
+  return path.join(userConfigDir(homeDir), FILES.notify);
 }
 
 /** 项目配置文件路径。 */
 export function projectNotifyConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.y-zero', 'notify.json');
+  return path.join(projectConfigDir(projectRoot), FILES.notify);
 }
 
 export interface LoadNotifyConfigOptions {
@@ -157,7 +158,7 @@ export interface UpdateUserNotifyEnabledResult {
 }
 
 /**
- * 修改**全局**通知总开关（`yzero notify enable/disable` 唯一写入口）。
+ * 修改**全局**通知总开关（`delta notify enable/disable` 唯一写入口）。
  * 约束：
  *  - 只改 `enabled` 一个字段，文件内其它字段**原样保留**（写前读）；
  *  - tmp + rename 原子写（进程中断不会留下半个 JSON）；

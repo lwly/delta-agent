@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { OpenAICompatibleProvider } from '../src/llm/providers/openai-compatible.js';
 import { DeepSeekProvider } from '../src/llm/providers/deepseek.js';
 import { convertMessages } from '../src/llm/providers/openai-compatible.js';
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 
 function sseResponse(frames: string[]): Response {
   const encoder = new TextEncoder();

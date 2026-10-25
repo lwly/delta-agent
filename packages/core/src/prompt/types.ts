@@ -4,7 +4,7 @@
  *
  * 7 层架构：L1 Identity / L2 Environment / L3 Project / L4 Tools /
  *          L5 Skills / L6 Memory / L7 Session
- * 三级覆盖：builtin < project(.y-zero/) < session(runtime)
+ * 三级覆盖：builtin < project(.delta/) < session(runtime)
  */
 
 /** 层 id，按拼装顺序排列（即 7 层架构 L1–L7） */
@@ -23,7 +23,7 @@ export type LayerValue = string | Record<string, unknown> | unknown[];
 /** 单层覆盖请求（project 级或 session 级） */
 export type LayerOverride = LayerValue;
 
-/** 三级覆盖集：project 来自 .y-zero/，session 来自运行时注入 */
+/** 三级覆盖集：project 来自 .delta/，session 来自运行时注入 */
 export interface OverrideSet {
   project?: Partial<Record<LayerId, LayerOverride>>;
   session?: Partial<Record<LayerId, LayerOverride>>;
@@ -71,7 +71,7 @@ export interface AssembleResult extends SystemPrompt {
   projectName: string;
   /** L3：README 摘要 / 技术栈 / 目录结构（项目指令静态部分） */
   projectInstructions: string;
-  /** L3：项目静态记忆（MEMORY.md / .y-zero/agent.md 原文），可选 */
+  /** L3：项目静态记忆（MEMORY.md / .delta/agent.md 原文），可选 */
   staticMemory?: string;
   /** L4：已注册工具（name + description + schema） */
   tools: Array<{ name: string; description: string; schema: Record<string, unknown> }>;

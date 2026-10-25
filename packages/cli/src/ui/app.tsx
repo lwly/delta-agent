@@ -9,7 +9,7 @@ import type {
   ConfirmDecision,
   ConfirmRequest,
   ToolCall,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import {
   BudgetManager,
   GitIntegration,
@@ -40,7 +40,7 @@ import {
   type RunContext,
   type SessionRow,
   type SkillRuntime,
-} from '@y-zero/core';
+} from '@delta/core';
 import { ConfirmCard } from './confirm.js';
 import { BranchCard } from './branch-card.js';
 import { WorktreeBar } from './worktree-bar.js';
@@ -77,7 +77,7 @@ function useSpinnerFrame(active: boolean): string {
 export interface AppOptions {
   service: SessionService;
   session: SessionRow;
-  provider: Awaited<ReturnType<typeof import('@y-zero/core').resolveProviderFromEnv>>;
+  provider: Awaited<ReturnType<typeof import('@delta/core').resolveProviderFromEnv>>;
   /** pre-built registry (with MCP tools attached by the CLI entry) */
   registry?: ToolRegistry;
   systemPrompt: string;
@@ -88,9 +88,9 @@ export interface AppOptions {
   /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具） */
   skillsRuntime?: SkillRuntime;
   /** F-27 Hook 系统（SessionStart/Stop/SessionEnd 生命周期 + 工具挂钩） */
-  hooks?: import('@y-zero/core').HookManager;
+  hooks?: import('@delta/core').HookManager;
   /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
-  notify?: import('@y-zero/core').Notifier;
+  notify?: import('@delta/core').Notifier;
   yolo: boolean;
   /** F-23 权限模式（plan/default/yolo；yolo 需与 yolo 标志双重开启，由 CLI 入口保证） */
   permissionMode?: PermissionMode;
@@ -718,7 +718,7 @@ export function App(props: AppOptions) {
           });
           return true;
         case 'new':
-          addItem({ kind: 'system', text: '（/new 完整实现随 M4 多会话管理交付；当前请退出后重新运行 yzero）' });
+          addItem({ kind: 'system', text: '（/new 完整实现随 M4 多会话管理交付；当前请退出后重新运行 delta）' });
           return true;
         case 'todos':
           addItem({
@@ -940,7 +940,7 @@ export function App(props: AppOptions) {
       <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
         {items.length === 0 ? (
           <Text dimColor>
-            y-zero-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
+            delta-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
             {permissionLabel(permsRef.current.policy.mode)}
             {'\n'}输入需求开始；/help 查看命令。
           </Text>
@@ -1060,7 +1060,7 @@ function safeParseArgs(json: string): Record<string, unknown> {
 
 /** L2 记忆召回块（memory-design §7 动态段；空则隐藏）。 */
 function renderMemoryRecallBlock(
-  memory: import('@y-zero/core').MemoryStore | undefined,
+  memory: import('@delta/core').MemoryStore | undefined,
   input: string,
   scopes: string[],
 ): string {

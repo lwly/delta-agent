@@ -21,7 +21,7 @@ export default defineConfig({
     fileParallelism: false,
     server: {
       deps: {
-        inline: [/@modelcontextprotocol/, /@y-zero/],
+        inline: [/@modelcontextprotocol/, /@delta/],
       },
     },
   },

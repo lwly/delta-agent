@@ -1,4 +1,4 @@
-import type { BudgetConfig, BudgetState, ChatMessage, Usage } from '@y-zero/shared';
+import type { BudgetConfig, BudgetState, ChatMessage, Usage } from '@delta/shared';
 
 export const DEFAULT_SESSION_BUDGET: BudgetConfig = {
   maxTokens: 200_000,

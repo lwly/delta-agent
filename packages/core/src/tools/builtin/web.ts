@@ -47,7 +47,7 @@ export const webFetchTool: AgentTool = {
       const res = await fetch(parsed, {
         signal: ctx.signal,
         redirect: 'follow',
-        headers: { 'user-agent': 'y-zero-agent/0.1' },
+        headers: { 'user-agent': 'delta-agent/0.1' },
       });
       const contentType = res.headers.get('content-type') ?? '';
       const text = await res.text();

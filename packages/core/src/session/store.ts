@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 import { migrate } from './migrations.js';
 
 export interface SessionRow {

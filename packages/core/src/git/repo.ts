@@ -15,7 +15,7 @@ export type GitPolicyMode = 'off' | 'suggest' | 'auto';
 
 export interface GitPolicy {
   mode: GitPolicyMode;
-  /** 建议分支前缀（默认 `yzero/`） */
+  /** 建议分支前缀（默认 `delta/`） */
   branchPrefix?: string;
 }
 
@@ -80,9 +80,9 @@ export class GitIntegration {
     return r.code === 0 && r.stdout.length > 0;
   }
 
-  /** 建议工作分支名：yzero/<sessionId 前 8 位>。 */
+  /** 建议工作分支名：delta/<sessionId 前 8 位>。 */
   suggestBranchName(sessionId: string): string {
-    return `${this.policy.branchPrefix ?? 'yzero/'}${sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 8)}`;
+    return `${this.policy.branchPrefix ?? 'delta/'}${sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 8)}`;
   }
 
   async createBranch(name: string): Promise<GitOutcome> {
@@ -142,8 +142,8 @@ export class GitIntegration {
 
     // 身份兜底：仓库未配置 user.email 时用 -c 注入（不污染用户配置）
     const identity = await this.git('config user.email');
-    const cfg = identity.code === 0 && identity.stdout ? '' : '-c user.name=y-zero-agent -c user.email=yzero@local';
-    const msg = `yzero: ${oneLine(label)} (${paths.length} file${paths.length > 1 ? 's' : ''})`;
+    const cfg = identity.code === 0 && identity.stdout ? '' : '-c user.name=delta-agent -c user.email=delta@local';
+    const msg = `delta: ${oneLine(label)} (${paths.length} file${paths.length > 1 ? 's' : ''})`;
     const commit = await this.git(`commit -m ${shellQuote(msg)} ${cfg}`.trim());
     if (commit.code !== 0) return { ok: false, reason: commit.stderr || 'git commit failed' };
     return { ok: true, hash: commit.stdout.split('\n')[0]?.trim() || undefined };

@@ -1,4 +1,4 @@
-# y-zero-agent 执行模式与 Sub-agent 编排设计
+# delta-agent 执行模式与 Sub-agent 编排设计
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 参考：PaiCLI 三模式/Worker Pool/Skill 体系方案 ｜ 关联：technical-design.md §2/§7、memory-design.md
 
@@ -174,8 +174,8 @@ CREATE TABLE tasks (
 ### 7.1 三层覆盖（离项目越近，优先级越高）
 
 ```
-优先级 3（最高）：项目级  .y-zero/skills/        ← 同名覆盖
-优先级 2：        用户级  ~/.y-zero/skills/      ← 同名覆盖
+优先级 3（最高）：项目级  .delta/skills/        ← 同名覆盖
+优先级 2：        用户级  ~/.delta/skills/      ← 同名覆盖
 优先级 1（最低）：内置    packages/core/skills/
 ```
 

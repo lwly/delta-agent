@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { AgentEvent, ChatMessage, ChatRequest, LLMProvider, Plan, PlanDecision, StreamEvent } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, ChatRequest, LLMProvider, Plan, PlanDecision, StreamEvent } from '@delta/shared';
 import { BudgetManager } from '../src/context/budget.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { ToolContext } from '../src/tools/types.js';

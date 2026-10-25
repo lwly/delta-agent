@@ -11,7 +11,7 @@
  * - 丢弃孤儿 tool 消息（前面没有对应调用声明，网关同样会 400）
  * - 完整配对的历史原样保留（不改变顺序，不动 user/system 消息）
  */
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 
 export function sanitizeHistory(messages: ChatMessage[]): ChatMessage[] {
   // 预扫描：拥有 tool 消息响应的 callId 集合（位置只要在后面即可，顺序交由 pending 校验）

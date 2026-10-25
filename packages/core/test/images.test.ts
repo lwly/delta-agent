@@ -2,7 +2,7 @@
  * F-25 多模态：图片附件加载/校验/计价 + Provider 透传映射 单测。
  */
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 import {
   MAX_IMAGES_PER_MESSAGE,
   ImageError,
@@ -119,7 +119,7 @@ describe('F-25 normalizeIncomingImages (HTTP 通道)', () => {
 
 describe('F-25 prepareImages (CLI 文件通道)', () => {
   it('loads a png file from disk', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-img-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-img-'));
     const file = path.join(dir, 'shot.png');
     fs.writeFileSync(file, pngBytes(300, 200));
     const imgs = prepareImages([file]);

@@ -185,7 +185,7 @@ async function submit(): Promise<void> {
 
       <label class="field">
         <span class="label">任务描述（prompt）</span>
-        <textarea v-model="form.prompt" rows="4" placeholder="描述 agent 要完成的任务，等价 yzero run -p" />
+        <textarea v-model="form.prompt" rows="4" placeholder="描述 agent 要完成的任务，等价 delta run -p" />
         <span v-if="errors.prompt" class="err">{{ errors.prompt }}</span>
       </label>
 

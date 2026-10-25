@@ -75,7 +75,7 @@ export interface UnavailableMessageInput {
 function firstAction(reason: SandboxProbeReason, image: string, backend: 'docker' | 'seatbelt'): string {
   if (backend === 'seatbelt') {
     // seatbelt 的失败面比 docker 小得多：平台不符 / 二进制缺失（macOS 自带，几乎不发生）
-    return 'Seatbelt 仅 macOS 可用：Linux/Windows 请改用 docker 后端（.y-zero/sandbox.json → {"mode":"docker"}），或在 macOS 上重试';
+    return 'Seatbelt 仅 macOS 可用：Linux/Windows 请改用 docker 后端（.delta/sandbox.json → {"mode":"docker"}），或在 macOS 上重试';
   }
   switch (reason) {
     case 'cli_missing':
@@ -83,13 +83,13 @@ function firstAction(reason: SandboxProbeReason, image: string, backend: 'docker
     case 'permission_denied':
       return '把当前用户加入 docker 组（或修 /var/run/docker.sock 权限）后重试';
     case 'timeout':
-      return '重启 Docker Desktop 后重试（可用 `yzero sandbox status` 复查）';
+      return '重启 Docker Desktop 后重试（可用 `delta sandbox status` 复查）';
     case 'image_unavailable':
-      return `拉取镜像：\`yzero sandbox pull\`（或检查镜像名 sandbox.image=${image} 与网络）`;
+      return `拉取镜像：\`delta sandbox pull\`（或检查镜像名 sandbox.image=${image} 与网络）`;
     case 'daemon_down':
     case 'not_applicable':
     default:
-      return '启动 Docker Desktop（daemon）后重试（可用 `yzero sandbox status` 复查）';
+      return '启动 Docker Desktop（daemon）后重试（可用 `delta sandbox status` 复查）';
   }
 }
 
@@ -112,14 +112,14 @@ export function buildUnavailableMessage(input: UnavailableMessageInput): string 
 
   const actions: string[] = [firstAction(reason, image, backend)];
   if (enforced) {
-    actions.push('联系项目维护者调整 .y-zero/sandbox.json（enforce:true 下会话无法降级）');
-    actions.push('在维护者调整前，直接在宿主 shell 执行该命令（不经过 yzero）');
+    actions.push('联系项目维护者调整 .delta/sandbox.json（enforce:true 下会话无法降级）');
+    actions.push('在维护者调整前，直接在宿主 shell 执行该命令（不经过 delta）');
   } else {
-    actions.push('本次临时改用本地执行：`yzero run ... --sandbox local`');
+    actions.push('本次临时改用本地执行：`delta run ... --sandbox local`');
     actions.push(
       fallback === 'ask'
-        ? '若希望本项目始终不降级（不再询问）：.y-zero/sandbox.json → {"fallback":"deny"}'
-        : '长期允许降级并询问：.y-zero/sandbox.json → {"fallback":"ask"}',
+        ? '若希望本项目始终不降级（不再询问）：.delta/sandbox.json → {"fallback":"deny"}'
+        : '长期允许降级并询问：.delta/sandbox.json → {"fallback":"ask"}',
     );
   }
 

@@ -4,7 +4,7 @@
  *         running --租约过期/心跳丢失（崩溃恢复）--> queued（孤儿重排，retries+1）
  * 口诀：状态落库 + 租约心跳，让任务崩溃后可恢复。
  */
-import type { Plan, TaskNode } from '@y-zero/shared';
+import type { Plan, TaskNode } from '@delta/shared';
 import type Database from 'better-sqlite3';
 
 export const LEASE_MS = 60_000;

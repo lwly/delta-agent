@@ -324,7 +324,7 @@ if (alert) yield { type: 'budget_alert', ...alert };
 | `packages/shared/src/index.ts` | 修改 | AgentEvent：`budget_alert` 替换 `budget_warning`；`usage` 事件加 `model?` |
 | `packages/cli/src/ui/app.tsx` | 修改 | recordUsage 传 model；`budget_alert` 消费 |
 | `packages/cli/src/headless-run.ts` | 修改 | `budget_alert` stderr NOTICE |
-| `packages/cli/src/usage.ts` | **新增** | `yzero usage` 渲染逻辑（文本表格 + `--json` 同构输出） |
+| `packages/cli/src/usage.ts` | **新增** | `delta usage` 渲染逻辑（文本表格 + `--json` 同构输出） |
 | `packages/cli/src/index.ts` | 修改 | 注册 `usage` 子命令；KNOWN_SUBCOMMANDS 补 `'usage'`（裸任务路由白名单） |
 | `packages/core/src/server/http.ts` | 修改 | `/api/usage/summary`、`/api/usage/sessions` 两个 GET 端点 |
 | `packages/web/src/api/client.ts` | 修改 | usage API 封装 + 响应类型 |
@@ -374,7 +374,7 @@ sequenceDiagram
 
     Note over E,B: 下一轮轮首 guard：若达 100% → budget_exhausted（100% 告警已在 record 后先行发出）
 
-    Note over C,DB: 事后查询：GET /api/usage/summary（或 yzero usage / Web /usage 面板）
+    Note over C,DB: 事后查询：GET /api/usage/summary（或 delta usage / Web /usage 面板）
     C->>S: usageStore.summary({ range, projectId })
     S->>DB: 3 条聚合 SQL（totals / byProject / byModel）
     DB-->>S: 聚合行（含软删除会话费用）
@@ -390,7 +390,7 @@ sequenceDiagram
 | **T01** | Schema v3 迁移 + usage 写入链路（model/created_at） | `core/src/session/migrations.ts`、`store.ts`、`service.ts`、`server/hub.ts`、`headless.ts`、`shared/src/index.ts`、`core/src/engine/react.ts`（usage 事件加 model）、`cli/src/ui/app.tsx`、`core/test/usage.test.ts`（迁移与写入用例） | — | P0 |
 | **T02** | 聚合查询层 UsageStore | `core/src/session/usage.ts`（新增）、`service.ts`（挂载）、`core/src/index.ts`（导出）、`core/test/usage.test.ts`（聚合用例） | T01 | P0 |
 | **T03** | 预算分级告警 | `core/src/context/budget.ts`、`core/src/engine/react.ts`（alert 发出）、`shared/src/index.ts`、`cli/src/headless-run.ts`、`cli/src/ui/app.tsx`、`web/src/stores/chat.ts`、`core/test/budget.test.ts`、`core/test/react.test.ts` | T01（react.ts 串行编辑） | P0 |
-| **T04** | HTTP API + CLI `yzero usage` | `core/src/server/http.ts`、`cli/src/usage.ts`（新增）、`cli/src/index.ts`、`core/test/usage.test.ts`（API 用例）、`scripts/smoke-web.mjs` | T02 | P0（API）/ P1（CLI） |
+| **T04** | HTTP API + CLI `delta usage` | `core/src/server/http.ts`、`cli/src/usage.ts`（新增）、`cli/src/index.ts`、`core/test/usage.test.ts`（API 用例）、`scripts/smoke-web.mjs` | T02 | P0（API）/ P1（CLI） |
 | **T05** | Web 用量面板 UsageView | `web/src/views/UsageView.vue`（新增）、`web/src/router.ts`、`web/src/App.vue`、`web/src/api/client.ts` | T04 | P0 |
 
 **各任务验收方式**
@@ -398,7 +398,7 @@ sequenceDiagram
 - **T01**：`NODE_OPTIONS= pnpm test` 全绿；迁移单测覆盖「空库」「v2 历史库（含存量 usage 回填断言）」「重复打开」三路径，回填后 `model`/`created_at` 与 sessions 一致；新落库行带 model 与 ISO 时间戳；hub 改为逐轮落库后其行为用例（如有快照）回归通过。
 - **T02**：聚合结果与逐行手算一致；today/7d/30d 边界正确（本地时区 0 点）；空数据返回零值结构不报错；软删除会话费用计入 totals/byProject、bySession 列表排除；多项目/多模型/跨范围用例通过。
 - **T03**：50→80→100 严格各告警一次；跨级跳变（一轮 40%→90% 只发 0.8）与双维度取高（token 50% / cost 80% → 发 0.8）单测通过；未超阈值零告警；100% 后退出码 4 与优雅终止摘要与现状完全一致（headless.test.ts 既有断言不回归）。
-- **T04**：非法 `range` 回退 `all` 且响应回显；`/api/usage/summary` 与 `yzero usage --json` 输出 JSON 同构（同一查询层）；CLI `--project` 支持 id 与名称；空数据空态友好；`jq` 可直接消费 `--json`；smoke-web 新增 2 例通过。
+- **T04**：非法 `range` 回退 `all` 且响应回显；`/api/usage/summary` 与 `delta usage --json` 输出 JSON 同构（同一查询层）；CLI `--project` 支持 id 与名称；空数据空态友好；`jq` 可直接消费 `--json`；smoke-web 新增 2 例通过。
 - **T05**：`pnpm smoke:web` 通过（构建 + 端点冒烟）；范围切换与项目筛选正确刷新、空项目/空范围有空态提示；占比条为纯 CSS、无新依赖。
 
 ---

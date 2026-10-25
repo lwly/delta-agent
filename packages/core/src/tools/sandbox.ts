@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { AgentError } from '@y-zero/shared';
+import { AgentError } from '@delta/shared';
 
 /**
  * Path sandbox: every path parameter must resolve inside projectRoot.

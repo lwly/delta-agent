@@ -6,9 +6,10 @@ import * as os from 'node:os';
 import type {
   ToolDefinition,
   ToolResult,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import type { AgentTool, ToolContext } from '../tools/types.js';
 import { ok, fail } from '../tools/types.js';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 
 /** M2 scope: stdio transport. `url` is reserved for the SSE transport (M4 web). */
 export interface McpServerConfig {
@@ -52,7 +53,7 @@ export class McpManager {
       args: config.args ?? [],
       env: { ...process.env, ...config.env } as Record<string, string>,
     });
-    const client = new Client({ name: 'y-zero-agent', version: '0.1.0' });
+    const client = new Client({ name: 'delta-agent', version: '0.1.0' });
     await client.connect(transport);
     this.connections.set(name, { client, config });
   }
@@ -160,15 +161,15 @@ function contentToText(content: unknown[] | undefined): string {
 }
 
 /**
- * Load MCP config: global `~/.y-zero/mcp.json` merged with project-level
- * `.y-zero/mcp.json` (project wins on name conflict). Shape:
+ * Load MCP config: global `~/.delta/mcp.json` merged with project-level
+ * `.delta/mcp.json` (project wins on name conflict). Shape:
  * `{ "mcpServers": { "<name>": { "command": "...", "args": [...], "env": {...} } } }`
  */
 export function loadMcpConfig(projectRoot?: string): Record<string, McpServerConfig> {
   const files: string[] = [
-    path.join(os.homedir(), '.y-zero', 'mcp.json'),
+    path.join(userConfigDir(), FILES.mcp),
   ];
-  if (projectRoot) files.push(path.join(projectRoot, '.y-zero', 'mcp.json'));
+  if (projectRoot) files.push(path.join(projectConfigDir(projectRoot), FILES.mcp));
 
   const merged: Record<string, McpServerConfig> = {};
   for (const file of files) {

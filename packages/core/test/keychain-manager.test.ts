@@ -53,7 +53,7 @@ describe('keychain crypto', () => {
     // 用旧方案（hostname 派生）手工构造密文，模拟 macOS hostname 漂移前的存量数据
     const salt = crypto.randomBytes(16);
     const iv = crypto.randomBytes(12);
-    const secret = `y-zero-agent:${'old-host'}:${os.userInfo().username}`;
+    const secret = `delta-agent:${'old-host'}:${os.userInfo().username}`;
     const cipher = crypto.createCipheriv('aes-256-gcm', crypto.scryptSync(secret, salt, 32), iv);
     const data = Buffer.concat([cipher.update('sk-legacy', 'utf8'), cipher.final()]);
     const stored =
@@ -77,7 +77,7 @@ describe('keychain crypto', () => {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv(
       'aes-256-gcm',
-      crypto.scryptSync('y-zero-agent:foreign-machine:other', salt, 32),
+      crypto.scryptSync('delta-agent:foreign-machine:other', salt, 32),
       iv,
     );
     const data = Buffer.concat([cipher.update('x', 'utf8'), cipher.final()]);
@@ -207,7 +207,7 @@ describe('resolveProviderFromEnv storage fallback', () => {
 
     // clear all vendor keys so the env path misses
     for (const k of Object.keys(process.env)) {
-      if (/ANTHROPIC|DEEPSEEK|DASHSCOPE|OPENAI|YZERO/.test(k)) delete process.env[k];
+      if (/ANTHROPIC|DEEPSEEK|DASHSCOPE|OPENAI|DELTA/.test(k)) delete process.env[k];
     }
 
     const { resolveProviderFromEnv } = await import('../src/session/service.js');

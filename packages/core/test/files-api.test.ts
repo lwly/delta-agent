@@ -11,7 +11,7 @@ import { execSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@delta/shared';
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { SessionHub, createWebServer } from '../src/server/index.js';

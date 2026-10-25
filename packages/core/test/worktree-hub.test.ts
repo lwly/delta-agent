@@ -13,7 +13,7 @@ import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall } from '@delta/shared';
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { ProviderManager } from '../src/llm/manager.js';
@@ -132,7 +132,7 @@ describe('WorktreeManager 边界（QA 补充）', () => {
     const wm = new WorktreeManager(repoRoot);
     const w1 = await wm.addWorktree('sess-holder', { branch: 'feature' });
     expect(w1.ok).toBe(true);
-    const w2 = await wm.addWorktree('sess-attacker'); // 从 HEAD 检出（yzero-sess-att 分支）
+    const w2 = await wm.addWorktree('sess-attacker'); // 从 HEAD 检出（delta-sess-att 分支）
     expect(w2.ok).toBe(true);
     const r = await wm.checkout(w2.path!, { branch: 'feature' });
     expect(r.ok).toBe(false);
@@ -196,7 +196,7 @@ describe('SessionHub F-37 编排（QA 补充）', () => {
     const on = await hub.setWorktree(sessionId, true, { branch: 'feature' });
     expect(on.ok).toBe(true);
     expect(on.path).toBe(
-      path.join(fs.realpathSync(tmpBase), 'my-repo.worktrees', `yzero-${sessionId.slice(0, 8)}`),
+      path.join(fs.realpathSync(tmpBase), 'my-repo.worktrees', `delta-${sessionId.slice(0, 8)}`),
     );
     expect(on.branch).toBe('feature');
 
@@ -319,7 +319,7 @@ describe('F-37 HTTP 端点语义（QA 补充）', () => {
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ ok: true, branch: 'feature' });
     expect(r.json.path).toBe(
-      path.join(fs.realpathSync(tmpBase), 'my-repo.worktrees', `yzero-${sessionId.slice(0, 8)}`),
+      path.join(fs.realpathSync(tmpBase), 'my-repo.worktrees', `delta-${sessionId.slice(0, 8)}`),
     );
   });
 

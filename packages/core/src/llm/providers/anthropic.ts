@@ -5,7 +5,7 @@ import type {
   MessageImage,
   StreamEvent,
   ToolDefinition,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import { parseSse, parseDataFrames, openSseStream, isRetriableOpenError } from '../sse.js';
 import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 

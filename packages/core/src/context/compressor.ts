@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 import { estimateTextTokens, estimateMessagesTokens } from './tokens.js';
 
 /** Tool results longer than this are folded before summarization (chars). */

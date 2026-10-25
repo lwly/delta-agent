@@ -1,4 +1,4 @@
-import type { LLMProvider } from '@y-zero/shared';
+import type { LLMProvider } from '@delta/shared';
 import {
   encryptKey,
   decryptKey,

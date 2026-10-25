@@ -1,4 +1,4 @@
-import type { ToolCall } from '@y-zero/shared';
+import type { ToolCall } from '@delta/shared';
 
 interface Accum {
   id: string;

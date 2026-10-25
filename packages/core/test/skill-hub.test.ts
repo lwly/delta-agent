@@ -70,9 +70,9 @@ async function startMock(handler: (req: http.IncomingMessage, res: http.ServerRe
   };
 }
 
-const userSkillDir = (name: string) => path.join(tmp, '.y-zero', 'skills', name);
-const projectSkillDir = (name: string) => path.join(projectDir, '.y-zero', 'skills', name);
-const sourcesFile = () => path.join(tmp, '.y-zero', 'skill-hub.json');
+const userSkillDir = (name: string) => path.join(tmp, '.delta', 'skills', name);
+const projectSkillDir = (name: string) => path.join(projectDir, '.delta', 'skills', name);
+const sourcesFile = () => path.join(tmp, '.delta', 'skill-hub.json');
 
 interface HubItemView {
   name: string;
@@ -137,7 +137,7 @@ describe('GET /api/skill-hub', () => {
       );
     });
     try {
-      await fs.mkdir(path.join(tmp, '.y-zero'), { recursive: true });
+      await fs.mkdir(path.join(tmp, '.delta'), { recursive: true });
       await fs.writeFile(
         sourcesFile(),
         JSON.stringify({ sources: [{ name: '测试源', url: mock.url('/registry.json') }] }),
@@ -176,7 +176,7 @@ describe('GET /api/skill-hub', () => {
       res.end('boom');
     });
     try {
-      await fs.mkdir(path.join(tmp, '.y-zero'), { recursive: true });
+      await fs.mkdir(path.join(tmp, '.delta'), { recursive: true });
       await fs.writeFile(
         sourcesFile(),
         JSON.stringify({
@@ -225,7 +225,7 @@ describe('POST /api/skill-hub/install', () => {
     expect((detail.json.skills as Array<{ name: string }>).map((s) => s.name)).toContain('test-writer');
   });
 
-  it('安装到项目级：落在项目 .y-zero/skills 下', async () => {
+  it('安装到项目级：落在项目 .delta/skills 下', async () => {
     const r = await api('POST', '/api/skill-hub/install', {
       source: 'builtin', name: 'perf-tips', scope: 'project', projectId,
     });
@@ -338,7 +338,7 @@ describe('GET/PUT /api/skill-hub/sources', () => {
   });
 
   it('skill-hub.json 损坏时 GET hub 仍可用（errors 提示、目录只含内置）', async () => {
-    await fs.mkdir(path.join(tmp, '.y-zero'), { recursive: true });
+    await fs.mkdir(path.join(tmp, '.delta'), { recursive: true });
     await fs.writeFile(sourcesFile(), '{not json', 'utf8');
     const r = await api('GET', '/api/skill-hub');
     expect(r.status).toBe(200);

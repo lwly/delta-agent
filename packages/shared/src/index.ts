@@ -1,5 +1,5 @@
 /**
- * @y-zero/shared — protocol types shared by core, cli and web.
+ * @delta/shared — protocol types shared by core, cli and web.
  * Keep this package dependency-free.
  */
 

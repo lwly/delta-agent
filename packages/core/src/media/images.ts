@@ -10,7 +10,7 @@
  *   无法解析尺寸时退化为字节估算（≈ 原始字节/750，封顶 1600）。
  */
 import * as fs from 'node:fs';
-import type { MessageImage } from '@y-zero/shared';
+import type { MessageImage } from '@delta/shared';
 
 export const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 

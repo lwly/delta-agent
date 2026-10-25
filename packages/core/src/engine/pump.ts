@@ -1,7 +1,7 @@
 /**
  * 事件泵：worker pool 并发回调 → 实时 async 事件流（plan-execute / orchestrator 共用）。
  */
-import type { AgentEvent } from '@y-zero/shared';
+import type { AgentEvent } from '@delta/shared';
 
 export interface EventPump {
   push: (ev: AgentEvent) => void;

@@ -3,7 +3,7 @@
  * 分工不合并：Reviewer 找缺陷提意见；Verifier 跑测试/构建用事实说话。
  * 合并裁决为 ReviewVerdict：不通过时携带失败节点与原因，进入打回闭环。
  */
-import type { LLMProvider, Plan, ReviewVerdict, ToolCall, Usage } from '@y-zero/shared';
+import type { LLMProvider, Plan, ReviewVerdict, ToolCall, Usage } from '@delta/shared';
 import type { ToolContext } from '../tools/types.js';
 import { extractJson } from './planner.js';
 

@@ -1,5 +1,5 @@
 /**
- * yzero 本地 Web 服务（technical-design §8/§10）
+ * delta 本地 Web 服务（technical-design §8/§10）
  * - 纯本地部署：默认 127.0.0.1:7900，仅监听回环地址
  * - REST API：projects / sessions / messages / trash / search / abort / confirm / answer
  * - SSE：GET /api/sessions/:id/events 推送 HubEvent
@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import type { ConfirmDecision } from '@y-zero/shared';
+import type { ConfirmDecision } from '@delta/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
@@ -828,7 +828,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
-      // ── cron（F-22 定时任务面板：清单/增改删/立即运行；存储与 CLI 共用 ~/.y-zero/cron.json）──
+      // ── cron（F-22 定时任务面板：清单/增改删/立即运行；存储与 CLI 共用 ~/.delta/cron.json）──
       if (parts[0] === 'api' && parts[1] === 'cron') {
         const cronHome = opts.cronHomeDir;
         const cronJobs = (): ReturnType<typeof loadCronJobs>['jobs'] => loadCronJobs(cronHome).jobs;

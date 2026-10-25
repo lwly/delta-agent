@@ -3,7 +3,7 @@
  * 简单任务直达 ReAct；复杂任务 LLM 规划 → DAG → Worker Pool 并行执行 → 汇总。
  * 单节点失败：后继 skipped；critical 失败 → 整个 Plan 终止汇报。
  */
-import type { AgentEvent, MessageImage, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@y-zero/shared';
+import type { AgentEvent, MessageImage, Plan, PlanApprovalRequest, PlanDecision, Usage } from '@delta/shared';
 import { runReAct, type RunContext } from './react.js';
 import { buildPlan, resolveSimpleTask } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';

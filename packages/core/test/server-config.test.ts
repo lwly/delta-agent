@@ -53,8 +53,8 @@ const api = async (method: string, p: string, body?: unknown) => {
   return { status: res.status, json };
 };
 
-const userSkillDir = (name: string) => path.join(tmp, '.y-zero', 'skills', name);
-const projectSkillDir = (name: string) => path.join(projectDir, '.y-zero', 'skills', name);
+const userSkillDir = (name: string) => path.join(tmp, '.delta', 'skills', name);
+const projectSkillDir = (name: string) => path.join(projectDir, '.delta', 'skills', name);
 
 async function mkSkill(dir: string, description = '测试技能', body = '执行测试步骤'): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
@@ -125,7 +125,7 @@ describe('POST /api/skills/:name', () => {
     expect(deploy!.description).toBe('新版');
   });
 
-  it('项目级写入落在项目 .y-zero/skills 下', async () => {
+  it('项目级写入落在项目 .delta/skills 下', async () => {
     const r = await api('POST', '/api/skills/proj-only', {
       scope: 'project',
       projectId,
@@ -176,7 +176,7 @@ describe('GET/PUT /api/mcp', () => {
       },
     });
     expect(put.status).toBe(200);
-    const raw = JSON.parse(await fs.readFile(path.join(tmp, '.y-zero', 'mcp.json'), 'utf8'));
+    const raw = JSON.parse(await fs.readFile(path.join(tmp, '.delta', 'mcp.json'), 'utf8'));
     expect(raw.mcpServers.filesystem.command).toBe('npx');
 
     const get = await api('GET', '/api/mcp');
@@ -214,8 +214,8 @@ describe('GET/PUT /api/mcp', () => {
   });
 
   it('解析失败的 mcp.json 进 parseError 不炸端点', async () => {
-    await fs.mkdir(path.join(tmp, '.y-zero'), { recursive: true });
-    await fs.writeFile(path.join(tmp, '.y-zero', 'mcp.json'), '{not json', 'utf8');
+    await fs.mkdir(path.join(tmp, '.delta'), { recursive: true });
+    await fs.writeFile(path.join(tmp, '.delta', 'mcp.json'), '{not json', 'utf8');
     const r = await api('GET', '/api/mcp');
     expect(r.status).toBe(200);
     expect((r.json.global as Record<string, unknown>).parseError).toBeTruthy();

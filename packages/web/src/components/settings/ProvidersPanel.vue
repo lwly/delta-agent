@@ -104,7 +104,7 @@ async function test(id: string) {
         <button class="op del" @click="remove(p.id)">删除</button>
       </span>
     </div>
-    <p v-if="providers.length === 0" class="empty">（空）在下方添加 Provider，或先用 CLI <code>yzero models add</code></p>
+    <p v-if="providers.length === 0" class="empty">（空）在下方添加 Provider，或先用 CLI <code>delta models add</code></p>
   </div>
 
   <div class="form">

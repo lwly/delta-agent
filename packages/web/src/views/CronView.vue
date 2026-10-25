@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 定时任务页（自 CronModal 迁移为独立页面，路由 /cron）：Tab 筛选（全部/已启用/已暂停，带计数）+
 // 任务卡片列表 + 批量管理（多选 + 浮动操作栏）+ 新建/编辑弹窗（CronJobForm，保持弹窗形态）。
-// 存储 ~/.y-zero/cron.json 与 CLI 共用；「立即运行」走 spawn 子进程（与 daemon 同构），
+// 存储 ~/.delta/cron.json 与 CLI 共用；「立即运行」走 spawn 子进程（与 daemon 同构），
 // 提交后轮询运行锁与 last_run；倒计时 30s 刷新（nowTick 注入卡片）。
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { api, type CronJobView } from '../api/client';
@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
       <h2>⏰ 定时任务</h2>
     </div>
     <p class="sub">
-      按 cron 规则定期自动运行 agent 任务（本地时区；存储 ~/.y-zero/cron.json，与 CLI <code>yzero cron</code> 共用）
+      按 cron 规则定期自动运行 agent 任务（本地时区；存储 ~/.delta/cron.json，与 CLI <code>delta cron</code> 共用）
     </p>
     <p v-if="error" class="error">✘ {{ error }}</p>
     <p v-if="toast" class="toast">⚠ {{ toast }}</p>
@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="filteredJobs.length === 0" class="empty">
-      （{{ tab === 'all' ? '暂无定时任务——点「+ 新建」创建，或用 CLI yzero cron add' : '该分组下暂无任务' }}）
+      （{{ tab === 'all' ? '暂无定时任务——点「+ 新建」创建，或用 CLI delta cron add' : '该分组下暂无任务' }}）
     </div>
 
     <CronJobCard

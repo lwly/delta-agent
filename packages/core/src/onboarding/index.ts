@@ -1,13 +1,14 @@
 /**
  * F-34 项目 onboarding：新项目首次启动自动扫描（docs/prd-f34-project-onboarding.md）
  *  - 用一次 LLM 调用从扫描输入生成「项目摘要 + agent.md 草案 + MEMORY.md 草案」（仿 distillMemories 的一次性调用模式）
- *  - 草案落成 `*.draft` 文件，`yzero onboarding confirm` 采纳后改名到位；目标已存在**绝不覆盖**（只提示手工合并）
- *  - 状态存 `.y-zero/onboarding.json`（tmp+rename 原子写；坏 JSON 视为 pending，永不 throw）
+ *  - 草案落成 `*.draft` 文件，`delta onboarding confirm` 采纳后改名到位；目标已存在**绝不覆盖**（只提示手工合并）
+ *  - 状态存 `.delta/onboarding.json`（tmp+rename 原子写；坏 JSON 视为 pending，永不 throw）
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { LLMProvider } from '@y-zero/shared';
+import type { LLMProvider } from '@delta/shared';
 import { scanProjectLayout, type ProjectScan, type ScanOptions, SCAN_SKIP_DIRS } from './scan.js';
+import { FILES, projectConfigDir } from '../paths.js';
 
 // 扫描器符号随模块一起导出（core index.ts 从本模块统一 re-export）
 export { scanProjectLayout, SCAN_SKIP_DIRS };
@@ -47,14 +48,14 @@ export interface ConfirmOnboardingResult {
 
 // ── 路径约定 ────────────────────────────────────────────────────────────────
 
-/** 状态文件路径：`<root>/.y-zero/onboarding.json` */
+/** 状态文件路径：`<root>/.delta/onboarding.json` */
 export function onboardingStatePath(projectRoot: string): string {
-  return path.join(projectRoot, '.y-zero', 'onboarding.json');
+  return path.join(projectConfigDir(projectRoot), FILES.onboarding);
 }
 
-/** agent.md 草案路径：`<root>/.y-zero/agent.md.draft` */
+/** agent.md 草案路径：`<root>/.delta/agent.md.draft` */
 export function agentMdDraftPath(projectRoot: string): string {
-  return path.join(projectRoot, '.y-zero', 'agent.md.draft');
+  return path.join(projectConfigDir(projectRoot), FILES.agentMdDraft);
 }
 
 /** MEMORY.md 草案路径：`<root>/MEMORY.md.draft` */
@@ -62,9 +63,9 @@ export function memoryMdDraftPath(projectRoot: string): string {
   return path.join(projectRoot, 'MEMORY.md.draft');
 }
 
-/** agent.md 正式目标：`<root>/.y-zero/agent.md`（Prompt 组装的静态记忆来源之一） */
+/** agent.md 正式目标：`<root>/.delta/agent.md`（Prompt 组装的静态记忆来源之一） */
 export function agentMdTargetPath(projectRoot: string): string {
-  return path.join(projectRoot, '.y-zero', 'agent.md');
+  return path.join(projectConfigDir(projectRoot), FILES.agentMd);
 }
 
 /** MEMORY.md 正式目标：`<root>/MEMORY.md` */
@@ -252,7 +253,7 @@ function parseMarkedSections(text: string): { summary: string; agentMd: string; 
 // ── 采纳 / 跳过 ─────────────────────────────────────────────────────────────
 
 /**
- * 采纳草案：草案改名到位（`.y-zero/agent.md` / `MEMORY.md`）。
+ * 采纳草案：草案改名到位（`.delta/agent.md` / `MEMORY.md`）。
  * 目标文件已存在时**绝不覆盖**（团队共享文件可能含手工维护内容），归入 skipped 供手工合并。
  */
 export function confirmOnboarding(projectRoot: string): ConfirmOnboardingResult {

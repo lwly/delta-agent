@@ -16,13 +16,13 @@ import { runCommandTool, runTestsTool } from '../src/tools/builtin/exec.js';
 import type { SandboxExecutor, SandboxExecResult, RunOptions } from '../src/sandbox/index.js';
 import type { SandboxMeta } from '../src/sandbox/types.js';
 import type { ToolContext } from '../src/tools/types.js';
-import type { ToolResult } from '@y-zero/shared';
+import type { ToolResult } from '@delta/shared';
 
 // ── 测试基建 ────────────────────────────────────────────────────────────────
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
-    projectRoot: mkdtempSync(join(tmpdir(), 'yzero-exec-')),
+    projectRoot: mkdtempSync(join(tmpdir(), 'delta-exec-')),
     signal: new AbortController().signal,
     confirm: async () => ({ kind: 'allow' }),
     askUser: async () => '',
@@ -175,7 +175,7 @@ describe('注入 SandboxExecutor：meta 与诊断透传', () => {
 
 describe('run_tests：ok 判定保持 code === 0（timedOut 也算过）', () => {
   it('package.json test script + 退出码 0（即使 timedOut）→ ok=true 且带 meta', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'yzero-exec-pkg-'));
+    const root = mkdtempSync(join(tmpdir(), 'delta-exec-pkg-'));
     const fs = await import('node:fs');
     fs.writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { test: 'echo suite' } }));
     const { executor } = makeSpyExecutor({
@@ -192,7 +192,7 @@ describe('run_tests：ok 判定保持 code === 0（timedOut 也算过）', () =>
   });
 
   it('package.json test script 退出码非 0 → fail', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'yzero-exec-pkg-'));
+    const root = mkdtempSync(join(tmpdir(), 'delta-exec-pkg-'));
     const fs = await import('node:fs');
     fs.writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { test: 'echo suite' } }));
     const { executor } = makeSpyExecutor({ code: 1, stdout: 'boom' });

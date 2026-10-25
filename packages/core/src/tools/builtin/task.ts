@@ -9,7 +9,7 @@
  * - 成本隔离：独立 BudgetManager；用量回写父预算保持会话费用口径完整
  * - 深度上限：子代理不可再派生（MAX_SUBAGENT_DEPTH = 1），防递归放大
  */
-import type { AgentEvent, ToolResult, Usage } from '@y-zero/shared';
+import type { AgentEvent, ToolResult, Usage } from '@delta/shared';
 import { fail, type AgentTool, type ToolContext } from '../types.js';
 import { BudgetManager } from '../../context/budget.js';
 import { PermissionState } from '../permissions.js';

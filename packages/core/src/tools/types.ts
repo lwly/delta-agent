@@ -1,4 +1,4 @@
-import type { ConfirmResponder, ToolResult, ToolCall, ToolDefinition, LLMProvider, BudgetConfig } from '@y-zero/shared';
+import type { ConfirmResponder, ToolResult, ToolCall, ToolDefinition, LLMProvider, BudgetConfig } from '@delta/shared';
 import type { PermissionState } from './permissions.js';
 import type { FileChangeStore } from '../session/changes.js';
 import type { HookManager } from '../hooks/manager.js';

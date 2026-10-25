@@ -1,11 +1,11 @@
 /**
- * F-29 Headless / SDK 形态 —— `yzero run` 非交互入口。
+ * F-29 Headless / SDK 形态 —— `delta run` 非交互入口。
  *
  * 用法：
- *   yzero run "任务描述"                     # 人类可读：流式文本到 stdout，过程到 stderr
- *   yzero run -p "任务描述" --json           # 结构化输出：单个 JSON 到 stdout
- *   yzero run "任务" --output result.txt     # 结果落文件
- *   yzero run "任务" -r <sessionId>          # 追加到既有会话
+ *   delta run "任务描述"                     # 人类可读：流式文本到 stdout，过程到 stderr
+ *   delta run -p "任务描述" --json           # 结构化输出：单个 JSON 到 stdout
+ *   delta run "任务" --output result.txt     # 结果落文件
+ *   delta run "任务" -r <sessionId>          # 追加到既有会话
  *
  * 退出码协议（headlessExitCode）：
  *   0 成功 / 1 配置参数错误 / 2 引擎致命错误 / 3 达最大轮次 / 4 预算耗尽 / 5 SIGINT 中断
@@ -38,9 +38,9 @@ import {
   type MessageImage,
   type PreparedImage,
   type RunContext,
-} from '@y-zero/core';
+} from '@delta/core';
 import { assemblePrompt } from './prompt.js';
-import { HookManager } from '@y-zero/core';
+import { HookManager } from '@delta/core';
 import {
   normalizeGitPolicy,
   normalizeMode,
@@ -72,7 +72,7 @@ export interface RunOptions {
 export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   const task = (opts.prompt ?? (Array.isArray(opts.task) ? opts.task.join(' ') : opts.task) ?? '').trim();
   if (!task) {
-    console.error('✘ 缺少任务描述。用法：yzero run "任务描述"（或 yzero run -p "任务" --json）');
+    console.error('✘ 缺少任务描述。用法：delta run "任务描述"（或 delta run -p "任务" --json）');
     process.exitCode = 1;
     return;
   }
@@ -87,7 +87,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     return;
   }
 
-  // MCP：~/.y-zero/mcp.json + .y-zero/mcp.json（项目级优先）
+  // MCP：~/.delta/mcp.json + .delta/mcp.json（项目级优先）
   const registry = new ToolRegistry();
   const mcp = new McpManager();
   for (const [name, cfg] of Object.entries(loadMcpConfig(process.cwd()))) {
@@ -118,7 +118,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   if (!session) {
     session = service.createSession(project.id, {
       title: `headless · ${task.slice(0, 40)}`,
-      model: opts.model ?? process.env.YZERO_MODEL ?? 'claude-sonnet-4-5-20250929',
+      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
       mode: normalizeMode(opts.mode),
     });
   } else if (opts.model) {
@@ -137,10 +137,10 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
         model: session.model || 'claude-sonnet-4-5-20250929',
       });
       if (r && !r.skipped) {
-        console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`yzero onboarding confirm\` 采纳）`);
+        console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
       }
     } catch {
-      console.error('⚠ onboarding 扫描失败（已跳过，可稍后运行 `yzero onboarding run`）');
+      console.error('⚠ onboarding 扫描失败（已跳过，可稍后运行 `delta onboarding run`）');
     }
   }
 

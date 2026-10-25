@@ -39,7 +39,7 @@
 | F-37-1 | core WorktreeManager | 单一模块承载：列本地分支（含当前分支标识）、会话级 checkout、`git worktree add`（基于指定分支或就地新建分支）、worktree 列表/移除/prune、当前工作根查询；所有 git 调用复用 ShellAdapter（跨平台），失败返回结构化 reason 不 throw；超时沿用 GitIntegration 的 15s 口径 |
 | F-37-2 | 会话工作根运行时可重绑定 | projectRoot 从「启动时固化」变为「会话状态字段」：切换分支/worktree 后原子更新，并同步刷新工具沙箱（resolveInSandbox）、run_command cwd、hooks cwd、GitIntegration 的 projectRoot；切换完成后向会话注入一条系统提示（工作根已切换至分支 X / 目录 Y），让模型感知新环境 |
 | F-37-3 | 切换安全规则 | ① 会话运行中（任务未结束）禁止切换，UI 置灰并提示；② 主工作区切分支时若工作区脏（isDirty）则阻止并提示先提交/stash，**不自动 stash**；③ worktree 切换（add 新目录）不受脏工作区影响（新目录从分支 HEAD 干净检出）；④ 提示词 L2 Environment 层随切换重组装（CWD 更新） |
-| F-37-4 | worktree 目录约定 | 存放在**仓库外**避免嵌套：`../<repoName>.worktrees/<sessionId 前 8 位>`（名字形如 `yzero-a1b2c3d4`）；会话与 worktree 目录一一绑定（勾选→创建并切换，取消→切回主工作区，目录保留）；会话持久化记录绑定的工作根，恢复会话时还原绑定 |
+| F-37-4 | worktree 目录约定 | 存放在**仓库外**避免嵌套：`../<repoName>.worktrees/<sessionId 前 8 位>`（名字形如 `delta-a1b2c3d4`）；会话与 worktree 目录一一绑定（勾选→创建并切换，取消→切回主工作区，目录保留）；会话持久化记录绑定的工作根，恢复会话时还原绑定 |
 | F-37-5 | TUI 底栏 | 底栏三段式：左侧项目名 ｜ 中间当前分支（`/branch` 或快捷键弹出分支选择列表：方向键选择/回车切换/`n` 新建）｜ 右侧 Worktree 开关（`/worktree` 或快捷键切换）；切换结果以行内提示反馈（成功/失败原因） |
 | F-37-6 | Web 底栏 | 对话页底部状态条同样三段式：项目名 ｜ 当前分支（点击弹出分支下拉：本地分支列表 + 当前打勾 + 新建输入框）｜ Worktree checkbox（勾选即切入、取消即切回）；切换通过 hub 转发 core 执行，结果以 toast 反馈 |
 | F-37-7 | 与 GitPolicy 衔接 | GitPolicy（off/suggest/auto）语义不变：suggest 启动建议文案与底栏分支信息联动；auto commit 在**当前工作根**执行（worktree 内的会话提交的就是 worktree 里的改动）；F-24 FileChangeStore 相对路径以**当前工作根**为基准，回滚同样作用于当前工作根 |
@@ -48,7 +48,7 @@
 
 | 编号 | 需求 | 描述 |
 |------|------|------|
-| F-37-8 | worktree 生命周期管理 | `yzero worktree list/remove/prune` 子命令组；会话删除时若绑定 worktree 则提示是否一并移除；跨会话孤儿目录（对应会话已删）扫描与清理 |
+| F-37-8 | worktree 生命周期管理 | `delta worktree list/remove/prune` 子命令组；会话删除时若绑定 worktree 则提示是否一并移除；跨会话孤儿目录（对应会话已删）扫描与清理 |
 | F-37-9 | 切换事件可视化 | 分支/worktree 切换作为事件写入会话时间线（Web 回放页可还原切换轨迹）；TUI 以独立样式行展示切换事件 |
 | F-37-10 | worktree 环境引导 | 切入 worktree 后检测 node_modules 缺失等环境问题，提示用户（如「worktree 为干净检出，可能需要重新安装依赖」），不自动执行安装 |
 
@@ -58,7 +58,7 @@
 |------|------|------|
 | F-37-11 | 只读 git 工具 | 向模型暴露受控的分支/worktree 状态查询工具（只读白名单），支持模型在回复中感知当前分支；**不提供**模型可调用的切换能力（防提示词注入乱切） |
 | F-37-12 | 多 worktree 并存 | 一个会话支持按分支切换多个 worktree（当前一期为每会话一个 worktree 目录） |
-| F-37-13 | worktree 配置化 | worktree 存放位置、命名模板进项目级 `.y-zero/settings.json` |
+| F-37-13 | worktree 配置化 | worktree 存放位置、命名模板进项目级 `.delta/settings.json` |
 
 ## 5. 关键交互说明
 
@@ -74,7 +74,7 @@
 
 - 底栏左：项目名（已注册项目名）；中：当前分支（detached HEAD 显示短 hash）；右：Worktree 开关（☐ 主工作区 / ● 已切入 worktree）。
 - `/branch`：弹出分支列表卡（ink 选择卡，与确认卡同风格）——方向键选择、回车 checkout、`n` 输入名称新建并切过去、`Esc` 取消；运行中打开提示「任务运行中，结束后再切换」。
-- `/worktree`：开关注册——勾选路径：脏不拦截（新目录干净检出），创建成功后底栏右侧变 ●，行内提示目录路径；取消路径：切回主工作区，提示「worktree 目录已保留，可用 yzero worktree remove 清理」。
+- `/worktree`：开关注册——勾选路径：脏不拦截（新目录干净检出），创建成功后底栏右侧变 ●，行内提示目录路径；取消路径：切回主工作区，提示「worktree 目录已保留，可用 delta worktree remove 清理」。
 - 切换成功后向会话注入系统提示一行：`[环境] 工作根已切换：<分支> @ <目录>`。
 
 ### 5.2 Web 控制台（packages/web）

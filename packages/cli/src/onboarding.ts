@@ -1,5 +1,5 @@
 /**
- * `yzero onboarding` 子命令组（F-34 设计 §6，样例沿用 notify.ts / sandbox.ts）：
+ * `delta onboarding` 子命令组（F-34 设计 §6，样例沿用 notify.ts / sandbox.ts）：
  *  - status   查看状态、草案与目标文件情况
  *  - run      扫描项目并用一次 LLM 调用生成草案（--force 忽略已有状态重新生成）
  *  - confirm  采纳草案（改名到位；目标已存在绝不覆盖，提示手工合并）
@@ -16,7 +16,7 @@ import {
   agentMdTargetPath,
   memoryMdTargetPath,
   resolveProviderFromEnv,
-} from '@y-zero/core';
+} from '@delta/core';
 
 /** status：打印状态与草案/目标文件情况（不做任何写操作）。 */
 export function onboardingStatusCommand(): void {
@@ -43,8 +43,8 @@ export function onboardingStatusCommand(): void {
     lines.push(`${label}：${hasDraft ? (hasTarget ? `草案与正式文件并存（${draft}，需手工合并）` : `待采纳（${draft}）`) : hasTarget ? `已有正式文件（${target}）` : '无'}`);
   }
   console.log(lines.join('\n'));
-  if (state.status === 'draft') console.log('\n采纳：`yzero onboarding confirm`　跳过：`yzero onboarding skip`');
-  if (state.status === 'pending') console.log('\n生成草案：`yzero onboarding run`');
+  if (state.status === 'draft') console.log('\n采纳：`delta onboarding confirm`　跳过：`delta onboarding skip`');
+  if (state.status === 'pending') console.log('\n生成草案：`delta onboarding run`');
 }
 
 /** run：扫描 + 生成草案（需要已配置模型 provider）。 */
@@ -63,7 +63,7 @@ export async function onboardingRunCommand(opts: { force?: boolean }): Promise<v
     process.exitCode = 1;
     return;
   }
-  const model = process.env.YZERO_MODEL || 'claude-sonnet-4-5-20250929';
+  const model = process.env.DELTA_MODEL || 'claude-sonnet-4-5-20250929';
   console.log(`⏳ 正在扫描项目并生成静态记忆草案（模型：${model}）…`);
   try {
     const r = await runOnboardingScan({ projectRoot, provider, model, force: opts.force });
@@ -73,7 +73,7 @@ export async function onboardingRunCommand(opts: { force?: boolean }): Promise<v
     }
     console.log(`✔ 项目摘要：${r.summary}`);
     console.log(`✔ 草案已生成：\n  ${r.agentMdDraftPath}\n  ${r.memoryMdDraftPath}`);
-    console.log('\n确认采纳：`yzero onboarding confirm`（目标文件已存在时不覆盖，需手工合并）');
+    console.log('\n确认采纳：`delta onboarding confirm`（目标文件已存在时不覆盖，需手工合并）');
   } catch (e) {
     console.error(`✘ onboarding 生成失败：${(e as Error).message}`);
     process.exitCode = 1;
@@ -84,7 +84,7 @@ export async function onboardingRunCommand(opts: { force?: boolean }): Promise<v
 export function onboardingConfirmCommand(): void {
   const r = confirmOnboarding(process.cwd());
   if (r.applied.length === 0 && r.skipped.length === 0) {
-    console.log('ℹ 没有待采纳的草案（先运行 `yzero onboarding run`）');
+    console.log('ℹ 没有待采纳的草案（先运行 `delta onboarding run`）');
     return;
   }
   for (const f of r.applied) console.log(`✔ 已采纳：${f}`);
@@ -97,5 +97,5 @@ export function onboardingConfirmCommand(): void {
 /** skip：跳过 onboarding（不再自动扫描）。 */
 export function onboardingSkipCommand(): void {
   skipOnboarding(process.cwd());
-  console.log('✔ 已跳过 onboarding（新项目首次注册不再自动扫描；可用 `yzero onboarding run --force` 手动触发）');
+  console.log('✔ 已跳过 onboarding（新项目首次注册不再自动扫描；可用 `delta onboarding run --force` 手动触发）');
 }

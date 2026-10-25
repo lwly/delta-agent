@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
-import type { BranchInfo } from '@y-zero/core';
+import type { BranchInfo } from '@delta/core';
 import { theme, icons } from './theme.js';
 
 /**
@@ -46,7 +46,7 @@ export function BranchCard(props: {
             const name = v.trim();
             if (name) props.onNew(name);
           }}
-          placeholder="分支名，如 yzero/fix-login"
+          placeholder="分支名，如 delta/fix-login"
         />
         <Text dimColor>（Esc 放弃新建，返回分支列表）</Text>
       </Box>

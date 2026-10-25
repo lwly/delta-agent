@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>y-zero-agent · AI Coding Agent 控制台</title>
+<title>delta-agent · AI Coding Agent 控制台</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -461,7 +461,7 @@
     <div class="brand">
       <div class="brand-logo">y0</div>
       <div>
-        <div class="brand-name">y-zero-agent</div>
+        <div class="brand-name">delta-agent</div>
         <div class="brand-sub">AI Coding Agent · v0.1.0</div>
       </div>
     </div>
@@ -485,7 +485,7 @@
   <div class="main">
 
     <div class="topbar">
-      <div class="topbar-crumb" id="crumb">y-zero-agent <span class="dim">/</span> quant-engine <span class="dim">/</span> <span id="crumbSession">修复回测 look-ahead bias</span></div>
+      <div class="topbar-crumb" id="crumb">delta-agent <span class="dim">/</span> quant-engine <span class="dim">/</span> <span id="crumbSession">修复回测 look-ahead bias</span></div>
 
       <div class="mode-switch">
         <button class="mode-btn react-mode active" data-mode="react" onclick="setMode(this)">
@@ -564,7 +564,7 @@
     <button class="cfg-add" onclick="addProvider()">＋ 添加模型服务（Anthropic / OpenAI 兼容 / DeepSeek / Qwen…）</button>
     <div class="cfg-note">
       🔐 API Key 存储于<b>系统钥匙串</b>（mac Keychain / Win Credential Manager），界面不回显；保存前自动<b>连通性测试</b>。
-      配置修改仅对<b>新对话</b>生效；项目级 <b>.y-zero/models.json</b> 可覆盖全局默认。
+      配置修改仅对<b>新对话</b>生效；项目级 <b>.delta/models.json</b> 可覆盖全局默认。
     </div>
     <div class="modal-btns" style="margin-top:14px">
       <button onclick="closeCfg()">关闭</button>
@@ -656,7 +656,7 @@ function switchSession(pid, sid) {
   renderSidebar();
   const p = projects.find(p=>p.id===pid), s = p.sessions.find(s=>s.id===sid);
   document.getElementById('crumb').innerHTML =
-    `y-zero-agent <span class="dim">/</span> ${p.name} <span class="dim">/</span> <span>${s.title}</span>`;
+    `delta-agent <span class="dim">/</span> ${p.name} <span class="dim">/</span> <span>${s.title}</span>`;
   fakeToast(`已切换对话：${s.title}（上下文已恢复）`);
 }
 
@@ -691,7 +691,7 @@ function addAIMsg(html, meta) {
   d.className = 'msg';
   d.innerHTML = `
     <div class="msg-meta"><div class="avatar ai" style="width:22px;height:22px;font-size:9px;border-radius:6px">y0</div>
-      <span>y-zero-agent</span>
+      <span>delta-agent</span>
       <span class="tag turn">${meta.turn}</span>
       <span class="tag tok">${meta.tok}</span></div>
     <div style="margin-left:30px"><div class="msg-text">${html}</div></div>`;
@@ -852,7 +852,7 @@ function askRemove(kind, id, name) {
     input.classList.remove('show'); btn.disabled = false; btn.textContent = '删除（软删除）';
   } else {
     title.textContent = '移除项目';
-    desc.innerHTML = `将移除项目 <b>「${name}」</b> 及其下<b>所有会话</b>（级联软删除，30 天内可恢复）。<br>⚠ 仅解除注册与停用项目级 MCP/Skills 配置，<b>不会删除磁盘上的源码与 .y-zero/ 目录</b>。<br>为防误操作，请输入项目名确认：`;
+    desc.innerHTML = `将移除项目 <b>「${name}」</b> 及其下<b>所有会话</b>（级联软删除，30 天内可恢复）。<br>⚠ 仅解除注册与停用项目级 MCP/Skills 配置，<b>不会删除磁盘上的源码与 .delta/ 目录</b>。<br>为防误操作，请输入项目名确认：`;
     input.classList.add('show'); input.value = ''; btn.disabled = true; btn.textContent = '移除（软删除）';
   }
   mask.classList.add('show');
@@ -947,7 +947,7 @@ let memories = [
   { id:'m1', kind:'preference', on:true,  content:'用户偏好中文沟通，代码注释与提交信息用中文', imp:0.9, conf:0.95, score:87.4, access:23, src:'tool' },
   { id:'m2', kind:'decision',  on:true,  content:'QuantEdge 遵循"先修底层再开新模块"原则，压缩参数统一 80%/55%', imp:0.8, conf:0.9, score:65.8, access:11, src:'auto' },
   { id:'m3', kind:'pitfall',   on:true,  content:'wzky-wms 的 Sa-Token 拦截器需排除 /auth/** 路径，否则登录接口 401', imp:0.7, conf:0.85, score:42.6, access:7, src:'tool' },
-  { id:'m4', kind:'fact',      on:true,  content:'用户主力项目目录：y-zero-agent（TS Agent）、wzky-wms（Java WMS）', imp:0.6, conf:0.9, score:38.1, access:15, src:'auto' },
+  { id:'m4', kind:'fact',      on:true,  content:'用户主力项目目录：delta-agent（TS Agent）、wzky-wms（Java WMS）', imp:0.6, conf:0.9, score:38.1, access:15, src:'auto' },
   { id:'m5', kind:'workflow',  on:false, content:'发版前先跑 pnpm test && pnpm build 双平台冒烟', imp:0.5, conf:0.7, score:12.3, access:2, src:'tool' },
 ];
 let pendingMemories = [

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 设置页·MCP 配置面板：全局（~/.y-zero/mcp.json）与项目级（<root>/.y-zero/mcp.json）
+// 设置页·MCP 配置面板：全局（~/.delta/mcp.json）与项目级（<root>/.delta/mcp.json）
 // 两作用域的 mcpServers 增删改（整体保存覆盖对应文件）。项目级同名覆盖全局。
 // 如实标注：当前仅支持 stdio 传输；MCP 配置在 CLI 会话生效，Web 控制台会话尚未接入 MCP 桥。
 import { computed, onMounted, ref, watch } from 'vue';
@@ -174,7 +174,7 @@ async function save() {
     <!-- 作用域切换 -->
     <div class="scope-bar">
       <button class="scope-pill" :class="{ on: scope === 'global' }" @click="switchScope('global')">
-        全局 <code>~/.y-zero/mcp.json</code>
+        全局 <code>~/.delta/mcp.json</code>
       </button>
       <button
         class="scope-pill"
@@ -182,7 +182,7 @@ async function save() {
         :title="projectEnabled ? `项目级：${activeProjectName}` : '回到工作台选中项目后启用'"
         @click="switchScope('project')"
       >
-        项目级 <code>.y-zero/mcp.json</code>
+        项目级 <code>.delta/mcp.json</code>
       </button>
       <span class="scope-path" :title="scopePath">{{ scopePath }}</span>
     </div>
@@ -233,7 +233,7 @@ async function save() {
     </div>
 
     <p class="foot-note">
-      ⚠ 生效范围：MCP 配置当前由 CLI 运行（<code>yzero</code> 命令行会话）加载；Web 控制台会话尚未接入 MCP
+      ⚠ 生效范围：MCP 配置当前由 CLI 运行（<code>delta</code> 命令行会话）加载；Web 控制台会话尚未接入 MCP
       工具桥，此处修改对 Web 会话不生效。工具将以 <code>mcp__&lt;服务器&gt;__&lt;工具&gt;</code> 形式注册并默认逐次确认。
     </p>
   </section>

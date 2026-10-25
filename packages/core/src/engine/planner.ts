@@ -3,7 +3,7 @@
  * - detectSimpleTask: 启发式第一层（关键词/意图分类）
  * - buildPlan: LLM 一次调用产出 DAG JSON，解析失败/结构非法时带错误反馈修复重试
  */
-import type { LLMProvider, Plan, TaskNode, TaskRole, Usage } from '@y-zero/shared';
+import type { LLMProvider, Plan, TaskNode, TaskRole, Usage } from '@delta/shared';
 import { validatePlan } from './plan.js';
 
 /** 复杂信号关键词：命中即判复杂（重构/迁移/批量/多模块）。 */

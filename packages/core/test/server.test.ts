@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { AgentEvent, ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall, ConfirmDecision } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall, ConfirmDecision } from '@delta/shared';
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { ProviderManager } from '../src/llm/manager.js';

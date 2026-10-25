@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
-import type { ConfirmDecision, ConfirmRequest } from '@y-zero/shared';
+import type { ConfirmDecision, ConfirmRequest } from '@delta/shared';
 import { theme, icons } from './theme.js';
 
 /**

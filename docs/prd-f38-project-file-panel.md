@@ -227,7 +227,7 @@
 | 类别 | 目录 |
 |---|---|
 | **必忽略**（不可见） | `node_modules`、`.git`、`dist`、`build`、`out`、`coverage`、`target`、`__pycache__`、`.venv`、`venv`、`.next`、`.nuxt`、`bin`、`obj` |
-| **必须显示**（点号目录照常展示） | `.github`、`.workbuddy`、`.vscode`、`.idea`、`.config`、`.claude`、`.y-zero` 以及任何其它点号目录 |
+| **必须显示**（点号目录照常展示） | `.github`、`.workbuddy`、`.vscode`、`.idea`、`.config`、`.claude`、`.delta` 以及任何其它点号目录 |
 
 ## 7. 技术约束（已定，勿在 PRD 层展开方案）
 

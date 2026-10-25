@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { ToolCall } from '@y-zero/shared';
+import type { ToolCall } from '@delta/shared';
 import { GitIntegration, SessionStore, ToolRegistry } from '../src/index.js';
 import { FileChangeStore } from '../src/session/changes.js';
 import type { ToolContext } from '../src/tools/types.js';
@@ -70,16 +70,16 @@ describe('GitIntegration 基础探测', () => {
     const note = await git.advisory('s1');
     expect(note).toContain('建议');
     expect(note).toContain(git.suggestBranchName('s1'));
-    // 分支名格式：yzero/<sessionId 前 8 位>
-    expect(git.suggestBranchName('s1')).toMatch(/^yzero\/s1$/);
+    // 分支名格式：delta/<sessionId 前 8 位>
+    expect(git.suggestBranchName('s1')).toMatch(/^delta\/s1$/);
   });
 
   it('createBranch 创建并切换分支', async () => {
     initRepo();
     const git = new GitIntegration(tmpRoot, { mode: 'suggest' });
-    const res = await git.createBranch('yzero/test');
+    const res = await git.createBranch('delta/test');
     expect(res.ok).toBe(true);
-    expect(await git.currentBranch()).toBe('yzero/test');
+    expect(await git.currentBranch()).toBe('delta/test');
   });
 });
 
@@ -98,7 +98,7 @@ describe('autoCommitChanges（auto 策略）', () => {
     expect(committed).toContain('src/a.ts');
     expect(committed).not.toContain('user-note.txt');
     const msg = execSync('git log -1 --format=%s', { cwd: tmpRoot }).toString();
-    expect(msg).toContain('yzero:');
+    expect(msg).toContain('delta:');
     expect(msg).toContain('实现 a 模块');
   });
 

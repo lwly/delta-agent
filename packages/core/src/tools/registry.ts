@@ -7,8 +7,8 @@ import type {
   ToolCall,
   ToolDefinition,
   ToolResult,
-} from '@y-zero/shared';
-import { AgentError } from '@y-zero/shared';
+} from '@delta/shared';
+import { AgentError } from '@delta/shared';
 import type { AgentTool, ToolContext } from './types.js';
 import { resolveInSandbox } from './sandbox.js';
 import { readSnapshot } from '../session/changes.js';

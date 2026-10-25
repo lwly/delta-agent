@@ -16,7 +16,7 @@ import type { Notifier, NotifyConfig } from './types.js';
 import { loadNotifyConfig } from './config.js';
 
 /** 通知标题统一前缀（与命令名一致，用户一眼知道是谁在通知） */
-const NOTIFY_TITLE = 'y-zero-agent';
+const NOTIFY_TITLE = 'delta-agent';
 
 /** 正文最大长度（系统通知面板展示差，且降低转义风险） */
 const MAX_BODY_LENGTH = 200;
@@ -57,7 +57,7 @@ function defaultRunner(cmd: string, args: string[], timeoutMs: number): Promise<
 }
 
 export interface DesktopNotifierOptions {
-  /** 项目根（项目级配置 `.y-zero/notify.json` 的查找基准；缺省 process.cwd()） */
+  /** 项目根（项目级配置 `.delta/notify.json` 的查找基准；缺省 process.cwd()） */
   projectRoot?: string;
   /** 用户主目录（缺省 os.homedir()） */
   homeDir?: string;
@@ -122,7 +122,7 @@ export class DesktopNotifier implements Notifier {
 
   /**
    * 构造平台命令并发送（fire-and-forget）。无可用后端（未知平台）时静默返回。
-   * 供 `yzero notify test` 复用；返回发送 Promise 便于 CLI 等待结果（仍不抛错）。
+   * 供 `delta notify test` 复用；返回发送 Promise 便于 CLI 等待结果（仍不抛错）。
    */
   deliver(title: string, body: string): Promise<void> {
     const command = buildNotifyCommand(this.platform, title, body);

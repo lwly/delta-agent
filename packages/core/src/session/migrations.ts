@@ -190,7 +190,7 @@ export function migrate(db: Database.Database): MigrateResult {
   const from = currentSchemaVersion(db);
   if (from > LATEST_SCHEMA_VERSION) {
     throw new Error(
-      `数据库 schema 版本 ${from} 高于程序支持的最高版本 ${LATEST_SCHEMA_VERSION}（是否用更新版本的 yzero 打开过？）`,
+      `数据库 schema 版本 ${from} 高于程序支持的最高版本 ${LATEST_SCHEMA_VERSION}（是否用更新版本的 delta 打开过？）`,
     );
   }
   const applied: number[] = [];
