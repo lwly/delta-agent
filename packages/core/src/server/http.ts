@@ -18,6 +18,16 @@ import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
 import { discoverSkills } from '../skills/loader.js';
 import {
+  deleteSkill,
+  listLayerSkills,
+  readMcpConfigs,
+  skillLayerDirs,
+  validateConfigName,
+  validateMcpServers,
+  writeMcpServers,
+  writeSkill,
+} from './config-store.js';
+import {
   addCronJob,
   cronJobToJson,
   loadCronJobs,
@@ -26,6 +36,15 @@ import {
   findCronJob,
 } from '../cron/store.js';
 import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
+import {
+  deriveNameFromUrl,
+  findHubEntry,
+  importSkillFromUrl,
+  listHubSnapshot,
+  readHubSources,
+  validateHubSources,
+  writeHubSources,
+} from './skill-hub.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -45,6 +64,8 @@ export interface ServeOptions {
   cronHomeDir?: string;
   /** Composer 自动补全：用户级 skills 扫描目录（缺省 os.homedir()；测试注入临时目录隔离） */
   skillsHomeDir?: string;
+  /** Skills/MCP 配置读写根目录（缺省回落 skillsHomeDir 再缺省 os.homedir()；测试注入临时目录隔离） */
+  configHomeDir?: string;
 }
 
 /**
@@ -257,6 +278,237 @@ export function createWebServer(opts: ServeOptions): http.Server {
             skills: skills.map((s) => ({ name: s.name, description: s.description, layer: s.layer })),
             errors,
           });
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
+        }
+      }
+
+      // ── Skills / MCP 配置中心（设置页 Skills / MCP 面板）──────────────────
+      // 配置读写根：configHomeDir 优先（测试隔离），回落 skillsHomeDir，再缺省主目录
+      const configHome = opts.configHomeDir ?? opts.skillsHomeDir ?? os.homedir();
+
+      // GET /api/skills/detail?projectId=<id> —— 分层原始发现 + 合并视图（含同名覆盖标识）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skills' && parts[2] === 'detail' && parts.length === 3) {
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (projectId && !projectRoot) return err(res, 404, 'project not found');
+        const layers = skillLayerDirs({ homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) });
+        const dirs: Array<{ layer: 'builtin' | 'user' | 'project'; dir: string | null }> = [
+          { layer: 'builtin', dir: layers.builtin },
+          { layer: 'user', dir: layers.user },
+          { layer: 'project', dir: layers.project },
+        ];
+        const errors: string[] = [];
+        const perLayer: Record<string, Array<Record<string, unknown>>> = { builtin: [], user: [], project: [] };
+        const byName = new Map<string, Record<string, unknown>>();
+        const availability = new Map<string, Array<'builtin' | 'user' | 'project'>>();
+        for (const { layer, dir } of dirs) {
+          if (!dir) continue;
+          const { skills, errors: layerErrors } = await listLayerSkills(dir, layer);
+          errors.push(...layerErrors);
+          for (const s of skills) {
+            const view = {
+              name: s.name,
+              description: s.description,
+              triggers: s.triggers,
+              toolsAllowlist: s.toolsAllowlist,
+              layer: s.layer,
+              dir: s.dir,
+              references: s.references,
+              body: s.body,
+            };
+            perLayer[layer].push(view);
+            const prev = byName.get(s.name);
+            // 遍历顺序 builtin → user → project：高层覆盖低层；覆盖标记挂在胜出视图上
+            if (prev) (view as { shadowing?: string }).shadowing = (prev as { layer: string }).layer;
+            byName.set(s.name, view);
+            const av = availability.get(s.name) ?? [];
+            av.push(layer);
+            availability.set(s.name, av);
+          }
+        }
+        return json(res, 200, {
+          skills: [...byName.values()],
+          layers: perLayer,
+          availability: Object.fromEntries(availability),
+          errors,
+        });
+      }
+
+      // POST /api/skills/:name —— 新建/覆盖一个用户级或项目级 Skill（内置层拒绝）
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'skills' && parts[2] && parts.length === 3) {
+        const body = await readBody(req);
+        const scope = String(body.scope ?? '');
+        if (scope !== 'user' && scope !== 'project') return err(res, 400, 'scope 必须是 user 或 project');
+        const projectId = body.projectId ? String(body.projectId) : undefined;
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (scope === 'project' && !projectRoot) return err(res, 404, 'project not found');
+        const toList = (v: unknown): string[] =>
+          Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
+        try {
+          const file = await writeSkill(
+            parts[2]!,
+            scope,
+            {
+              description: String(body.description ?? ''),
+              triggers: toList(body.triggers),
+              toolsAllowlist: toList(body.toolsAllowlist),
+              body: String(body.body ?? ''),
+            },
+            { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) },
+          );
+          return json(res, 200, { ok: true, path: file });
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // DELETE /api/skills/:name?scope=user|project&projectId=<id> —— 删除用户级/项目级 Skill
+      if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'skills' && parts[2] && parts.length === 3) {
+        const scope = url.searchParams.get('scope');
+        if (scope !== 'user' && scope !== 'project') return err(res, 400, 'scope 必须是 user 或 project');
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (scope === 'project' && !projectRoot) return err(res, 404, 'project not found');
+        try {
+          await deleteSkill(parts[2]!, scope, { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) });
+          return json(res, 200, { ok: true });
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // ── Skill Hub（技能市场：目录浏览 / 预览 / 一键安装 / 远程源管理）──────
+      // GET /api/skill-hub?projectId=<id> —— 合并目录（内置 + 远程源实时拉取）+ installedIn
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skill-hub' && parts.length === 2) {
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (projectId && !projectRoot) return err(res, 404, 'project not found');
+        try {
+          const snapshot = await listHubSnapshot(
+            { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) },
+            configHome,
+          );
+          return json(res, 200, snapshot);
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
+        }
+      }
+
+      // GET /api/skill-hub/item?source=builtin|<源名>&name=<名称>&projectId= —— 单条完整 entry（安装前预览）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skill-hub' && parts[2] === 'item' && parts.length === 3) {
+        const source = url.searchParams.get('source') ?? 'builtin';
+        const name = url.searchParams.get('name') ?? '';
+        if (!name) return err(res, 400, 'name is required');
+        try {
+          const entry = await findHubEntry(configHome, source, name);
+          return entry ? json(res, 200, entry) : err(res, 404, `条目不存在：${source}/${name}`);
+        } catch (e) {
+          return err(res, 502, (e as Error).message);
+        }
+      }
+
+      // POST /api/skill-hub/install —— 安装到用户级/项目级
+      // 两种模式：url 模式（导入 SKILL.md raw 原文）与目录模式（source+name 必须从目录取，防绕过校验）
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'skill-hub' && parts[2] === 'install' && parts.length === 3) {
+        const body = await readBody(req);
+        const scope = String(body.scope ?? '');
+        if (scope !== 'user' && scope !== 'project') return err(res, 400, 'scope 必须是 user 或 project');
+        const projectId = body.projectId ? String(body.projectId) : undefined;
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (scope === 'project' && !projectRoot) return err(res, 404, 'project not found');
+        const layers = { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) };
+
+        try {
+          let name: string;
+          let skillInput: { description: string; triggers: string[]; toolsAllowlist: string[]; body: string };
+          if (typeof body.url === 'string' && body.url.trim() !== '') {
+            // url 导入模式：fetch SKILL.md 原文并解析 frontmatter
+            const importUrl = body.url.trim();
+            const imported = await importSkillFromUrl(importUrl);
+            const derived = body.name ? String(body.name).trim() : deriveNameFromUrl(importUrl) ?? '';
+            name = derived;
+            const invalid = validateConfigName(name);
+            if (invalid) {
+              return err(res, 400, `无法确定合法 Skill 名称（${invalid}）；请显式传入 name`);
+            }
+            skillInput = imported;
+          } else {
+            // 目录模式：source+name 必须能在目录中找到（不接受客户端直接传内容）
+            const source = String(body.source ?? 'builtin');
+            name = String(body.name ?? '').trim();
+            if (!name) return err(res, 400, 'name is required');
+            const entry = await findHubEntry(configHome, source, name);
+            if (!entry) {
+              return err(res, 404, `目录中不存在条目：${source}/${name}（远程源拉取失败或已下架）`);
+            }
+            name = entry.name;
+            skillInput = {
+              description: entry.description,
+              triggers: entry.triggers,
+              toolsAllowlist: entry.toolsAllowlist,
+              body: entry.body,
+            };
+          }
+          const file = await writeSkill(name, scope, skillInput, layers);
+          return json(res, 200, { ok: true, name, path: file });
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // GET /api/skill-hub/sources —— 读取远程源配置（skill-hub.json）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'skill-hub' && parts[2] === 'sources' && parts.length === 3) {
+        const { sources, error } = await readHubSources(configHome);
+        return json(res, 200, { sources, ...(error ? { error } : {}) });
+      }
+
+      // PUT /api/skill-hub/sources —— 整体覆盖写入远程源配置（写入前形状校验）
+      if (method === 'PUT' && parts[0] === 'api' && parts[1] === 'skill-hub' && parts[2] === 'sources' && parts.length === 3) {
+        const body = await readBody(req);
+        let validated;
+        try {
+          validated = validateHubSources(body.sources);
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+        try {
+          const file = await writeHubSources(configHome, validated);
+          return json(res, 200, { ok: true, path: file });
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
+        }
+      }
+
+      // GET /api/mcp?projectId=<id> —— 全局/项目两级 mcp.json 原始内容 + 合并视图
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 2) {
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (projectId && !projectRoot) return err(res, 404, 'project not found');
+        const snapshot = await readMcpConfigs({ homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) });
+        return json(res, 200, { ...snapshot, projectEnabled: Boolean(projectRoot) });
+      }
+
+      // PUT /api/mcp —— 整体写入某作用域的 mcpServers（scope=global|project）
+      if (method === 'PUT' && parts[0] === 'api' && parts[1] === 'mcp' && parts.length === 2) {
+        const body = await readBody(req);
+        const scope = String(body.scope ?? '');
+        if (scope !== 'global' && scope !== 'project') return err(res, 400, 'scope 必须是 global 或 project');
+        const projectId = body.projectId ? String(body.projectId) : undefined;
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (scope === 'project' && !projectRoot) return err(res, 404, 'project not found');
+        let servers: ReturnType<typeof validateMcpServers>;
+        try {
+          servers = validateMcpServers(body.mcpServers);
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+        try {
+          const file = await writeMcpServers(scope, servers, {
+            homeDir: configHome,
+            ...(projectRoot ? { projectRoot } : {}),
+          });
+          return json(res, 200, { ok: true, path: file });
         } catch (e) {
           return err(res, 500, (e as Error).message);
         }
@@ -688,6 +940,24 @@ export function createWebServer(opts: ServeOptions): http.Server {
         } catch (e) {
           return err(res, 400, (e as Error).message);
         }
+      }
+      // POST /api/trash/purge-batch —— 批量彻底清除
+      // 结构校验（空/非数组/条目缺 kind|id）→ 400；条目不在回收站 → 单条计入 failed
+      if (method === 'POST' && parts[1] === 'trash' && parts[2] === 'purge-batch' && parts.length === 3) {
+        const body = await readBody(req);
+        const items = Array.isArray(body.items) ? body.items : [];
+        const isValidItem = (it: unknown): it is { kind: 'project' | 'session'; id: string } =>
+          typeof it === 'object' &&
+          it !== null &&
+          ((it as { kind?: unknown }).kind === 'project' || (it as { kind?: unknown }).kind === 'session') &&
+          typeof (it as { id?: unknown }).id === 'string' &&
+          (it as { id?: unknown }).id !== '';
+        if (items.length === 0 || items.some((it) => !isValidItem(it))) {
+          return err(res, 400, 'items must be a non-empty array of { kind: project|session, id: string }');
+        }
+        const result = service.purgeTrashBatch(items);
+        // 单条失败不整体报错：ok 恒为 true，失败明细在 failed 中由前端展示
+        return json(res, 200, { ok: true, purged: result.purged, failed: result.failed });
       }
       // F-17 对话检索：全文/语义搜索历史消息（置于 /api/search 之前避免被会话检索截获）
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'search' && parts[2] === 'messages') {
