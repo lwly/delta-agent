@@ -132,14 +132,16 @@ watch(() => [chat.sessionId, chat.running], () => {
 </template>
 
 <style scoped>
-/* 吸附输入框正下方的附属状态行：与 composer 同宽（随 composer-wrap 内缩）、无横贯分隔线 */
+/* 输入框卡片内置页脚：负 margin 抵消 composer 内边距拉通同宽，与卡片圆角拼合成一体 */
 .git-bar {
-  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 6px;
-  padding: 2px 10px;
+  margin: 10px -14px -10px;
+  padding: 5px 14px 7px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 0 0 11px 11px;
   font-size: 11.5px;
   color: var(--text-faint);
 }

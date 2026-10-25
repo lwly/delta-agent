@@ -1336,10 +1336,10 @@ watch(
               </button>
             </div>
             <div class="rsz bottom" title="拖动调整输入框高度" @pointerdown="startComposerResize('bottom', $event)"></div>
-          </div>
 
-          <!-- F-37 底部状态条：吸附输入框正下方（项目名 ｜ 当前分支 ｜ Worktree 开关） -->
-          <GitStatusBar v-if="chat.sessionId" />
+            <!-- F-37 底部状态条：作为输入框卡片内置页脚（同宽拼合，项目名 ｜ 当前分支 ｜ Worktree 开关） -->
+            <GitStatusBar v-if="chat.sessionId" />
+          </div>
         </div>
       </template>
       </template>
