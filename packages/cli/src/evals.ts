@@ -1,9 +1,9 @@
 /**
- * F-28 Evals 评测体系 —— `yzero evals` 子命令。
+ * F-28 Evals 评测体系 —— `delta evals` 子命令。
  *
- *   yzero evals list                                  # 内置/自定义基准集清单
- *   yzero evals run  [--provider a,b,c] ...           # 跑基准集（多 provider 自动横向对比）
- *   yzero evals baseline --save | --check ...         # 回归保护：保存基线 / 对比基线
+ *   delta evals list                                  # 内置/自定义基准集清单
+ *   delta evals run  [--provider a,b,c] ...           # 跑基准集（多 provider 自动横向对比）
+ *   delta evals baseline --save | --check ...         # 回归保护：保存基线 / 对比基线
  *
  * 复用 F-29 headless 内核：每用例独立会话 + 独立预算 + 独立权限状态，
  * 判分在 core/evals 内确定性完成；报告默认 Markdown，--json 输出结构化结果。
@@ -13,6 +13,9 @@ import * as path from 'node:path';
 import {
   BUILTIN_SUITE,
   BudgetManager,
+  CONFIG_DIR,
+  FILES,
+  projectConfigDir,
   HookManager,
   McpManager,
   PermissionState,
@@ -33,7 +36,7 @@ import {
   saveBaseline,
   type EvalSuite,
   type SuiteRun,
-} from '@y-zero/core';
+} from '@delta/core';
 import { assemblePrompt } from './prompt.js';
 import { normalizeMode, parseAllowTools, resolvePermissionMode } from './shared.js';
 
@@ -55,7 +58,7 @@ export interface EvalsOptions {
   db?: string;
 }
 
-const BASELINE_PATH = path.join('.y-zero', 'evals', 'baseline.json');
+const BASELINE_PATH = path.join(CONFIG_DIR, FILES.evalsDir, 'baseline.json');
 
 // ── evals list ──────────────────────────────────────────────────────────────
 
@@ -66,7 +69,7 @@ export async function evalsListCommand(opts: EvalsOptions): Promise<void> {
     return;
   }
   printSuite(BUILTIN_SUITE, '内置');
-  const local = path.join(process.cwd(), '.y-zero', 'evals', 'suite.json');
+  const local = path.join(projectConfigDir(process.cwd()), FILES.evalsDir, 'suite.json');
   if (fs.existsSync(local)) {
     console.log(`\n发现项目套件：${local}（--suite 使用）`);
     try {
@@ -138,7 +141,7 @@ async function evalsBaselineCommand(opts: EvalsOptions): Promise<void> {
   }
   // --check
   if (!fs.existsSync(baselineFile)) {
-    console.error(`✘ 未找到基线 ${baselineFile}，请先运行 yzero evals baseline --save`);
+    console.error(`✘ 未找到基线 ${baselineFile}，请先运行 delta evals baseline --save`);
     process.exitCode = 1;
     return;
   }
@@ -180,7 +183,7 @@ async function runSelectors(opts: EvalsOptions): Promise<SuiteRun[]> {
   return runs;
 }
 
-/** 单 provider 全套用例：headless 内核接线（同 `yzero run` 语义，逐用例隔离）。 */
+/** 单 provider 全套用例：headless 内核接线（同 `delta run` 语义，逐用例隔离）。 */
 async function runSuiteForProvider(
   suite: EvalSuite,
   providerId: string,
@@ -206,7 +209,7 @@ async function runSuiteForProvider(
 
   const service = new SessionService(opts.db);
   const project = service.ensureProject(cwd);
-  const model = opts.model ?? process.env.YZERO_MODEL ?? 'claude-sonnet-4-5-20250929';
+  const model = opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929';
   const engineMode = normalizeMode(undefined);
   const permissionMode = resolvePermissionMode(Boolean(opts.yolo), opts.permission);
   const maxTurns = Number(opts.maxTurns) || 30;

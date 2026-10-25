@@ -5,7 +5,7 @@ import type {
   MessageImage,
   ToolCall,
   Usage,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import { estimateMessagesTokens } from '../context/tokens.js';
 import { BudgetManager } from '../context/budget.js';
 import { compact, shouldCompact, type CompressorDeps } from '../context/compressor.js';
@@ -49,7 +49,7 @@ export interface RunContext {
    * F-14 计划确认流：规划产出后等待用户决策（approve / edit / reject）。
    * 缺省 = 自动批准（非交互环境 / 测试兼容）。
    */
-  planApproval?: (req: import('@y-zero/shared').PlanApprovalRequest) => Promise<import('@y-zero/shared').PlanDecision>;
+  planApproval?: (req: import('@delta/shared').PlanApprovalRequest) => Promise<import('@delta/shared').PlanDecision>;
 }
 
 /** M5 编排参数 */

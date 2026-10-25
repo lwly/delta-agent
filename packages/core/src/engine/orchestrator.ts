@@ -4,7 +4,7 @@
  *       → 不通过：失败节点回队重试或调整目标（携带审查反馈），重试上限默认 2
  *       → 超限终止并汇报遗留问题；通过：Orchestrator 汇总交付。
  */
-import type { AgentEvent, ChatMessage, MessageImage, Plan, PlanDecision, ReviewVerdict, TaskNode, Usage } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, MessageImage, Plan, PlanDecision, ReviewVerdict, TaskNode, Usage } from '@delta/shared';
 import type { RunContext } from './react.js';
 import { buildPlan } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';

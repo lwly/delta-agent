@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import type { ChatMessage, LLMProvider } from '@y-zero/shared';
+import { FILES, userConfigDir } from '../paths.js';
+import type { ChatMessage, LLMProvider } from '@delta/shared';
 import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
 import { TaskStore } from './tasks.js';
 import { MemoryStore } from './memory.js';
@@ -23,9 +24,9 @@ export function resolveWorkRoot(session: SessionRow, projectRoot: string): strin
   return projectRoot;
 }
 
-/** Default DB location: ~/.y-zero/agent.db */
+/** Default DB location: ~/.delta/agent.db */
 export function defaultDbPath(): string {
-  return path.join(os.homedir(), '.y-zero', 'agent.db');
+  return path.join(userConfigDir(), FILES.database);
 }
 
 export const TRASH_RETENTION_DAYS = 30;
@@ -259,7 +260,7 @@ export class SessionService {
     this.store.recordCompaction(sessionId, before, after, summary);
   }
 
-  /** Latest session for a project, to support `yzero` resume-on-start. */
+  /** Latest session for a project, to support `delta` resume-on-start. */
   latestSession(projectId: string): SessionRow | undefined {
     return this.listSessions(projectId)[0];
   }
@@ -431,14 +432,14 @@ const PROVIDER_ENV: Record<Exclude<ProviderId, 'anthropic'>, { key: string; base
 
 /**
  * Resolve the runtime LLM provider:
- * explicit id > YZERO_PROVIDER > env keys > stored config (`yzero models add`).
+ * explicit id > DELTA_PROVIDER > env keys > stored config (`delta models add`).
  * `opts.modelsFile` overrides the provider store location (DI / tests).
  */
 export async function resolveProviderFromEnv(
   id?: string,
   opts?: { modelsFile?: string },
 ): Promise<LLMProvider> {
-  const wanted = (id || process.env.YZERO_PROVIDER || '') as ProviderId | '';
+  const wanted = (id || process.env.DELTA_PROVIDER || '') as ProviderId | '';
   const candidates: ProviderId[] = wanted
     ? [wanted]
     : ['anthropic', 'deepseek', 'qwen', 'openai'];
@@ -451,7 +452,7 @@ export async function resolveProviderFromEnv(
       return new AnthropicProvider({
         apiKey,
         baseUrl: process.env.ANTHROPIC_BASE_URL,
-        model: process.env.YZERO_MODEL,
+        model: process.env.DELTA_MODEL,
       });
     }
     const env = PROVIDER_ENV[pid];
@@ -471,11 +472,11 @@ export async function resolveProviderFromEnv(
     return new Ctor({
       apiKey,
       baseUrl: env.base ? process.env[env.base] : undefined,
-      model: process.env.YZERO_MODEL,
+      model: process.env.DELTA_MODEL,
     });
   }
 
-  // env miss → stored provider config (`yzero models add`)
+  // env miss → stored provider config (`delta models add`)
   const { ProviderManager } = await import('../llm/manager.js');
   const mgr = new ProviderManager(opts?.modelsFile);
   const errors: string[] = [];
@@ -493,6 +494,6 @@ export async function resolveProviderFromEnv(
   throw new Error(
     `未找到可用的 Provider（尝试顺序：${tried}）。请设置对应 API Key：` +
       `ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / OPENAI_API_KEY，` +
-      `或用 YZERO_PROVIDER / --provider 指定，或运行 \`yzero models add\` 保存配置。${hint}`,
+      `或用 DELTA_PROVIDER / --provider 指定，或运行 \`delta models add\` 保存配置。${hint}`,
   );
 }

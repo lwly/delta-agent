@@ -30,7 +30,7 @@ sequenceDiagram
 
     Note over E,B: 下一轮轮首 guard：若达 100% → budget_exhausted（100% 告警已在 record 后先行发出）
 
-    Note over C,DB: 事后查询：GET /api/usage/summary（或 yzero usage / Web /usage 面板）
+    Note over C,DB: 事后查询：GET /api/usage/summary（或 delta usage / Web /usage 面板）
     C->>S: usageStore.summary({ range, projectId })
     S->>DB: 3 条聚合 SQL（totals / byProject / byModel）
     DB-->>S: 聚合行（含软删除会话费用）

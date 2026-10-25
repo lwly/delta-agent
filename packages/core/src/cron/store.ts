@@ -1,7 +1,7 @@
 /**
  * F-22 定时任务 —— 调度存储。
  *
- * 职责：管理 cron 任务清单（`~/.y-zero/cron.json`，用户级单文件，每条任务自带
+ * 职责：管理 cron 任务清单（`~/.delta/cron.json`，用户级单文件，每条任务自带
  * 运行目录 cwd）。约束：
  *  - 读路径**永不 throw**：坏 JSON / 非法条目降级为 warning + 跳过该条（对齐 notify 惯例）；
  *  - 写路径**先读后写**：既有文件坏 JSON 时拒绝写入（覆盖用户文件属破坏性动作，宁可失败）；
@@ -12,6 +12,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { nextRun } from './parse.js';
+import { FILES, userConfigDir } from '../paths.js';
 
 /** 单次运行记录 */
 export interface CronRunRecord {
@@ -38,7 +39,7 @@ export interface CronJob {
   name: string;
   /** 5 字段 cron 表达式或 @别名 */
   cron: string;
-  /** 任务描述（以 `yzero run -p` 语义执行） */
+  /** 任务描述（以 `delta run -p` 语义执行） */
   prompt: string;
   /** 运行目录（决定项目与上下文） */
   cwd: string;
@@ -104,9 +105,9 @@ export function isInValidWindow(job: Pick<CronJob, 'validFrom' | 'validUntil'>, 
 /** runningSince 残留超过该时长视为上次进程崩溃（默认 24h） */
 export const STALE_RUNNING_MS = 24 * 60 * 60 * 1000;
 
-/** cron.json 路径（`~/.y-zero/cron.json`） */
+/** cron.json 路径（`~/.delta/cron.json`） */
 export function userCronConfigPath(homeDir: string = os.homedir()): string {
-  return path.join(homeDir, '.y-zero', 'cron.json');
+  return path.join(userConfigDir(homeDir), FILES.cron);
 }
 
 /**

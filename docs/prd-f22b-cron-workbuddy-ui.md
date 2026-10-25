@@ -21,7 +21,7 @@
 
 | 项 | 现状 | 结论 |
 |---|---|---|
-| `yzero run --permission` | **已支持**（F-23：plan/default/yolo，yolo 须与 `--yolo` 双重开启） | 无需改 headless-run.ts，只需执行器透传 |
+| `delta run --permission` | **已支持**（F-23：plan/default/yolo，yolo 须与 `--yolo` 双重开启） | 无需改 headless-run.ts，只需执行器透传 |
 | `cron-executor.ts` | 仅透传 `-p/--json/--max-cost`，**未传 permission** | P0：需在 spawn args 中追加 `--permission <mode>`；mode=yolo 时同时追加 `--yolo` |
 | 有效期 validFrom/validUntil | 数据模型无此字段，runner 无窗口判断 | P0：store + runner + API 三处增量 |
 | cron.json | version: 1 | P0：缺字段视为长期有效/标准确认（向后兼容），version 升 2 或保留 1 + 可选字段（实现时二选一，倾向后者，见待确认 Q3） |

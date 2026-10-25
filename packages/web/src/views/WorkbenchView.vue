@@ -423,8 +423,8 @@ const input = ref('');
 const composerEl = ref<HTMLTextAreaElement | null>(null);
 
 // ── 输入框高度拖拽：上/下边框手柄，向上/向下拖增高，localStorage 记忆 ──
-const COMPOSER_H_KEY = 'yzero-composer-h';
-const COMPOSER_TOUCHED_KEY = 'yzero-composer-h-touched';
+const COMPOSER_H_KEY = 'delta-composer-h';
+const COMPOSER_TOUCHED_KEY = 'delta-composer-h-touched';
 const COMPOSER_AUTO_MAX = 190; // 自动增高上限：约 8 行（14px × 1.5 行高 ≈ 21px/行），超限内部滚动
 const composerH = ref(Number(localStorage.getItem(COMPOSER_H_KEY)) || 44);
 const composerResizing = ref(false);
@@ -959,7 +959,7 @@ watch(
       <div class="brand">
         <span class="brand-logo">y0</span>
         <span class="brand-text">
-          <span class="brand-name">y-zero-agent</span>
+          <span class="brand-name">delta-agent</span>
           <span class="brand-sub">AI Coding Agent · v0.1.0</span>
         </span>
       </div>
@@ -1073,7 +1073,7 @@ watch(
         <!-- 空态 hero：图标 / 产品名 / 价值主张 / 主行动 + 快捷键提示 / 次级入口 / 三特性卡 -->
         <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
           <div class="hero-logo">y0</div>
-          <h1>y-zero-agent</h1>
+          <h1>delta-agent</h1>
           <p class="hero-tagline">在本地仓库中推理、规划并执行你的开发任务</p>
           <div class="hero-actions">
             <button class="hero-btn primary" :disabled="!ws.activeProjectId" @click="newSession()">新建对话</button>
@@ -1107,7 +1107,7 @@ watch(
         <!-- 顶栏：层级面包屑 + 回放（右侧） -->
         <div class="topbar">
           <nav class="crumb" aria-label="会话位置">
-            <span class="crumb-seg crumb-brand" title="y-zero-agent">y-zero-agent</span>
+            <span class="crumb-seg crumb-brand" title="delta-agent">delta-agent</span>
             <span class="crumb-sep" aria-hidden="true">/</span>
             <span class="crumb-seg crumb-project" :title="activeProjectName || '未选择项目'">{{ activeProjectName || '未选择项目' }}</span>
             <span class="crumb-sep" aria-hidden="true">/</span>

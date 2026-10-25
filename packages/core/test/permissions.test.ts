@@ -5,7 +5,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { ConfirmDecision, ConfirmRequest, ToolCall, ToolResult } from '@y-zero/shared';
+import type { ConfirmDecision, ConfirmRequest, ToolCall, ToolResult } from '@delta/shared';
 import { PermissionState, ToolRegistry, toolCapability } from '../src/index.js';
 import type { ToolContext } from '../src/tools/types.js';
 

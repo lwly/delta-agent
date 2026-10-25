@@ -7,28 +7,28 @@
 Agent 任务的 cron 调度：按 5 字段 cron 表达式（本地时区）定期以 **headless 非交互语义**
 自动运行一条 agent 任务，运行记录可查、可启停、可手动补跑。
 
-**本期范围**：core 调度内核 + `yzero cron` CLI 子命令组 + 常驻 daemon + Web 调度面板
-（`yzero serve` 内 `/api/cron` 端点 + 工作台「⏰ 定时」弹窗，与 CLI 共用同一 `cron.json` 存储）。
+**本期范围**：core 调度内核 + `delta cron` CLI 子命令组 + 常驻 daemon + Web 调度面板
+（`delta serve` 内 `/api/cron` 端点 + 工作台「⏰ 定时」弹窗，与 CLI 共用同一 `cron.json` 存储）。
 **不在本期**：分布式/多机调度。
 
 ## 2. 总体结构
 
 ```
-~/.y-zero/cron.json ──┐
+~/.delta/cron.json ──┐
                       ├─ core/cron/parse.ts      5 字段表达式解析 + nextRun（纯函数，零依赖）
                       ├─ core/cron/store.ts      任务清单 CRUD / 原子写 / 坏 JSON 降级
                       ├─ core/cron/runner.ts     到期扫描 + 执行编排（执行器注入）
                       ├─ core/cron/scheduler.ts  常驻 tick 循环（busy 保护 / signal 停止）
-cli/cron-executor.ts ─┘ 默认执行器：spawn `yzero run -p <prompt> --json` 子进程
-cli/cron.ts            yzero cron 子命令组
+cli/cron-executor.ts ─┘ 默认执行器：spawn `delta run -p <prompt> --json` 子进程
+cli/cron.ts            delta cron 子命令组
 ```
 
 关键决策：**执行采用子进程隔离**（而非进程内复用 headless 内核）。每次运行都是全新的
-`yzero run` 进程——MCP / hooks / 权限 / 预算按该项目配置完整重新装配，崩溃不波及
+`delta run` 进程——MCP / hooks / 权限 / 预算按该项目配置完整重新装配，崩溃不波及
 daemon，且天然复用 F-29 的退出码协议与 JSON 报告。core 的 runner 只依赖注入的
 `CronExecutor` 接口，不感知进程细节，测试用伪造执行器。
 
-## 3. 数据模型（~/.y-zero/cron.json）
+## 3. 数据模型（~/.delta/cron.json）
 
 ```jsonc
 {
@@ -41,7 +41,7 @@ daemon，且天然复用 F-29 的退出码协议与 JSON 报告。core 的 runne
       "prompt": "整理昨日会话成日报",
       "cwd": "/path/to/project",   // 运行目录（决定项目上下文）
       "enabled": true,
-      "maxCostUsd": 0.5,           // 可选，透传 yzero run --max-cost
+      "maxCostUsd": 0.5,           // 可选，透传 delta run --max-cost
       "nextRunAt": "ISO",          // 下次到期；缺失视为到期待补算
       "runningSince": "ISO",       // 运行锁：执行前写、完成清；残留 >24h 视为崩溃自动解除
       "lastRun": { "...": "最近一次运行记录" },
@@ -81,19 +81,19 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 
 | 命令 | 说明 |
 |------|------|
-| `yzero cron list [--json]` | 清单：表达式 / 下次运行 / 上次结果摘要 |
-| `yzero cron add --name N --cron E --prompt P [--dir D] [--max-cost C] [--disable]` | 新增（name 唯一、表达式与目录即时校验、预计算 nextRunAt） |
-| `yzero cron remove <id-or-name>` | 删除 |
-| `yzero cron enable/disable <id-or-name>` | 启停（enable 从当下重算下次运行，不补跑停用期） |
-| `yzero cron run [--id]` | 手动补跑；`--id` 强制试跑一次 |
-| `yzero cron daemon [--tick-ms 30000] [--once]` | 常驻调度；`--once` 单轮补跑后退出（配合系统 cron / systemd timer） |
+| `delta cron list [--json]` | 清单：表达式 / 下次运行 / 上次结果摘要 |
+| `delta cron add --name N --cron E --prompt P [--dir D] [--max-cost C] [--disable]` | 新增（name 唯一、表达式与目录即时校验、预计算 nextRunAt） |
+| `delta cron remove <id-or-name>` | 删除 |
+| `delta cron enable/disable <id-or-name>` | 启停（enable 从当下重算下次运行，不补跑停用期） |
+| `delta cron run [--id]` | 手动补跑；`--id` 强制试跑一次 |
+| `delta cron daemon [--tick-ms 30000] [--once]` | 常驻调度；`--once` 单轮补跑后退出（配合系统 cron / systemd timer） |
 
 执行器超时默认 30 分钟（SIGTERM），超时记 `timeout`；子进程输出无法解析为 JSON
 报告时收敛为 `error` 并携带输出前 500 字。
 
 ## 6.1 Web 调度面板（F-22 增量）
 
-**端点**（`core/server/http.ts`，serve 进程内直读 `~/.y-zero/cron.json`；`ServeOptions`
+**端点**（`core/server/http.ts`，serve 进程内直读 `~/.delta/cron.json`；`ServeOptions`
 新增 `cronExecutor`（CLI serve 传 spawn 执行器）与 `cronHomeDir`（测试隔离））：
 
 | 端点 | 说明 |
@@ -115,8 +115,8 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 - 写路径全部 tmp+rename 原子写；既有文件坏 JSON 时**拒绝写入**（宁可不落盘也不覆盖）；
 - 读路径永不 throw：坏 JSON / 非法条目降级 warning + 跳过；
 - headless 非交互语义原样继承：高危确认自动拒绝（写任务用任务级 `--max-cost` +
-  项目 `.y-zero` 权限配置；如需放行在项目级配置 yolo，与交互运行同等审慎）；
-- 用量与费用按会话正常落库，`costUsd` 进入运行记录与 `yzero usage` 口径；
+  项目 `.delta` 权限配置；如需放行在项目级配置 yolo，与交互运行同等审慎）；
+- 用量与费用按会话正常落库，`costUsd` 进入运行记录与 `delta usage` 口径；
 - F-33 桌面通知不接入 cron 子进程（子进程无确认卡；如需完成通知可在项目级
   hooks.json 用 Stop 钩子实现）。
 
@@ -132,5 +132,5 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 - `cron-server.test.ts`：/api/cron 清单/新增校验/编辑/删除/404/立即运行（202 + 轮询 last_run +
   手动语义不推进 nextRunAt）/ 未配执行器 400 / cronHomeDir 隔离（6 例）；
 - 端到端冒烟：隔离 HOME 下 add/list/run --id（无 Provider 正确收敛 error）/ disable /
-  remove / daemon --once 全链路通过；`yzero serve` 冒烟：/api/cron GET / POST（snake_case
+  remove / daemon --once 全链路通过；`delta serve` 冒烟：/api/cron GET / POST（snake_case
   返回 + cwd 缺省 serve 目录）/ run 404 全通。

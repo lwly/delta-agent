@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { DiffLine } from '@y-zero/core';
+import type { DiffLine } from '@delta/core';
 import { theme } from './theme.js';
 
 export function DiffView(props: { lines: DiffLine[]; title?: string }) {

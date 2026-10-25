@@ -2,7 +2,7 @@
  * F-32 模型路由（PRD：按任务难度自动选模型，路由规则可配）
  * - 分类 / 提炼 / 摘要等辅助调用 → 规则指定的小模型（省成本、提速）
  * - 规划 / 执行等核心调用 → 固定走会话主模型（不在本路由器职责内）
- * - 规则持久化于 ~/.y-zero/models.json 的 routing 字段（keychain.ts RoutingConfig）
+ * - 规则持久化于 ~/.delta/models.json 的 routing 字段（keychain.ts RoutingConfig）
  * - 任何配置缺失 / 非法 / 目标 provider 不可用时，调用方一律回退会话主模型
  */
 import { loadModelsFile, modelsConfigPath, type RoutingConfig, type RoutingRule } from './keychain.js';

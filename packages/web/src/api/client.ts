@@ -1,5 +1,5 @@
 /**
- * API client：`yzero serve` REST 端点封装（technical-design §8.2）。
+ * API client：`delta serve` REST 端点封装（technical-design §8.2）。
  * 同源部署（serve 内嵌托管）+ dev 代理，均走相对路径。
  */
 

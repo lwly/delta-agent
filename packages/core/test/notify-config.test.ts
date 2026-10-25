@@ -16,16 +16,16 @@ import {
 } from '../src/notify/config.js';
 import { DEFAULT_NOTIFY_CONFIG } from '../src/notify/types.js';
 
-/** 建一个带 .y-zero 的临时项目目录 */
+/** 建一个带 .delta 的临时项目目录 */
 function tmpProject(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-notify-'));
-  fs.mkdirSync(path.join(dir, '.y-zero'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-notify-'));
+  fs.mkdirSync(path.join(dir, '.delta'), { recursive: true });
   return dir;
 }
 
 function tmpHome(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-notify-home-'));
-  fs.mkdirSync(path.join(dir, '.y-zero'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-notify-home-'));
+  fs.mkdirSync(path.join(dir, '.delta'), { recursive: true });
   return dir;
 }
 
@@ -42,8 +42,8 @@ describe('F-33 notify 配置加载', () => {
   it('项目层逐字段覆盖用户层', () => {
     const project = tmpProject();
     const home = tmpHome();
-    fs.writeFileSync(path.join(home, '.y-zero', 'notify.json'), JSON.stringify({ enabled: false, onConfirm: false }));
-    fs.writeFileSync(path.join(project, '.y-zero', 'notify.json'), JSON.stringify({ enabled: true, minDurationMs: 60000 }));
+    fs.writeFileSync(path.join(home, '.delta', 'notify.json'), JSON.stringify({ enabled: false, onConfirm: false }));
+    fs.writeFileSync(path.join(project, '.delta', 'notify.json'), JSON.stringify({ enabled: true, minDurationMs: 60000 }));
     const r = loadNotifyConfig({ projectRoot: project, homeDir: home });
     expect(r.config.enabled).toBe(true); // 项目覆盖用户
     expect(r.config.onConfirm).toBe(false); // 用户层字段保留
@@ -56,7 +56,7 @@ describe('F-33 notify 配置加载', () => {
     const project = tmpProject();
     const home = tmpHome();
     fs.writeFileSync(
-      path.join(home, '.y-zero', 'notify.json'),
+      path.join(home, '.delta', 'notify.json'),
       JSON.stringify({ enabled: 'yes', minDurationMs: -5, onDone: 1 }),
     );
     const r = loadNotifyConfig({ projectRoot: project, homeDir: home });
@@ -70,8 +70,8 @@ describe('F-33 notify 配置加载', () => {
   it('坏 JSON 整层忽略 + warning；另一层不受影响', () => {
     const project = tmpProject();
     const home = tmpHome();
-    fs.writeFileSync(path.join(home, '.y-zero', 'notify.json'), '{not json');
-    fs.writeFileSync(path.join(project, '.y-zero', 'notify.json'), JSON.stringify({ enabled: false }));
+    fs.writeFileSync(path.join(home, '.delta', 'notify.json'), '{not json');
+    fs.writeFileSync(path.join(project, '.delta', 'notify.json'), JSON.stringify({ enabled: false }));
     const r = loadNotifyConfig({ projectRoot: project, homeDir: home });
     expect(r.config.enabled).toBe(false);
     expect(r.warnings.some((w) => w.source === 'user' && /无法解析/.test(w.message))).toBe(true);
@@ -95,15 +95,15 @@ describe('F-33 notify 配置加载', () => {
   it('空文件整层忽略 + warning', () => {
     const project = tmpProject();
     const home = tmpHome();
-    fs.writeFileSync(path.join(home, '.y-zero', 'notify.json'), '   ');
+    fs.writeFileSync(path.join(home, '.delta', 'notify.json'), '   ');
     const r = loadNotifyConfig({ projectRoot: project, homeDir: home });
     expect(r.config).toEqual(DEFAULT_NOTIFY_CONFIG);
     expect(r.warnings.some((w) => /空文件/.test(w.message))).toBe(true);
   });
 
-  it('路径函数：~/.y-zero/notify.json 与 .y-zero/notify.json', () => {
-    expect(userNotifyConfigPath('/h')).toBe(path.join('/h', '.y-zero', 'notify.json'));
-    expect(projectNotifyConfigPath('/p')).toBe(path.join('/p', '.y-zero', 'notify.json'));
+  it('路径函数：~/.delta/notify.json 与 .delta/notify.json', () => {
+    expect(userNotifyConfigPath('/h')).toBe(path.join('/h', '.delta', 'notify.json'));
+    expect(projectNotifyConfigPath('/p')).toBe(path.join('/p', '.delta', 'notify.json'));
   });
 });
 
@@ -111,7 +111,7 @@ describe('F-33 updateUserNotifyEnabled（enable/disable 写路径）', () => {
   it('只改 enabled，其它字段原样保留', () => {
     const home = tmpHome();
     fs.writeFileSync(
-      path.join(home, '.y-zero', 'notify.json'),
+      path.join(home, '.delta', 'notify.json'),
       JSON.stringify({ enabled: true, onDone: false, minDurationMs: 5000 }),
     );
     const r = updateUserNotifyEnabled(false, { homeDir: home });
@@ -140,7 +140,7 @@ describe('F-33 updateUserNotifyEnabled（enable/disable 写路径）', () => {
 
   it('既有文件坏 JSON 时拒绝写入（宁可不写也不覆盖用户文件）', () => {
     const home = tmpHome();
-    const file = path.join(home, '.y-zero', 'notify.json');
+    const file = path.join(home, '.delta', 'notify.json');
     fs.writeFileSync(file, '{broken');
     expect(() => updateUserNotifyEnabled(false, { homeDir: home })).toThrow(/无法解析/);
     expect(fs.readFileSync(file, 'utf8')).toBe('{broken'); // 原样保留

@@ -5,6 +5,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { CONFIG_DIR } from '../paths.js';
 
 /** 扫描时跳过的目录名（依赖产物 / 版本库 / 构建输出等，避免噪声挤占输入预算） */
 export const SCAN_SKIP_DIRS = new Set([
@@ -22,7 +23,7 @@ export const SCAN_SKIP_DIRS = new Set([
   'venv',
   '.idea',
   '.vscode',
-  '.y-zero',
+  CONFIG_DIR,
   '.next',
   '.nuxt',
   'vendor',

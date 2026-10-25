@@ -8,7 +8,7 @@ import type {
   ToolCall,
   ToolDefinition,
   ToolResult,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import { BudgetManager } from '../src/context/budget.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { ToolContext } from '../src/tools/types.js';
@@ -17,7 +17,7 @@ import { runMultiAgent } from '../src/engine/orchestrator.js';
 import { runSubTask } from '../src/engine/subtask.js';
 
 /** 顺序脚本 Mock：每次 chat() 消耗一条脚本（文本分片流出 + usage + done）。 */
-class MockProvider implements import('@y-zero/shared').LLMProvider {
+class MockProvider implements import('@delta/shared').LLMProvider {
   readonly id = 'mock';
   constructor(private script: Array<{ text?: string }>) {}
   async *chat(): AsyncIterable<StreamEvent> {

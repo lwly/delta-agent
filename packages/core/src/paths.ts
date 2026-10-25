@@ -1,0 +1,79 @@
+/**
+ * 应用标识与路径常量（单一事实来源）
+ *
+ * 改名 / 换配置目录只需修改本文件。其余模块一律引用这里的常量，
+ * 不再写死 `.delta`、`models.json` 之类的字面量。
+ *
+ * 目录布局：
+ *   - 用户级：`~/.delta/`        （models.json、agent.db、cron.json、skills/ …）
+ *   - 项目级：`<projectRoot>/.delta/`（mcp.json、hooks.json、sandbox.json、agent.md …）
+ *
+ * 这是底层模块，只依赖 node 内置模块，不得 import 其他 core 模块（避免循环依赖）。
+ */
+import os from 'node:os';
+import path from 'node:path';
+
+/** 应用名：CLI 命令、npm scope、界面展示名 */
+export const APP_NAME = 'delta';
+
+/** 配置目录名（用户级与项目级共用） */
+export const CONFIG_DIR = '.delta';
+
+/** 用户级配置根目录，默认 `~/.delta` */
+export function userConfigDir(homeDir: string = os.homedir()): string {
+  return path.join(homeDir, CONFIG_DIR);
+}
+
+/** 项目级配置根目录，默认 `<projectRoot>/.delta` */
+export function projectConfigDir(projectRoot: string): string {
+  return path.join(projectRoot, CONFIG_DIR);
+}
+
+/** 配置文件与子目录名 */
+export const FILES = {
+  /** 模型 Provider 配置（API Key 加密存储） */
+  models: 'models.json',
+  /** SQLite 会话数据库 */
+  database: 'agent.db',
+  /** MCP Server 配置 */
+  mcp: 'mcp.json',
+  /** 桌面通知配置 */
+  notify: 'notify.json',
+  /** 沙箱配置 */
+  sandbox: 'sandbox.json',
+  /** Hook 配置 */
+  hooks: 'hooks.json',
+  /** cron 任务清单 */
+  cron: 'cron.json',
+  /** Skill Hub 源配置 */
+  skillHub: 'skill-hub.json',
+  /** 项目引导状态 */
+  onboarding: 'onboarding.json',
+  /** 项目静态记忆 */
+  agentMd: 'agent.md',
+  /** 项目引导产出的 agent.md 草案 */
+  agentMdDraft: 'agent.md.draft',
+  /** Web 控制台设置 */
+  settings: 'settings.json',
+  /** 技能包目录 */
+  skillsDir: 'skills',
+  /** 专家包目录 */
+  expertsDir: 'experts',
+  /** 评测集目录 */
+  evalsDir: 'evals',
+} as const;
+
+/** Docker 容器 label 键：用于识别本应用创建的沙箱容器（GC / 清理） */
+export const LABELS = {
+  session: `${APP_NAME}.session`,
+  project: `${APP_NAME}.project`,
+  created: `${APP_NAME}.created`,
+} as const;
+
+/** 环境变量前缀，如 `DELTA_MODEL`、`DELTA_SKILL_HUB_URL` */
+export const ENV_PREFIX = 'DELTA_';
+
+/** 构造环境变量名，如 envName('MODEL') === 'DELTA_MODEL' */
+export function envName(suffix: string): string {
+  return `${ENV_PREFIX}${suffix}`;
+}

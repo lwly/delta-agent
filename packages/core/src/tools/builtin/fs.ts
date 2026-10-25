@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { AgentError } from '@y-zero/shared';
+import { AgentError } from '@delta/shared';
 import { ok, fail, type AgentTool } from '../types.js';
 import { resolveInSandbox } from '../sandbox.js';
 

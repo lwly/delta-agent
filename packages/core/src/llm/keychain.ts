@@ -3,6 +3,7 @@ import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { FILES, userConfigDir } from '../paths.js';
 
 // ── Key encryption (F-04a: 钥匙串加密存储) ────────────────────────────────
 //
@@ -79,7 +80,7 @@ function legacyHostnameCandidates(): string[] {
   }
   cachedLegacySecrets = [...variants]
     .filter(Boolean)
-    .map((h) => `y-zero-agent:${h}:${user}`);
+    .map((h) => `delta-agent:${h}:${user}`);
   return cachedLegacySecrets;
 }
 
@@ -87,8 +88,8 @@ function stableSecret(): string {
   if (cachedStableSecret) return cachedStableSecret;
   const id = platformMachineId();
   cachedStableSecret = id
-    ? `y-zero-agent:platform:${id}:${os.userInfo().username}`
-    : `y-zero-agent:${os.hostname()}:${os.userInfo().username}`; // 无平台号环境退回旧行为
+    ? `delta-agent:platform:${id}:${os.userInfo().username}`
+    : `delta-agent:${os.hostname()}:${os.userInfo().username}`; // 无平台号环境退回旧行为
   return cachedStableSecret;
 }
 
@@ -192,7 +193,7 @@ export interface ModelsFile {
 }
 
 export function modelsConfigPath(): string {
-  return path.join(os.homedir(), '.y-zero', 'models.json');
+  return path.join(userConfigDir(), FILES.models);
 }
 
 export function loadModelsFile(file: string = modelsConfigPath()): ModelsFile {

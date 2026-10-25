@@ -154,7 +154,7 @@ async function remove(s: SkillDetailView) {
         <h2 class="panel-title">Skills 技能</h2>
         <p class="panel-sub">
           三层优先级：项目级 &gt; 用户级 &gt; 内置（同名覆盖）。
-          <template v-if="projectEnabled">项目层扫描 <code>{{ activeProjectName }}</code> 的 .y-zero/skills/</template>
+          <template v-if="projectEnabled">项目层扫描 <code>{{ activeProjectName }}</code> 的 .delta/skills/</template>
           <template v-else>未选择项目：项目层不参与（回到工作台选中项目后启用）</template>
         </p>
       </div>
@@ -185,8 +185,8 @@ async function remove(s: SkillDetailView) {
         <label class="field">
           <span class="fl">写入层</span>
           <select v-model="editor.scope" :disabled="editor.mode === 'view'">
-            <option value="user">用户级 ~/.y-zero/skills/</option>
-            <option value="project" :disabled="!projectEnabled">项目级 .y-zero/skills/</option>
+            <option value="user">用户级 ~/.delta/skills/</option>
+            <option value="project" :disabled="!projectEnabled">项目级 .delta/skills/</option>
           </select>
         </label>
         <label class="field grow">

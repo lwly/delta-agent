@@ -53,7 +53,7 @@ export interface SplitAssemblerOptions {
  * 分段组装器：静态段走缓存（fingerprint 命中 O(1)），动态段每轮重建。
  * 缓存失效由 fingerprint 自动覆盖（prompt-design.md §2.3）：
  *   - MCP 工具注册/断开 → tools 层值变化 → key 变化 → 自动失效
- *   - .y-zero/ 配置或 MEMORY.md 变更 → project 层值变化 → 自动失效
+ *   - .delta/ 配置或 MEMORY.md 变更 → project 层值变化 → 自动失效
  *   - 版本升级 → ASSEMBLER_VERSION 参与 hash → 全量失效
  */
 export class SplitPromptAssembler {

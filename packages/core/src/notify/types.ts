@@ -11,7 +11,7 @@ export type NotifyTrigger = 'done' | 'confirm';
 
 /** F-33 生效配置（两级文件逐字段 merge 后的最终值） */
 export interface NotifyConfig {
-  /** 总开关（`yzero notify enable/disable` 只改此字段） */
+  /** 总开关（`delta notify enable/disable` 只改此字段） */
   enabled: boolean;
   /** 任务结束通知开关 */
   onDone: boolean;
@@ -21,7 +21,7 @@ export interface NotifyConfig {
   minDurationMs: number;
 }
 
-/** 默认配置：默认开启——30s 门槛 + 确认低频使噪声可控；不满意 `yzero notify disable` 一键关 */
+/** 默认配置：默认开启——30s 门槛 + 确认低频使噪声可控；不满意 `delta notify disable` 一键关 */
 export const DEFAULT_NOTIFY_CONFIG: NotifyConfig = {
   enabled: true,
   onDone: true,
@@ -39,7 +39,7 @@ export const NOTIFY_MERGE_FIELDS = [
 
 export type NotifyMergeField = (typeof NOTIFY_MERGE_FIELDS)[number];
 
-/** 配置来源层（user = ~/.y-zero，project = .y-zero，与 sandbox.json 同构） */
+/** 配置来源层（user = ~/.delta，project = .delta，与 sandbox.json 同构） */
 export type NotifyConfigSource = 'user' | 'project';
 
 export interface NotifyConfigWarning {

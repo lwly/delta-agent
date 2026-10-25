@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentEvent, ChatMessage, ToolCall } from '@y-zero/shared';
+import type { AgentEvent, ChatMessage, ToolCall } from '@delta/shared';
 import { BudgetManager } from '../src/context/budget.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { RunContext } from '../src/engine/react.js';

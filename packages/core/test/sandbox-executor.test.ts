@@ -92,7 +92,7 @@ describe('DockerExecutor：超时、中断与清理序列', () => {
     expect(r.timedOut).toBe(true);
     const name = cli.syncCalls[0]![1];
     expect(cli.syncCalls.map((c) => c[0])).toEqual(['kill', 'rm']);
-    expect(name).toMatch(/^yzero-sess1a2b-.{6}$/);
+    expect(name).toMatch(/^delta-sess1a2b-.{6}$/);
     expect(cli.syncCalls[1]).toEqual(['rm', '-f', name]);
   });
 
@@ -134,7 +134,7 @@ describe('DockerExecutor：超时、中断与清理序列', () => {
     expect(r.timedOut).toBe(true);
     expect(warns).toHaveLength(2);
     expect(warns[0]).toContain('docker kill');
-    expect(warns[1]).toContain('yzero sandbox gc');
+    expect(warns[1]).toContain('delta sandbox gc');
   });
 
   it('daemon 未运行时的工作区守卫：任何 docker 调用之前就拒绝', async () => {
@@ -249,19 +249,19 @@ describe('DockerExecutor：argv 与诊断', () => {
 // ── gc ─────────────────────────────────────────────────────────────────────
 
 describe('DockerExecutor：残留清理', () => {
-  it('gc 按 label 列出并逐条 rm -f；非 yzero- 前缀忽略', async () => {
+  it('gc 按 label 列出并逐条 rm -f；非 delta- 前缀忽略', async () => {
     const { cli, exec } = makeExec({
-      ps: dockerOk('yzero-a\nother-container\nyzero-b\n'),
+      ps: dockerOk('delta-a\nother-container\ndelta-b\n'),
       rm: dockerOk(''),
     });
     const r = await exec.gc();
     expect(r.removed).toBe(2);
-    expect(r.names.sort()).toEqual(['yzero-a', 'yzero-b']);
+    expect(r.names.sort()).toEqual(['delta-a', 'delta-b']);
     expect(cli.calls[0]).toEqual([
       'ps',
       '-a',
       '--filter',
-      'label=yzero.created',
+      'label=delta.created',
       '--format',
       '{{.Names}}',
     ]);

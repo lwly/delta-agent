@@ -1,10 +1,10 @@
 /**
- * F-31 成本与用量报告 —— `yzero usage` 渲染逻辑。
+ * F-31 成本与用量报告 —— `delta usage` 渲染逻辑。
  *
  * 用法：
- *   yzero usage                                # 全部时间、全部项目的文本报表
- *   yzero usage --range 7d --project <id|名>   # 时间范围 + 项目过滤
- *   yzero usage --json                         # 结构化输出（与 GET /api/usage/summary 同构，jq 可直接消费）
+ *   delta usage                                # 全部时间、全部项目的文本报表
+ *   delta usage --range 7d --project <id|名>   # 时间范围 + 项目过滤
+ *   delta usage --json                         # 结构化输出（与 GET /api/usage/summary 同构，jq 可直接消费）
  */
 import {
   SessionService,
@@ -13,7 +13,7 @@ import {
   type UsageProjectRow,
   type UsageModelRow,
   type UsageSessionRow,
-} from '@y-zero/core';
+} from '@delta/core';
 
 export interface UsageCommandOptions {
   range?: string;
@@ -73,7 +73,7 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<void> {
         projects.find((p) => p.id === opts.project) ??
         projects.find((p) => p.name === opts.project);
       if (!hit) {
-        console.error(`✘ 未找到项目：${opts.project}（可用 yzero serve 的 /api/projects 或 Web 控制台查看项目列表）`);
+        console.error(`✘ 未找到项目：${opts.project}（可用 delta serve 的 /api/projects 或 Web 控制台查看项目列表）`);
         process.exitCode = 1;
         return;
       }

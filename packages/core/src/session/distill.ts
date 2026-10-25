@@ -3,7 +3,7 @@
  * 会话结束/压缩后用小模型从历史提炼 0-3 条候选 → 待确认队列（status='pending'），
  * Web 记忆面板一键采纳，避免记忆污染。默认开启可关（memory.autoDistill）。
  */
-import type { LLMProvider } from '@y-zero/shared';
+import type { LLMProvider } from '@delta/shared';
 import type { MemoryStore } from './memory.js';
 import type { MemoryProvider } from '../prompt/memory-provider.js';
 import type { RecalledMemory } from '../prompt/types.js';

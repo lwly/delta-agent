@@ -1,4 +1,4 @@
-# y-zero-agent 技术方案设计
+# delta-agent 技术方案设计
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 对应 PRD：v1.0
 
@@ -9,7 +9,7 @@
 ### 1.1 Monorepo 结构（pnpm workspace + turborepo）
 
 ```
-y-zero-agent/
+delta-agent/
 ├── apps/
 │   └── web/                    # Vue 3 Web 控制台
 ├── packages/
@@ -22,7 +22,7 @@ y-zero-agent/
 │   │   ├── src/context/        # 预算管理 + 上下文压缩
 │   │   ├── src/skills/         # Skills 系统
 │   │   └── src/session/        # 会话/项目模型 + 持久化
-│   ├── cli/                    # CLI 入口，命令名 `yzero`（commander + ink TUI）
+│   ├── cli/                    # CLI 入口，命令名 `delta`（commander + ink TUI）
 │   └── shared/                 # 共享类型 / 协议定义（core ↔ web）
 ├── pnpm-workspace.yaml
 └── turbo.json
@@ -255,12 +255,12 @@ tools.forEach(t => registry.register(wrapMcpTool(client, t)));
 // 连接断开：自动重连 ×3，期间工具标记不可用并在提示词中摘除
 ```
 
-配置：`~/.y-zero/mcp.json`（全局）与 `.y-zero/mcp.json`（项目级）合并。
+配置：`~/.delta/mcp.json`（全局）与 `.delta/mcp.json`（项目级）合并。
 
 ### 3.4 大模型配置管理（Provider Registry）
 
 ```typescript
-// ~/.y-zero/models.json —— 明文部分；API Key 单独存系统钥匙串（win: Credential Manager / mac: Keychain），
+// ~/.delta/models.json —— 明文部分；API Key 单独存系统钥匙串（win: Credential Manager / mac: Keychain），
 // 无钥匙串环境降级为 AES-256-GCM 加密文件（密钥派生自机器标识）
 interface ProviderConfig {
   id: string;                    // 用户可读 id，如 'anthropic-main'
@@ -285,7 +285,7 @@ interface ProviderRegistry {
 
 - 双入口：CLI `agent models add/test/use/remove` 与 Web 设置页共享同一 ProviderRegistry。
 - 生效范围：切换/修改配置仅对新对话生效，进行中的会话保持原 Provider（保证事件流一致性）。
-- 项目级覆盖：`.y-zero/models.json` 可覆盖全局默认 Provider（复用三级覆盖机制）。
+- 项目级覆盖：`.delta/models.json` 可覆盖全局默认 Provider（复用三级覆盖机制）。
 
 ### 3.5 输入框隐形 Markdown 支持
 
@@ -317,7 +317,7 @@ class PromptAssembler {
   ];
 
   assemble(overrides: OverrideSet): SystemPrompt {
-    // 三级覆盖：builtin < project(.y-zero/) < session(runtime)
+    // 三级覆盖：builtin < project(.delta/) < session(runtime)
     // 规则：字符串 section 后者覆盖；对象深度合并；数组并集去重
     // Identity 层标记 locked=true，覆盖请求直接忽略并告警
   }
@@ -381,7 +381,7 @@ class PromptAssembler {
 > 本节为 MVP 简化版；完整设计（三层覆盖 / SKILL.md+references+scripts 包结构 / 两阶段按需加载 / 匹配评分）以 `docs/agent-modes-design.md` §7 为准。**M3 已按该节实现**（packages/core/src/skills/ + 内置 3 Skills + load_skill/unload_skill 工具）。
 
 ```yaml
-# .y-zero/skills/commit-review/skill.yaml
+# .delta/skills/commit-review/skill.yaml
 name: commit-review
 description: 审查当前未提交变更并生成规范 commit message
 triggers: ["审查提交", "review commit"]
@@ -389,7 +389,7 @@ tools_allowlist: [read_file, glob_search, grep_search, run_command]
 prompt: ./prompt.md          # 注入 L5 Skills 层
 ```
 
-- 加载：项目级 `.y-zero/skills/` + 全局 `~/.y-zero/skills/` 合并，同名项目级优先。
+- 加载：项目级 `.delta/skills/` + 全局 `~/.delta/skills/` 合并，同名项目级优先。
 - 触发：显式（`/skill commit-review`）或自动（trigger 词匹配后询问用户）。
 - 隔离：Skills 只能声明工具白名单子集，不能新增危险能力。
 
@@ -429,7 +429,7 @@ interface SessionService {
   removeProject(projectId, confirmName: string, opts?: { hard?: boolean }): void;
   // 二次确认：confirmName 必须与项目名完全一致（Web/CLI 双端校验）
   // 级联软删除项目下全部会话；项目级 MCP/Skills 配置一并停用；
-  // 项目目录内文件（.y-zero/、源码）不删除，仅解除注册
+  // 项目目录内文件（.delta/、源码）不删除，仅解除注册
   restore(kind: 'project' | 'session', id): void;      // 回收站恢复
   listTrash(kind?: 'project' | 'session'): TrashItem[]; // 回收站列表
   purgeExpired(): number;                                // 清理超期软删除（默认 30 天）
@@ -439,7 +439,7 @@ interface SessionService {
 **移除安全策略**：
 - 运行中的会话删除前必须 `AbortSignal` 中止主循环并等待工具子进程退出，避免半写状态。
 - 物理删除（hard）在事务内执行且先做一次临时备份文件，异常可回滚。
-- 项目移除仅解除注册，**绝不触碰用户源码目录**；`.y-zero/` 项目级配置目录保留（由用户自行决定是否删除）。
+- 项目移除仅解除注册，**绝不触碰用户源码目录**；`.delta/` 项目级配置目录保留（由用户自行决定是否删除）。
 
 Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue 构建产物作为静态资源内嵌 CLI npm 包，CLI `agent serve` 启动本地 server（默认 `127.0.0.1:7900`，仅监听回环地址）调用 SessionService，AgentEvent 以 SSE 推送到前端渲染；不做远程部署形态。
 
@@ -453,7 +453,7 @@ Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue
 | Shell 差异 | win 下优先 PowerShell，检测失败降级 cmd；macOS 默认 zsh；`run_command` 抽象 ShellAdapter |
 | ripgrep 分发 | 按平台二进制随包分发（`@vscode/ripgrep`） |
 | 键盘中断 | win: SIGINT 模拟（ctrl+c 监听）；macOS: 标准 SIGINT |
-| 配置目录 | 统一 `~/.y-zero`（win 展开为 `%USERPROFILE%`），经 `os.homedir()` |
+| 配置目录 | 统一 `~/.delta`（win 展开为 `%USERPROFILE%`），经 `os.homedir()` |
 | 换行符 | 文件读写尊重原文件 EOL；日志统一 LF |
 | CI | GitHub Actions matrix: `windows-latest` + `macos-latest`，双平台跑同一套 E2E 冒烟 |
 

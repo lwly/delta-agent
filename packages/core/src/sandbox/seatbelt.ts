@@ -66,7 +66,7 @@ export function buildSeatbeltProfile(spec: SeatbeltProfileSpec): string {
   const networkRule = spec.network === 'none' ? '(deny network*)' : '(allow network*)';
   return [
     '(version 1)',
-    '; y-zero-agent F-30 seatbelt 沙箱（自动生成，勿手改）',
+    '; delta-agent F-30 seatbelt 沙箱（自动生成，勿手改）',
     '(deny default)',
     '(allow file-read*)',
     '(allow process-exec*)',
@@ -109,7 +109,7 @@ export function classifySeatbeltProbe(
     return {
       available: false,
       reason: 'cli_missing',
-      detail: `Seatbelt 仅 macOS 提供（当前 ${info.platform}）：改用 docker 后端（.y-zero/sandbox.json → {"mode":"docker"}）或 fallback 配置`,
+      detail: `Seatbelt 仅 macOS 提供（当前 ${info.platform}）：改用 docker 后端（.delta/sandbox.json → {"mode":"docker"}）或 fallback 配置`,
     };
   }
   if (info.executableExists === false) {
@@ -249,7 +249,7 @@ export interface SeatbeltExecutorOptions {
   projectRoot: string;
   /** 执行端口（测试注入 FakeDockerCli）。缺省 realSeatbeltCli */
   cli?: DockerCli;
-  /** profile 落盘目录（缺省 os.tmpdir()/yzero-sbx）；测试可注入临时目录 */
+  /** profile 落盘目录（缺省 os.tmpdir()/delta-sbx）；测试可注入临时目录 */
   profileRoot?: string;
   platform?: NodeJS.Platform;
   onDebugArgv?: (argv: string[]) => void;
@@ -349,7 +349,7 @@ export class SeatbeltExecutor implements SandboxExecutor {
   /** 生成并落盘本会话 profile（同一 runtime 只写一次；失败直接抛错 → 走降级链）。 */
   private ensureProfile(network: SandboxNetwork): string {
     if (this.profilePath) return this.profilePath;
-    const root = this.opts.profileRoot ?? join(tmpdir(), 'yzero-sbx');
+    const root = this.opts.profileRoot ?? join(tmpdir(), 'delta-sbx');
     const hash = createHash('sha256').update(`${this.projectRoot}\n${network}`).digest('hex').slice(0, 12);
     const dir = join(root, hash);
     mkdirSync(dir, { recursive: true });
@@ -375,7 +375,7 @@ export function buildSeatbeltHints(r: DockerResult, cfg: SandboxConfig): string[
   ) {
     hints.push(
       '[sandbox] network=none 下网络被 Seatbelt 拒绝。若该命令确需联网：加 --sandbox-network bridge，' +
-        '或设置 .y-zero/sandbox.json {"network":"bridge"}',
+        '或设置 .delta/sandbox.json {"network":"bridge"}',
     );
   }
   if (r.code !== 0 && /Operation not permitted|EPERM/i.test(stderr)) {

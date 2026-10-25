@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 function writeConfig(scope: 'user' | 'project', content: string): void {
-  const dir = scope === 'user' ? path.join(home, '.y-zero') : path.join(project, '.y-zero');
+  const dir = scope === 'user' ? path.join(home, '.delta') : path.join(project, '.delta');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'sandbox.json'), content, 'utf8');
 }
@@ -389,7 +389,7 @@ describe('updateUserSandboxMode：只改 mode、写前读、原子写', () => {
   const { join } = require('node:path') as typeof import('node:path');
 
   function tempHome(): string {
-    return mkdtempSync(join(tmpdir(), 'yzero-cfg-home-'));
+    return mkdtempSync(join(tmpdir(), 'delta-cfg-home-'));
   }
 
   it('文件不存在 → 创建 {"mode":"seatbelt"}，previous=local', () => {
@@ -401,10 +401,10 @@ describe('updateUserSandboxMode：只改 mode、写前读、原子写', () => {
 
   it('既有文件的其它字段原样保留，只改 mode', () => {
     const home = tempHome();
-    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
-    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '{"mode":"docker","network":"bridge","memoryMb":1024}');
+    fs.mkdirSync(join(home, '.delta'), { recursive: true });
+    writeFileSync(join(home, '.delta', 'sandbox.json'), '{"mode":"docker","network":"bridge","memoryMb":1024}');
     updateUserSandboxMode('seatbelt', { homeDir: home });
-    expect(JSON.parse(readFileSync(join(home, '.y-zero', 'sandbox.json'), 'utf8'))).toEqual({
+    expect(JSON.parse(readFileSync(join(home, '.delta', 'sandbox.json'), 'utf8'))).toEqual({
       mode: 'seatbelt',
       network: 'bridge',
       memoryMb: 1024,
@@ -413,16 +413,16 @@ describe('updateUserSandboxMode：只改 mode、写前读、原子写', () => {
 
   it('坏 JSON → 拒绝写入并抛错（不覆盖用户文件）', () => {
     const home = tempHome();
-    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
-    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '{broken');
+    fs.mkdirSync(join(home, '.delta'), { recursive: true });
+    writeFileSync(join(home, '.delta', 'sandbox.json'), '{broken');
     expect(() => updateUserSandboxMode('local', { homeDir: home })).toThrow(/无法解析/);
-    expect(readFileSync(join(home, '.y-zero', 'sandbox.json'), 'utf8')).toBe('{broken');
+    expect(readFileSync(join(home, '.delta', 'sandbox.json'), 'utf8')).toBe('{broken');
   });
 
   it('非对象 JSON（数组）→ 拒绝写入', () => {
     const home = tempHome();
-    fs.mkdirSync(join(home, '.y-zero'), { recursive: true });
-    writeFileSync(join(home, '.y-zero', 'sandbox.json'), '[]');
+    fs.mkdirSync(join(home, '.delta'), { recursive: true });
+    writeFileSync(join(home, '.delta', 'sandbox.json'), '[]');
     expect(() => updateUserSandboxMode('local', { homeDir: home })).toThrow(/无法解析/);
   });
 
@@ -430,7 +430,7 @@ describe('updateUserSandboxMode：只改 mode、写前读、原子写', () => {
     const home = tempHome();
     updateUserSandboxMode('docker', { homeDir: home });
     const { readdirSync } = require('node:fs') as typeof import('node:fs');
-    expect(readdirSync(join(home, '.y-zero')).filter((f: string) => f.includes('.tmp-'))).toHaveLength(0);
-    expect(existsSync(join(home, '.y-zero', 'sandbox.json'))).toBe(true);
+    expect(readdirSync(join(home, '.delta')).filter((f: string) => f.includes('.tmp-'))).toHaveLength(0);
+    expect(existsSync(join(home, '.delta', 'sandbox.json'))).toBe(true);
   });
 });

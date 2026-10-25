@@ -6,7 +6,7 @@
  * - yolo：全放行（双重开启由 CLI/Web 入口保证）；非白名单 run_command 仍需确认
  */
 import { isWhitelistedCommand } from './sandbox.js';
-import type { PermissionMode } from '@y-zero/shared';
+import type { PermissionMode } from '@delta/shared';
 
 export type { PermissionMode };
 

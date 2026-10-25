@@ -19,7 +19,7 @@ import type {
   PlanApprovalRequest,
   PlanDecision,
   ToolCall,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import type { RunContext } from './engine/react.js';
 
 // ── 类型 ────────────────────────────────────────────────────────────────────

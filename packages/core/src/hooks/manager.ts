@@ -2,7 +2,7 @@
  * F-27 Hook 系统 —— 生命周期钩子，用户注入自定义逻辑
  * （保存前 lint、禁改 main、任务结束后跑测试等）。
  *
- * 配置：~/.y-zero/hooks.json（用户级）+ .y-zero/hooks.json（项目级），
+ * 配置：~/.delta/hooks.json（用户级）+ .delta/hooks.json（项目级），
  * 两个来源的钩子都执行（用户级先、项目级后）。
  *
  * 事件：
@@ -20,6 +20,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 
 export type HookEvent = 'PreToolUse' | 'PostToolUse' | 'SessionStart' | 'SessionEnd' | 'Stop';
 
@@ -111,8 +112,8 @@ function readHookFile(file: string, source: 'user' | 'project', errors: string[]
 /** 加载用户级 + 项目级 hooks.json（缺失/坏文件不抛错，错误记录在 errors）。 */
 export function loadHookFiles(projectRoot: string, homeDir: string = os.homedir()): HookFiles {
   const errors: string[] = [];
-  const user = readHookFile(path.join(homeDir, '.y-zero', 'hooks.json'), 'user', errors);
-  const project = readHookFile(path.join(projectRoot, '.y-zero', 'hooks.json'), 'project', errors);
+  const user = readHookFile(path.join(userConfigDir(homeDir), FILES.hooks), 'user', errors);
+  const project = readHookFile(path.join(projectConfigDir(projectRoot), FILES.hooks), 'project', errors);
   return { hooks: [...user, ...project], user, project, errors };
 }
 

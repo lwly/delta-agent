@@ -117,7 +117,7 @@ describe('skill hub config', () => {
     const home = path.join(tmp, 'home5');
     writeSkillHubUrl('https://a.example.com', { homeDir: home });
     expect(readSkillHubUrl(home)).toBe('https://a.example.com');
-    expect(userSkillHubConfigPath(home)).toBe(path.join(home, '.y-zero', 'skill-hub.json'));
+    expect(userSkillHubConfigPath(home)).toBe(path.join(home, '.delta', 'skill-hub.json'));
 
     // 手工塞一个无关字段，验证 reset 不破坏
     const file = userSkillHubConfigPath(home);

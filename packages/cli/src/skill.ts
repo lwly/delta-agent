@@ -1,24 +1,28 @@
 /**
- * `yzero skill` 子命令组（Skill Hub 接入）：
+ * `delta skill` 子命令组（Skill Hub 接入）：
  *  - search   从 Skill Hub 搜索技能（GET {hub}/api/v1/search）
- *  - install  安装到 user 层 `~/.y-zero/skills/`（默认）或项目层 `.y-zero/skills/`（--project）
+ *  - install  安装到 user 层 `~/.delta/skills/`（默认）或项目层 `.delta/skills/`（--project）
  *  - list     本机已装 Skill（builtin / user / project 三层分组）
- *  - hub      查看 / 设置 / 重置 hub 地址（~/.y-zero/skill-hub.json）
+ *  - hub      查看 / 设置 / 重置 hub 地址（~/.delta/skill-hub.json）
  *
- * hub 地址解析优先级：--hub 参数 > 环境变量 YZERO_SKILL_HUB_URL > 配置文件 > 官方默认（api.skillhub.cn）。
+ * hub 地址解析优先级：--hub 参数 > 环境变量 DELTA_SKILL_HUB_URL > 配置文件 > 官方默认（api.skillhub.cn）。
  */
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_SKILL_HUB_BASE,
   SKILL_HUB_ENV,
+  CONFIG_DIR,
+  FILES,
+  projectConfigDir,
+  userConfigDir,
   discoverSkills,
   installHubSkill,
   resolveSkillHubBase,
   searchHubSkills,
   userSkillHubConfigPath,
   writeSkillHubUrl,
-} from '@y-zero/core';
+} from '@delta/core';
 
 interface HubOpts {
   hub?: string;
@@ -49,7 +53,7 @@ function oneLine(s: string, max = 80): string {
 export async function skillSearchCommand(query: string[], opts: HubOpts): Promise<void> {
   const q = query.join(' ').trim();
   if (q === '') {
-    console.error('✘ 请提供搜索词，例如：yzero skill search git');
+    console.error('✘ 请提供搜索词，例如：delta skill search git');
     process.exitCode = 1;
     return;
   }
@@ -58,7 +62,7 @@ export async function skillSearchCommand(query: string[], opts: HubOpts): Promis
     const results = await searchHubSkills(base, q, { limit: 15 });
     console.log(`Skill Hub：${base}（来源：${sourceLabel(source)}）　搜索「${q}」命中 ${results.length} 条\n`);
     if (results.length === 0) {
-      console.log('（无结果）换个关键词试试，或 `yzero skill hub set <url>` 换源');
+      console.log('（无结果）换个关键词试试，或 `delta skill hub set <url>` 换源');
       return;
     }
     for (const s of results) {
@@ -68,7 +72,7 @@ export async function skillSearchCommand(query: string[], opts: HubOpts): Promis
       const desc = s.descriptionZh ?? s.description;
       if (desc) console.log(`    ${oneLine(desc, 90)}`);
     }
-    console.log('\n安装：yzero skill install <slug>');
+    console.log('\n安装：delta skill install <slug>');
   } catch (e) {
     console.error(`✘ 搜索失败：${(e as Error).message}`);
     process.exitCode = 1;
@@ -83,8 +87,8 @@ export async function skillInstallCommand(
   const { base, source } = hubBase(opts);
   const projectRoot = process.cwd();
   const targetDir = opts.project
-    ? path.join(projectRoot, '.y-zero', 'skills')
-    : path.join(os.homedir(), '.y-zero', 'skills');
+    ? path.join(projectConfigDir(projectRoot), FILES.skillsDir)
+    : path.join(userConfigDir(), FILES.skillsDir);
   try {
     const r = await installHubSkill(slug, {
       base,
@@ -111,8 +115,8 @@ export async function skillListCommand(): Promise<void> {
   const layers = ['builtin', 'user', 'project'] as const;
   const labels: Record<(typeof layers)[number], string> = {
     builtin: '内置（packages/core/skills）',
-    user: `用户级（${path.join(os.homedir(), '.y-zero', 'skills')}）`,
-    project: `项目级（${path.join(process.cwd(), '.y-zero', 'skills')}）`,
+    user: `用户级（${path.join(userConfigDir(), FILES.skillsDir)}）`,
+    project: `项目级（${path.join(projectConfigDir(process.cwd()), FILES.skillsDir)}）`,
   };
   for (const layer of layers) {
     const group = skills.filter((s) => s.layer === layer);

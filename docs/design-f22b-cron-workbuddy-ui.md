@@ -246,7 +246,7 @@ sequenceDiagram
     else 到期且在窗口内
         R->>ST: 写 runningSince 锁 + save
         R->>E: executor(job, {dueAt, trigger:'schedule'})
-        E->>E: spawn yzero run -p … --json<br/>（yolo → --permission yolo --yolo；plan → --permission plan）
+        E->>E: spawn delta run -p … --json<br/>（yolo → --permission yolo --yolo；plan → --permission plan）
         E-->>R: CronExecutorResult
         R->>ST: 运行记录 + lastRun + 推进 nextRunAt + save
     end

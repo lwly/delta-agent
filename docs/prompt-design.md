@@ -1,4 +1,4 @@
-# y-zero-agent Prompt 组装设计（静态 / 动态 / 模式切换）
+# delta-agent Prompt 组装设计（静态 / 动态 / 模式切换）
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 参考：PaiCLI Prompt 拼装方案 ｜ 关联：technical-design.md §5、memory-design.md §7、agent-modes-design.md
 
@@ -44,7 +44,7 @@
 |----|--------|------|----------|
 | 人格 | L1 Identity | Agent 身份、安全基线（locked，不可覆盖） | 随版本 |
 | 行为准则 | L2 Environment | 输出规范、工具使用纪律、确认策略 | 随版本 + 平台探测 |
-| 项目指令 | L3 Project | README 摘要/目录结构/技术栈/规范 + **L3 静态记忆**（MEMORY.md/.y-zero/agent.md） | 项目文件/git 变更 |
+| 项目指令 | L3 Project | README 摘要/目录结构/技术栈/规范 + **L3 静态记忆**（MEMORY.md/.delta/agent.md） | 项目文件/git 变更 |
 | 工具清单 | L4 Tools | 内置 14 工具 + MCP 动态工具的 schema | 工具/MCP 注册变化 |
 
 ### 2.2 缓存复用策略（双层）
@@ -71,7 +71,7 @@ interface StaticPromptCache {
 |------|--------|------|
 | MCP 工具注册/断开 | 工具清单 | 仅重组装 L4 |
 | Skill 加载/卸载 | （索引在动态段，不受影响）；项目级 Skill 变更 | 无需重组装静态段 |
-| `.y-zero/` 配置或 MEMORY.md 变更 | 项目指令 | 仅重组装 L3 |
+| `.delta/` 配置或 MEMORY.md 变更 | 项目指令 | 仅重组装 L3 |
 | 版本升级 / 覆盖集变化 | 全部 | 全量重组装 |
 
 ## 3. 动态 Prompt（每轮更新）

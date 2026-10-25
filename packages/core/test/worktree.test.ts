@@ -118,7 +118,7 @@ describe('checkout（脏区拦截，D9）', () => {
 });
 
 describe('worktree add / list / remove / prune', () => {
-  it('add：容器目录约定 ../<repo>.worktrees/yzero-<sid8>，从指定分支检出', async () => {
+  it('add：容器目录约定 ../<repo>.worktrees/delta-<sid8>，从指定分支检出', async () => {
     initRepo();
     const wm = new WorktreeManager(repoRoot);
     const sid = 'a1b2c3d4-5e6f-4a1b-8c2d-000000000001';
@@ -126,7 +126,7 @@ describe('worktree add / list / remove / prune', () => {
     expect(r.ok).toBe(true);
     // realpath 归一（macOS tmpdir 符号链接）：与 worktreePathFor 内部口径一致
     const expected = path.join(
-      fs.realpathSync(tmpBase), 'my-repo.worktrees', 'yzero-a1b2c3d4',
+      fs.realpathSync(tmpBase), 'my-repo.worktrees', 'delta-a1b2c3d4',
     );
     expect(r.path).toBe(expected);
     expect(fs.existsSync(expected)).toBe(true);
@@ -142,17 +142,17 @@ describe('worktree add / list / remove / prune', () => {
   it('add：-b 就地新建分支', async () => {
     initRepo();
     const wm = new WorktreeManager(repoRoot);
-    const r = await wm.addWorktree('new-branch-sess', { newBranch: 'yzero/work' });
+    const r = await wm.addWorktree('new-branch-sess', { newBranch: 'delta/work' });
     expect(r.ok).toBe(true);
-    expect(await wm.currentBranch(r.path!)).toBe('yzero/work');
+    expect(await wm.currentBranch(r.path!)).toBe('delta/work');
   });
 
-  it('add：缺省从当前 HEAD 检出（git 默认以目录名建分支，恰为 yzero-<sid8>）', async () => {
+  it('add：缺省从当前 HEAD 检出（git 默认以目录名建分支，恰为 delta-<sid8>）', async () => {
     initRepo();
     const wm = new WorktreeManager(repoRoot);
     const r = await wm.addWorktree('head-sess');
     expect(r.ok).toBe(true);
-    expect(await wm.currentBranch(r.path!)).toBe('yzero-head-ses');
+    expect(await wm.currentBranch(r.path!)).toBe('delta-head-ses');
   });
 
   it('add 幂等（D10）：路径已在 worktree list → 直接重绑返回', async () => {
@@ -269,7 +269,7 @@ describe('切换注入消息文案（D5 两端一致）', () => {
       '（系统提示：[环境] 工作根已切换：分支 feature @ /wt（独立 worktree，主工作区改动不受影响））',
     );
     expect(worktreeOffMessage('/repo', '/wt')).toBe(
-      '（系统提示：[环境] 已切回主工作区：/repo；worktree 目录已保留（/wt），可用 yzero worktree remove 清理）',
+      '（系统提示：[环境] 已切回主工作区：/repo；worktree 目录已保留（/wt），可用 delta worktree remove 清理）',
     );
   });
 });

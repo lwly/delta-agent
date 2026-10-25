@@ -23,14 +23,14 @@ describe('loadHookFiles', () => {
 
   it('读 { hooks: [...] } 与裸数组两种形态，标注来源', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-home-'));
-    await fs.mkdir(path.join(home, '.y-zero'), { recursive: true });
+    await fs.mkdir(path.join(home, '.delta'), { recursive: true });
     await fs.writeFile(
-      path.join(home, '.y-zero', 'hooks.json'),
+      path.join(home, '.delta', 'hooks.json'),
       JSON.stringify({ hooks: [{ event: 'Stop', command: 'echo stop' }] }),
     );
-    await fs.mkdir(path.join(tmpRoot, '.y-zero'), { recursive: true });
+    await fs.mkdir(path.join(tmpRoot, '.delta'), { recursive: true });
     await fs.writeFile(
-      path.join(tmpRoot, '.y-zero', 'hooks.json'),
+      path.join(tmpRoot, '.delta', 'hooks.json'),
       JSON.stringify([{ event: 'PreToolUse', tool: 'write_file', command: 'echo pre' }]),
     );
     const files = loadHookFiles(tmpRoot, home);
@@ -43,9 +43,9 @@ describe('loadHookFiles', () => {
 
   it('未知事件与缺 command 跳过，坏 JSON 记错误不抛', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-home-'));
-    await fs.mkdir(path.join(tmpRoot, '.y-zero'), { recursive: true });
+    await fs.mkdir(path.join(tmpRoot, '.delta'), { recursive: true });
     await fs.writeFile(
-      path.join(tmpRoot, '.y-zero', 'hooks.json'),
+      path.join(tmpRoot, '.delta', 'hooks.json'),
       JSON.stringify([
         { event: 'Nonsense', command: 'x' },
         { event: 'Stop' },

@@ -1,5 +1,5 @@
 /**
- * `yzero sandbox` 子命令组（F-30 设计 §11 T05）：
+ * `delta sandbox` 子命令组（F-30 设计 §11 T05）：
  *  - status   查看生效模式 + 后端探测 + 警告（格式化单点 formatSandboxStatus，CLI 与未来 Web 复用）
  *  - enable   全局启用沙箱（默认 seatbelt；--mode docker 切换容器后端）
  *  - disable  全局关闭（mode=local）
@@ -8,7 +8,7 @@
  *
  * enable/disable 经 core 的 updateUserSandboxMode：只改 mode、写前读、tmp+rename 原子写。
  */
-import { createSandboxRuntime, updateUserSandboxMode, type SandboxStatus } from '@y-zero/core';
+import { createSandboxRuntime, updateUserSandboxMode, type SandboxStatus } from '@delta/core';
 
 /** status 的人类可读格式化（R7：macOS bind mount 慢提示固定追加）。 */
 export function formatSandboxStatus(st: SandboxStatus): string {
@@ -19,8 +19,8 @@ export function formatSandboxStatus(st: SandboxStatus): string {
   const probeMark = st.docker.available ? '✔' : '✘';
   lines.push(`后端探测：${probeMark} ${st.docker.detail}${st.docker.fromCache ? '（缓存）' : ''}`);
   if (st.mode === 'docker') {
-    lines.push(`镜像：${st.image}（${st.imagePresent ? '已在本地' : '未拉取，可用 yzero sandbox pull 预热'}）`);
-    lines.push(`残留容器：${st.residues.length} 个${st.residues.length > 0 ? '，可用 yzero sandbox gc 清理' : ''}`);
+    lines.push(`镜像：${st.image}（${st.imagePresent ? '已在本地' : '未拉取，可用 delta sandbox pull 预热'}）`);
+    lines.push(`残留容器：${st.residues.length} 个${st.residues.length > 0 ? '，可用 delta sandbox gc 清理' : ''}`);
     if (process.platform === 'darwin') {
       lines.push('ℹ macOS 上 Docker bind mount I/O 明显慢于本地（首次 pnpm install 可能 60–120s），这是 Docker Desktop 的已知特性');
     }
@@ -46,7 +46,7 @@ export function sandboxStatusCommand(opts: { refresh?: boolean } = {}): void {
     .then((st) => {
       console.log(formatSandboxStatus(st));
       if (!st.explicit) {
-        console.log('\n启用：`yzero sandbox enable`（默认 seatbelt；--mode docker 用容器）');
+        console.log('\n启用：`delta sandbox enable`（默认 seatbelt；--mode docker 用容器）');
       }
     })
     .catch((e: unknown) => {
@@ -62,7 +62,7 @@ export function sandboxEnableCommand(opts: { mode?: string }): void {
     const r = updateUserSandboxMode(mode);
     console.log(`✔ 沙箱已启用（${mode}）：${r.path}`);
     if (mode === 'docker') {
-      console.log('ℹ docker 后端需要本机 daemon 运行；未安装 Docker 时建议 `yzero sandbox enable`（seatbelt，macOS 自带）');
+      console.log('ℹ docker 后端需要本机 daemon 运行；未安装 Docker 时建议 `delta sandbox enable`（seatbelt，macOS 自带）');
     }
   } catch (e) {
     console.error(`✘ ${(e as Error).message}`);
@@ -101,7 +101,7 @@ export function sandboxPullCommand(opts: { image?: string }): void {
     });
 }
 
-/** gc：清理 yzero 残留容器（seatbelt/local 下返回 0 个，不报错）。 */
+/** gc：清理 delta 残留容器（seatbelt/local 下返回 0 个，不报错）。 */
 export function sandboxGcCommand(): void {
   const runtime = createSandboxRuntime({
     projectRoot: process.cwd(),

@@ -2,7 +2,7 @@
 /**
  * 真机冒烟测试：用已存储的 Provider 配置跑一次完整 ReAct 循环。
  * 用法：node scripts/smoke.mjs [项目目录]（缺省 /tmp/yz-smoke）
- * 无任何硬编码密钥 —— 走 `yzero models add` 的加密存储或环境变量。
+ * 无任何硬编码密钥 —— 走 `delta models add` 的加密存储或环境变量。
  */
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import * as fs from 'node:fs';
@@ -31,7 +31,7 @@ const ac = new AbortController();
 setTimeout(() => ac.abort(), 120_000); // hard cap
 
 const task =
-  '请在当前项目根目录创建文件 notes.txt，内容为一行文本 "hello from y-zero-agent"。' +
+  '请在当前项目根目录创建文件 notes.txt，内容为一行文本 "hello from delta-agent"。' +
   '然后用 read_file 读取它确认写入成功，最后简要报告完成情况。';
 
 let finalText = '';
@@ -43,9 +43,9 @@ for await (const ev of runReAct(
     sessionId: 'smoke',
     projectId: 'smoke',
     mode: 'react',
-    model: process.env.YZERO_MODEL || 'deepseek-chat',
+    model: process.env.DELTA_MODEL || 'deepseek-chat',
     systemPrompt:
-      '你是 y-zero-agent，一个在终端工作的 AI 编程助手。通过调用工具完成任务，遵循 ReAct 循环。',
+      '你是 delta-agent，一个在终端工作的 AI 编程助手。通过调用工具完成任务，遵循 ReAct 循环。',
     maxTurns: 8,
     signal: ac.signal,
     provider,
@@ -91,7 +91,7 @@ for await (const ev of runReAct(
 // verify side effect
 const file = path.join(root, 'notes.txt');
 const content = await readFile(file, 'utf8').catch(() => null);
-const ok = content?.trim() === 'hello from y-zero-agent';
+const ok = content?.trim() === 'hello from delta-agent';
 console.log(`[smoke] ${'─'.repeat(40)}`);
 console.log(`[smoke] file check: ${ok ? 'PASS' : 'FAIL'} (${content?.trim() ?? 'missing'})`);
 console.log(`[smoke] turns used tool calls: ${toolCalls}, wall: ${((Date.now() - t0) / 1000).toFixed(1)}s, ${finalText}`);

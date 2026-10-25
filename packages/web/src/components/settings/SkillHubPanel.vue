@@ -2,7 +2,7 @@
 // 设置页·Skill Hub 技能市场面板：内置目录 + 远程 registry 浏览、预览、一键安装。
 // 数据源：GET /api/skill-hub（合并目录 + installedIn）；安装：POST /api/skill-hub/install；
 // 卸载复用既有 DELETE /api/skills/:name（口径与 Skills 面板一致）；
-// 远程源配置：GET/PUT /api/skill-hub/sources（<configHome>/.y-zero/skill-hub.json）。
+// 远程源配置：GET/PUT /api/skill-hub/sources（<configHome>/.delta/skill-hub.json）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   api,
@@ -332,7 +332,7 @@ async function doImport() {
           <button
             class="btn sm"
             :disabled="!projectEnabled || Boolean(busy)"
-            :title="projectEnabled ? `安装到当前项目 .y-zero/skills/` : '未选择项目：回到工作台选中项目后可用'"
+            :title="projectEnabled ? `安装到当前项目 .delta/skills/` : '未选择项目：回到工作台选中项目后可用'"
             @click="install(item, 'project')"
           >安装到项目级</button>
           <button class="btn sm" @click="togglePreview(item)">
@@ -438,8 +438,8 @@ async function doImport() {
           <label class="field">
             <span class="fl">安装到</span>
             <select v-model="importScope">
-              <option value="user">用户级 ~/.y-zero/skills/</option>
-              <option value="project" :disabled="!projectEnabled">项目级 .y-zero/skills/</option>
+              <option value="user">用户级 ~/.delta/skills/</option>
+              <option value="project" :disabled="!projectEnabled">项目级 .delta/skills/</option>
             </select>
           </label>
         </div>

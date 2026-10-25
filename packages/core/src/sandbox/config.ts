@@ -1,6 +1,6 @@
 /**
  * F-30 沙箱配置体系（设计 §3）：
- *  - 两级 JSON（`~/.y-zero/sandbox.json` < `.y-zero/sandbox.json`）+ 会话覆盖，**逐字段 merge**
+ *  - 两级 JSON（`~/.delta/sandbox.json` < `.delta/sandbox.json`）+ 会话覆盖，**逐字段 merge**
  *  - 非法值 ⇒ 降级默认 + warning，**永不 throw**（配置写错不该让 agent 起不来）
  *  - 敏感键（mounts / privileged / …）⇒ 该层**硬拒**
  *  - `enforce: true` ⇒ 会话覆盖只能更严（偏序表），且 fallback 强制 deny
@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 import {
   DEFAULT_SANDBOX_CONFIG,
   DEFAULT_SANDBOX_IMAGE,
@@ -99,7 +100,7 @@ export function normalizeSandboxLayer(
 
   if (record.enforce !== undefined) {
     if (source !== 'project') {
-      warn('enforce', `enforce 仅在项目级（.y-zero/sandbox.json）生效，已忽略 ${source} 层的 enforce`);
+      warn('enforce', `enforce 仅在项目级（.delta/sandbox.json）生效，已忽略 ${source} 层的 enforce`);
     } else if (typeof record.enforce === 'boolean') {
       layer.enforce = record.enforce;
     } else {
@@ -288,12 +289,12 @@ export interface LoadSandboxConfigOptions {
 
 /** 全局配置文件路径（`sandbox enable/disable` 与 status 展示复用，保证单点）。 */
 export function userSandboxConfigPath(homeDir: string = os.homedir()): string {
-  return path.join(homeDir, '.y-zero', 'sandbox.json');
+  return path.join(userConfigDir(homeDir), FILES.sandbox);
 }
 
 /** 项目配置文件路径。 */
 export function projectSandboxConfigPath(projectRoot: string): string {
-  return path.join(projectRoot, '.y-zero', 'sandbox.json');
+  return path.join(projectConfigDir(projectRoot), FILES.sandbox);
 }
 
 /**
@@ -497,7 +498,7 @@ export function assertSafeWorkspaceRoot(realRoot: string): void {
   if (samePath(root, realpathOr(os.homedir()))) {
     throw new SandboxPathError(
       `[sandbox] sandbox 配置不允许把 home 目录（${root}）作为工作区挂进容器：` +
-        `其中包含 ~/.ssh 与 ~/.y-zero（Provider Key），隔离会失效。` +
+        `其中包含 ~/.ssh 与 ~/.delta（Provider Key），隔离会失效。` +
         `请在具体项目目录运行，或改用 --sandbox local。`,
     );
   }
@@ -549,7 +550,7 @@ export interface UpdateUserSandboxModeResult {
 }
 
 /**
- * 修改**全局**沙箱模式（`yzero sandbox enable/disable` 唯一写入口）。
+ * 修改**全局**沙箱模式（`delta sandbox enable/disable` 唯一写入口）。
  * 约束：
  *  - 只改 `mode` 一个字段，文件内其它字段**原样保留**（写前读）；
  *  - tmp + rename 原子写（进程中断不会留下半个 JSON）；

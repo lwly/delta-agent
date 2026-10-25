@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
-import type { LLMProvider, StreamEvent } from '@y-zero/shared';
+import type { LLMProvider, StreamEvent } from '@delta/shared';
 import {
   scanProjectLayout,
   runOnboardingScan,
@@ -144,7 +144,7 @@ describe('runOnboardingScan', () => {
 
 describe('confirmOnboarding', () => {
   beforeEach(() => {
-    fs.mkdirSync(path.join(root, '.y-zero'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.delta'), { recursive: true });
     fs.writeFileSync(agentMdDraftPath(root), 'draft-agent\n');
     fs.writeFileSync(memoryMdDraftPath(root), 'draft-memory\n');
     saveOnboardingState(root, { status: 'draft' });
@@ -193,8 +193,8 @@ describe('skipOnboarding / auto', () => {
   });
 
   it('bad state json degrades to pending (never throws)', () => {
-    fs.mkdirSync(path.join(root, '.y-zero'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.y-zero', 'onboarding.json'), '{broken');
+    fs.mkdirSync(path.join(root, '.delta'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.delta', 'onboarding.json'), '{broken');
     expect(loadOnboardingState(root).status).toBe('pending');
     expect(shouldAutoOnboard(root)).toBe(true);
   });

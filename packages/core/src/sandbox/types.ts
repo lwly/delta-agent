@@ -9,7 +9,7 @@
  *
  * 本文件**只放类型与常量**，没有副作用、不触碰 fs / 子进程，可被任意层安全导入。
  */
-import type { ConfirmDecision, ConfirmRequest } from '@y-zero/shared';
+import type { ConfirmDecision, ConfirmRequest } from '@delta/shared';
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ export type SandboxConfigSource = 'user' | 'project' | 'session';
 
 /**
  * 默认镜像：固定到 minor 线（跟随安全补丁，不锁 patch），
- * 且自带 node / pnpm / npm —— y-zero 自身与绝大多数目标项目可直接跑。
+ * 且自带 node / pnpm / npm —— delta 自身与绝大多数目标项目可直接跑。
  */
 export const DEFAULT_SANDBOX_IMAGE = 'node:22-bookworm-slim';
 
@@ -279,7 +279,7 @@ export interface SandboxStatus {
    * local 模式下恒 not_applicable）。改名会破坏既有 `sandbox status` 消费方，故保留。
    */
   docker: SandboxProbeResult;
-  /** 残留容器名（label 前缀 yzero-） */
+  /** 残留容器名（label 前缀 delta-） */
   residues: string[];
   provenance: SandboxConfigProvenance;
   warnings: SandboxConfigWarning[];

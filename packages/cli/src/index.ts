@@ -22,7 +22,8 @@ import {
   loadHookFiles,
   MIGRATIONS,
   LATEST_SCHEMA_VERSION,
-} from '@y-zero/core';
+  migrateLegacyConfig,
+} from '@delta/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
@@ -69,7 +70,7 @@ import {
   worktreePruneCommand,
 } from './worktree.js';
 import { createSpawnExecutor } from './cron-executor.js';
-import { createDesktopNotifier, autoOnboardProject } from '@y-zero/core';
+import { createDesktopNotifier, autoOnboardProject } from '@delta/core';
 import {
   normalizeGitPolicy,
   normalizeMode,
@@ -98,12 +99,12 @@ const program = new Command();
 program.enablePositionalOptions();
 
 program
-  .name('yzero')
-  .description('y-zero-agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
+  .name('delta')
+  .description('delta-agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
   .version('0.1.0')
   .option('-r, --resume [sessionId]', '恢复指定会话（缺省恢复项目最近会话）')
-  .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回各厂商默认）')
-  .option('-p, --provider <name>', '模型厂商：anthropic | deepseek | qwen | openai（默认读 YZERO_PROVIDER，再按已配置 Key 自动探测）')
+  .option('-m, --model <model>', '指定模型名（默认读 DELTA_MODEL，再退回各厂商默认）')
+  .option('-p, --provider <name>', '模型厂商：anthropic | deepseek | qwen | openai（默认读 DELTA_PROVIDER，再按已配置 Key 自动探测）')
   .option('--yolo', 'YOLO 第二重开关（须与 --permission yolo 同时使用；单独使用会降级为 default 并告警）')
   .option('--permission <mode>', 'F-23 权限模式：plan（只读）| default（写需确认）| yolo（全放行，需 --yolo 双重开启）', 'default')
   .option('--allow <tools>', '工具级 allowlist（逗号分隔，default 模式下命中跳过确认，如 write_file,edit_file）')
@@ -111,14 +112,14 @@ program
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
   .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
-  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: CliOpts) => {
     await start(opts);
   });
 
-// ── yzero models：Provider Key 本地管理（F-04a）──────────────────────────
+// ── delta models：Provider Key 本地管理（F-04a）──────────────────────────
 
-const models = program.command('models').description('管理模型 Provider 配置（Key 加密存储于 ~/.y-zero/models.json）');
+const models = program.command('models').description('管理模型 Provider 配置（Key 加密存储于 ~/.delta/models.json）');
 
 models
   .command('add')
@@ -145,7 +146,7 @@ models
   .action(() => {
     const list = new ProviderManager().list();
     if (list.length === 0) {
-      console.log('（空）先用 `yzero models add <id> -k <apiKey>` 添加');
+      console.log('（空）先用 `delta models add <id> -k <apiKey>` 添加');
       return;
     }
     for (const p of list) {
@@ -222,7 +223,7 @@ models
     const mgr = new ProviderManager();
     const target = id ?? mgr.activeIds()[0];
     if (!target) {
-      console.error('✘ 没有已启用的 Provider，先 `yzero models add`');
+      console.error('✘ 没有已启用的 Provider，先 `delta models add`');
       process.exitCode = 1;
       return;
     }
@@ -232,7 +233,7 @@ models
     if (!r.ok) process.exitCode = 1;
   });
 
-// ── F-32 模型路由：yzero models routing 子命令组 ─────────────────────────
+// ── F-32 模型路由：delta models routing 子命令组 ─────────────────────────
 
 models
   .command('routing')
@@ -326,7 +327,7 @@ models
     console.log('✔ 模型路由已停用');
   });
 
-// ── yzero memory：L2 动态记忆管理（memory-design §8）────────────────────
+// ── delta memory：L2 动态记忆管理（memory-design §8）────────────────────
 
 const memory = program.command('memory').description('管理 L2 长期动态记忆（memories 表）');
 
@@ -336,7 +337,7 @@ memory
   .option('--scope <scope>', '按 scope 过滤（global / project:<id> / session:<id>）')
   .option('--kind <kind>', '按类型过滤（preference/fact/decision/pitfall/workflow）')
   .option('--pending', '只看待确认队列')
-  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action((opts: { scope?: string; kind?: string; pending?: boolean; database?: string }) => {
     const service = new SessionService(opts.database);
     const items = opts.pending
@@ -388,7 +389,7 @@ memory
     service.close();
   });
 
-// ── yzero usage：F-31 成本与用量报告 ────────────────────────────────────
+// ── delta usage：F-31 成本与用量报告 ────────────────────────────────────
 
 program
   .command('usage')
@@ -396,17 +397,17 @@ program
   .option('--range <range>', '时间范围：today | 7d | 30d | all（默认 all，非法值归一化为 all）', 'all')
   .option('--project <id|name>', '按项目过滤（支持项目 id 或名称）')
   .option('--json', 'stdout 输出结构化 JSON（与 GET /api/usage/summary 同构，可直接供 jq 消费）', false)
-  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: UsageCommandOptions) => {
     await usageCommand(opts);
   });
 
-// ── yzero migrate：F-35 Schema 版本迁移 ─────────────────────────────────
+// ── delta migrate：F-35 Schema 版本迁移 ─────────────────────────────────
 
 program
   .command('migrate')
   .description('查看/执行数据库 Schema 迁移（打开数据库时自动执行；此命令用于核对版本与迁移历史）')
-  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action((opts: { database?: string }) => {
     const service = new SessionService(opts.database); // 构造即自动迁移
     const v = service.store.schemaVersion;
@@ -419,7 +420,7 @@ program
     service.close();
   });
 
-// ── yzero search：F-17 全文/语义搜索历史对话 ────────────────────────────
+// ── delta search：F-17 全文/语义搜索历史对话 ────────────────────────────
 
 program
   .command('search')
@@ -427,7 +428,7 @@ program
   .argument('<query>', '检索词（中英文均可）')
   .option('--mode <mode>', 'auto（混合，默认）| fulltext | semantic', 'auto')
   .option('--limit <n>', '返回条数（默认 10）', '10')
-  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (query: string, opts: { mode: string; limit: string; database?: string }) => {
     const service = new SessionService(opts.database);
     try {
@@ -445,14 +446,14 @@ program
     }
   });
 
-// ── yzero serve：Web 控制台本地服务（M4）────────────────────────────────
+// ── delta serve：Web 控制台本地服务（M4）────────────────────────────────
 
 program
   .command('serve')
   .description('启动 Web 控制台本地服务（纯本地：默认 127.0.0.1:7900，仅监听回环地址）')
   .option('--port <n>', '监听端口（默认 7900）', '7900')
   .option('--web-dist <dir>', 'Vue 构建产物目录（缺省用包内嵌 packages/web/dist）')
-  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: { port: string; webDist?: string; db?: string }) => {
     const service = new SessionService(opts.db);
     const registry = new ToolRegistry();
@@ -478,13 +479,13 @@ program
           const r = await autoOnboardProject({
             projectRoot,
             provider: onboardingProvider,
-            model: process.env.YZERO_MODEL || 'claude-sonnet-4-5-20250929',
+            model: process.env.DELTA_MODEL || 'claude-sonnet-4-5-20250929',
           });
           if (r && !r.skipped) {
-            console.log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`yzero onboarding confirm\` 采纳）`);
+            console.log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
           }
         } catch {
-          console.error('⚠ onboarding 扫描失败（可稍后手动运行 `yzero onboarding run`）');
+          console.error('⚠ onboarding 扫描失败（可稍后手动运行 `delta onboarding run`）');
         }
       })();
     }
@@ -507,7 +508,7 @@ program
       notify: createDesktopNotifier({ projectRoot }),
     });
 
-    const providers = new ProviderManager(); // 设置中心共用同一存储（~/.y-zero/models.json）
+    const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
     // Vue 构建产物候选：--web-dist > 包内嵌 cli/dist/web（npm 安装形态）> 仓库 packages/web/dist（开发形态）
     const distDir = path.dirname(fileURLToPath(import.meta.url));
     const webDist = [
@@ -526,7 +527,7 @@ program
       cronExecutor: createSpawnExecutor(),
     });
     server.listen(port, '127.0.0.1', () => {
-      console.log(`✔ yzero Web 控制台已启动：http://127.0.0.1:${port}`);
+      console.log(`✔ delta Web 控制台已启动：http://127.0.0.1:${port}`);
       console.log(webDist ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
       console.log('Ctrl+C 退出');
     });
@@ -551,7 +552,7 @@ async function start(opts: CliOpts): Promise<void> {
     process.exit(1);
   }
 
-  // MCP servers: ~/.y-zero/mcp.json + .y-zero/mcp.json（项目级优先）
+  // MCP servers: ~/.delta/mcp.json + .delta/mcp.json（项目级优先）
   const registry = new ToolRegistry();
   const mcp = new McpManager();
   const mcpConfig = loadMcpConfig(process.cwd());
@@ -581,7 +582,7 @@ async function start(opts: CliOpts): Promise<void> {
   if (!session) {
     session = service.createSession(project.id, {
       title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,
-      model: opts.model ?? process.env.YZERO_MODEL ?? 'claude-sonnet-4-5-20250929',
+      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
       mode: normalizeMode(opts.mode),
     });
   } else if (opts.model) {
@@ -605,9 +606,9 @@ async function start(opts: CliOpts): Promise<void> {
   }
 
   // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案
-  // （fire-and-forget 不阻塞 TUI 启动；完成情况看 `.y-zero/onboarding.json` 或 `yzero onboarding status`）
+  // （fire-and-forget 不阻塞 TUI 启动；完成情况看 `.delta/onboarding.json` 或 `delta onboarding status`）
   if (project.created) {
-    console.error('✨ 新项目已注册：onboarding 扫描已在后台启动（完成后用 `yzero onboarding confirm` 采纳）');
+    console.error('✨ 新项目已注册：onboarding 扫描已在后台启动（完成后用 `delta onboarding confirm` 采纳）');
     void autoOnboardProject({
       projectRoot: cwd,
       provider,
@@ -667,11 +668,11 @@ async function start(opts: CliOpts): Promise<void> {
   }
 }
 
-// ── yzero hooks：F-27 生命周期钩子配置查看 ──────────────────────────────
+// ── delta hooks：F-27 生命周期钩子配置查看 ──────────────────────────────
 
 program
   .command('hooks')
-  .description('查看已加载的 Hook 配置（~/.y-zero/hooks.json + .y-zero/hooks.json；事件与退出码语义见 PRD F-27）')
+  .description('查看已加载的 Hook 配置（~/.delta/hooks.json + .delta/hooks.json；事件与退出码语义见 PRD F-27）')
   .action(() => {
     const files = loadHookFiles(process.cwd());
     const render = (list: typeof files.user, label: string) => {
@@ -681,15 +682,15 @@ program
         console.log(`  ${h.event.padEnd(12)} ${h.command}${matcher}${h.timeout_ms ? ` timeout=${h.timeout_ms}ms` : ''}`);
       }
     };
-    render(files.user, '用户级 ~/.y-zero/hooks.json');
-    render(files.project, '项目级 .y-zero/hooks.json');
+    render(files.user, '用户级 ~/.delta/hooks.json');
+    render(files.project, '项目级 .delta/hooks.json');
     for (const e of files.errors) console.error(`✘ ${e}`);
     if (files.hooks.length === 0 && files.errors.length === 0) {
-      console.log('（未配置任何钩子）示例：.y-zero/hooks.json → {"hooks":[{"event":"PreToolUse","tool":"write_file","command":"npx lint --fix"}]}');
+      console.log('（未配置任何钩子）示例：.delta/hooks.json → {"hooks":[{"event":"PreToolUse","tool":"write_file","command":"npx lint --fix"}]}');
     }
   });
 
-// ── yzero evals：F-28 评测体系 ───────────────────────────────────────────
+// ── delta evals：F-28 评测体系 ───────────────────────────────────────────
 
 program
   .command('evals')
@@ -699,12 +700,12 @@ program
     'after',
     `
 子命令：
-  yzero evals list                                查看内置/项目基准集
-  yzero evals run [options]                       运行基准集（--provider a,b,c 横向对比）
-  yzero evals baseline --save [options]           保存当前结果为回归基线（.y-zero/evals/baseline.json）
-  yzero evals baseline --check [options]          重跑并对比基线，回归即退出码 1
+  delta evals list                                查看内置/项目基准集
+  delta evals run [options]                       运行基准集（--provider a,b,c 横向对比）
+  delta evals baseline --save [options]           保存当前结果为回归基线（.delta/evals/baseline.json）
+  delta evals baseline --check [options]          重跑并对比基线，回归即退出码 1
 
-自定义套件：.y-zero/evals/suite.json（{"name","cases":[{id,title,task,checks}]}），--suite 指定任意路径。`,
+自定义套件：.delta/evals/suite.json（{"name","cases":[{id,title,task,checks}]}），--suite 指定任意路径。`,
   )
   .option('--suite <path>', '基准集 JSON 路径（缺省用内置 builtin-core）')
   .option('--provider <ids>', 'Provider（逗号分隔可多个，横评对比；缺省自动探测）')
@@ -720,7 +721,7 @@ program
   .option('--permission <mode>', 'F-23 权限模式：plan | default | yolo（写类用例需放行）', 'default')
   .option('--yolo', 'YOLO 第二重开关（与 --permission yolo 同时使用）')
   .option('--allow <tools>', '工具级 allowlist（逗号分隔）')
-  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (sub: string | undefined, opts: EvalsOptions) => {
     if (sub && !['list', 'run', 'baseline'].includes(sub)) {
       console.error('✘ 未知子命令，可用：list / run / baseline');
@@ -731,7 +732,7 @@ program
     else await evalsRunCommand(opts);
   });
 
-// ── yzero sandbox：F-30 沙箱运维（status / enable / disable / pull / gc）──
+// ── delta sandbox：F-30 沙箱运维（status / enable / disable / pull / gc）──
 
 const sandbox = program.command('sandbox').description('F-30 沙箱运维：查看状态、启用/关闭（seatbelt 为主后端，Docker 为可选）');
 
@@ -743,7 +744,7 @@ sandbox
 
 sandbox
   .command('enable')
-  .description('全局启用沙箱（写 ~/.y-zero/sandbox.json 的 mode；默认 seatbelt，其它字段保留）')
+  .description('全局启用沙箱（写 ~/.delta/sandbox.json 的 mode；默认 seatbelt，其它字段保留）')
   .option('--mode <mode>', '隔离后端：seatbelt（macOS 自带，默认）| docker（容器）', 'seatbelt')
   .action((opts: { mode: string }) => sandboxEnableCommand(opts));
 
@@ -760,10 +761,10 @@ sandbox
 
 sandbox
   .command('gc')
-  .description('清理 yzero 残留容器（上次运行未正常退出时的兜底）')
+  .description('清理 delta 残留容器（上次运行未正常退出时的兜底）')
   .action(() => sandboxGcCommand());
 
-// ── yzero notify：F-33 桌面通知（status / enable / disable / test）────────
+// ── delta notify：F-33 桌面通知（status / enable / disable / test）────────
 
 const notify = program.command('notify').description('F-33 桌面通知：长任务结束 / 需人工确认时系统级通知（macOS 通知中心 / Windows 通知）');
 
@@ -774,7 +775,7 @@ notify
 
 notify
   .command('enable')
-  .description('全局启用桌面通知（写 ~/.y-zero/notify.json 的 enabled=true，其它字段保留）')
+  .description('全局启用桌面通知（写 ~/.delta/notify.json 的 enabled=true，其它字段保留）')
   .action(() => notifyEnableCommand());
 
 notify
@@ -789,11 +790,11 @@ notify
     void notifyTestCommand();
   });
 
-// ── yzero skill：Skill Hub 搜索 / 安装 / hub 地址管理 ────────────────────
+// ── delta skill：Skill Hub 搜索 / 安装 / hub 地址管理 ────────────────────
 
 const skill = program
   .command('skill')
-  .description('Skill 管理：从 Skill Hub 搜索/安装技能（地址可配置，存于 ~/.y-zero/skill-hub.json）');
+  .description('Skill 管理：从 Skill Hub 搜索/安装技能（地址可配置，存于 ~/.delta/skill-hub.json）');
 
 skill
   .command('search <query...>')
@@ -805,8 +806,8 @@ skill
 
 skill
   .command('install <slug>')
-  .description('安装技能：默认装到用户层 ~/.y-zero/skills/，--project 装到项目层 .y-zero/skills/')
-  .option('--project', '安装到项目层（.y-zero/skills/）而非用户层', false)
+  .description('安装技能：默认装到用户层 ~/.delta/skills/，--project 装到项目层 .delta/skills/')
+  .option('--project', '安装到项目层（.delta/skills/）而非用户层', false)
   .option('--force', '目标已存在时覆盖重装', false)
   .option('--hub <url>', '一次性指定 hub 地址')
   .action((slug: string, opts: { hub?: string; project?: boolean; force?: boolean }) => {
@@ -829,7 +830,7 @@ skillHub
 
 skillHub
   .command('set <url>')
-  .description('持久化 hub 地址（写入 ~/.y-zero/skill-hub.json 的 url 字段，其余字段保留）')
+  .description('持久化 hub 地址（写入 ~/.delta/skill-hub.json 的 url 字段，其余字段保留）')
   .action((url: string) => skillHubSetCommand(url));
 
 skillHub
@@ -837,7 +838,7 @@ skillHub
   .description('清除配置，恢复官方默认（api.skillhub.cn）')
   .action(() => skillHubResetCommand());
 
-// ── yzero onboarding：F-34 项目 onboarding（status / run / confirm / skip）────
+// ── delta onboarding：F-34 项目 onboarding（status / run / confirm / skip）────
 
 const onboarding = program
   .command('onboarding')
@@ -858,7 +859,7 @@ onboarding
 
 onboarding
   .command('confirm')
-  .description('采纳草案（改名到位为 .y-zero/agent.md 与 MEMORY.md；目标已存在时不覆盖）')
+  .description('采纳草案（改名到位为 .delta/agent.md 与 MEMORY.md；目标已存在时不覆盖）')
   .action(() => onboardingConfirmCommand());
 
 onboarding
@@ -866,7 +867,7 @@ onboarding
   .description('跳过 onboarding（新项目首次注册不再自动扫描）')
   .action(() => onboardingSkipCommand());
 
-// ── yzero run：F-29 Headless / SDK 非交互运行 ───────────────────────────
+// ── delta run：F-29 Headless / SDK 非交互运行 ───────────────────────────
 
 /** F-25：--image 可重复参数收集。 */
 function collectImages(val: string, prev: string[] = []): string[] {
@@ -881,7 +882,7 @@ program
   .option('--json', '结构化输出：最终在 stdout 打印单个 JSON 报告（结果/用量/工具调用/退出码）', false)
   .option('--output <file>', '把最终结果（--json 时为 JSON 报告）写入文件')
   .option('-r, --resume [sessionId]', '追加到既有会话（缺省恢复项目最近会话）')
-  .option('-m, --model <model>', '指定模型名（默认读 YZERO_MODEL，再退回各厂商默认）')
+  .option('-m, --model <model>', '指定模型名（默认读 DELTA_MODEL，再退回各厂商默认）')
   .option('--provider <name>', '模型厂商：anthropic | deepseek | qwen | openai')
   .option('--yolo', 'YOLO 第二重开关（须与 --permission yolo 同时使用）')
   .option('--permission <mode>', 'F-23 权限模式：plan | default | yolo（headless 下需确认操作会被自动拒绝，写任务请用 --allow / yolo）', 'default')
@@ -891,17 +892,17 @@ program
   .option('--max-cost <usd>', '本次任务费用预算（USD，默认 0.7）')
   .option('--mode <mode>', '执行模式：react | plan | multi（默认 react）')
   .option('--image <path>', 'F-25 多模态：附加图片（可重复，最多 5 张；png/jpeg/gif/webp，单张 ≤4MB）', collectImages)
-  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.y-zero/agent.db）')
+  .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (task: string[] | undefined, opts: RunOptions) => {
     opts.task = task?.length ? task.join(' ') : undefined;
     await runHeadlessCommand(opts);
   });
 
-// ── yzero cron：F-22 定时任务/自动化（list / add / remove / enable / disable / run / daemon）────
+// ── delta cron：F-22 定时任务/自动化（list / add / remove / enable / disable / run / daemon）────
 
 const cron = program
   .command('cron')
-  .description('F-22 定时任务：按 cron 表达式调度 agent 任务（配置 ~/.y-zero/cron.json，复用 yzero run 非交互语义）');
+  .description('F-22 定时任务：按 cron 表达式调度 agent 任务（配置 ~/.delta/cron.json，复用 delta run 非交互语义）');
 
 cron
   .command('list')
@@ -914,7 +915,7 @@ cron
   .description('新增定时任务（name 唯一；cron 为 5 字段表达式或 @hourly/@daily/@weekly/@monthly 等别名）')
   .requiredOption('--name <name>', '任务名称（唯一，用于后续引用）')
   .requiredOption('--cron <expr>', '5 字段 cron 表达式，如 "30 8 * * *"（每天 08:30）或 @daily')
-  .requiredOption('--prompt <text>', '任务描述（等价 yzero run -p）')
+  .requiredOption('--prompt <text>', '任务描述（等价 delta run -p）')
   .option('--dir <path>', '运行目录（决定项目与上下文；缺省当前目录）')
   .option('--max-cost <usd>', '单次运行费用预算（USD）')
   .option('--disable', '创建为停用状态', false)
@@ -954,7 +955,7 @@ cron
     void cronDaemonCommand(opts);
   });
 
-// ── yzero worktree：F-37 worktree 生命周期管理（P1 顺手件，F-37-8）────────
+// ── delta worktree：F-37 worktree 生命周期管理（P1 顺手件，F-37-8）────────
 
 const worktree = program
   .command('worktree')
@@ -981,13 +982,16 @@ worktree
     void worktreePruneCommand();
   });
 
-// ── 裸任务路由：`yzero "任务" --json` 等价于 `yzero run "任务" --json` ──
+// ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
 const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
 }
+
+// ── 老配置目录迁移：~/.y-zero → ~/.delta（幂等；失败只提示，不阻塞启动）──
+migrateLegacyConfig({ warn: (msg) => console.error(`[delta] ${msg}`) });
 
 program.parseAsync(process.argv).catch((e) => {
   console.error(`✘ ${(e as Error).message}`);

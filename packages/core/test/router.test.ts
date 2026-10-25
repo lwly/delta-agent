@@ -1,6 +1,6 @@
 /**
  * F-32 模型路由单测：ModelRouter 解析 + ProviderManager routing CRUD + 配置容错。
- * 全部走临时 models.json（DI file 参数），不触碰真实 ~/.y-zero。
+ * 全部走临时 models.json（DI file 参数），不触碰真实 ~/.delta。
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import * as fs from 'node:fs';

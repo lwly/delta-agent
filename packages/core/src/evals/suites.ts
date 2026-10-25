@@ -43,7 +43,7 @@ export const BUILTIN_SUITE: EvalSuite = {
       checks: [
         { kind: 'completed' },
         { kind: 'tool_used', name: 'read_file' },
-        { kind: 'result_contains', pattern: 'y-zero-agent' },
+        { kind: 'result_contains', pattern: 'delta-agent' },
         { kind: 'max_turns', value: 6 },
       ],
     },

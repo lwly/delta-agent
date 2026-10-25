@@ -156,13 +156,13 @@ describe('buildUnavailableMessage：判定依据 + 后果 + ≥2 动作', () => 
     expect(msg).toContain('1)');
     expect(msg).toContain('2)');
     expect(msg).toContain('3)');
-    expect(msg).toContain('yzero sandbox status');
+    expect(msg).toContain('delta sandbox status');
     expect(msg).toContain('--sandbox local');
   });
 
   it('enforce=true：不给「设置 fallback:ask」这类必然被拒的假动作', () => {
     const msg = buildUnavailableMessage({ ...base, enforced: true });
-    expect(msg).toContain('联系项目维护者调整 .y-zero/sandbox.json');
+    expect(msg).toContain('联系项目维护者调整 .delta/sandbox.json');
     expect(msg).not.toContain('{"fallback":"ask"}');
   });
 
@@ -172,13 +172,13 @@ describe('buildUnavailableMessage：判定依据 + 后果 + ≥2 动作', () => 
     expect(msg).toContain('fallback=ask');
   });
 
-  it('image_unavailable：首个动作指向 yzero sandbox pull，并带镜像名', () => {
+  it('image_unavailable：首个动作指向 delta sandbox pull，并带镜像名', () => {
     const msg = buildUnavailableMessage({
       ...base,
       reason: 'image_unavailable',
       detail: '镜像 node:22-bookworm-slim 拉取失败',
     });
-    expect(msg).toContain('yzero sandbox pull');
+    expect(msg).toContain('delta sandbox pull');
     expect(msg).toContain('node:22-bookworm-slim');
   });
 

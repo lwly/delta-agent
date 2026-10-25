@@ -1,5 +1,5 @@
 /**
- * CLI 侧 Prompt 组装助手：把 M3 提示词体系接入 yzero 主流程。
+ * CLI 侧 Prompt 组装助手：把 M3 提示词体系接入 delta 主流程。
  * - 真实 7 层组装（替换 M1 占位 prompt）：静态段缓存复用 + 动态段每轮刷新
  * - Skill 三层发现 + 两阶段加载 runtime（load_skill/unload_skill 工具依赖）
  * - --debug-prompt 调试报告
@@ -11,6 +11,8 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import {
+  FILES,
+  projectConfigDir,
   SplitPromptAssembler,
   PromptBuilder,
   SkillBuffer,
@@ -21,7 +23,7 @@ import {
   type SkillMeta,
   type SkillRuntime,
   type AssembleContext,
-} from '@y-zero/core';
+} from '@delta/core';
 
 export interface AssemblePromptOptions {
   /** 项目根；传函数 = 每次组装时动态解析当前工作根（F-37 TUI 用法） */
@@ -54,20 +56,20 @@ export async function assemblePrompt(opts: AssemblePromptOptions): Promise<Promp
   const getRoot = (): string =>
     typeof opts.projectRoot === 'function' ? opts.projectRoot() : opts.projectRoot;
 
-  // ── Skill 三层发现：内置 < ~/.y-zero/skills < .y-zero/skills ──
+  // ── Skill 三层发现：内置 < ~/.delta/skills < .delta/skills ──
   // （Skill 层级与工作根解耦：用户层固定 home，项目层以启动根为准，切换不重扫）
   const { skills: skillsMeta } = await discoverSkills({
     projectRoot: getRoot(),
     homeDir: os.homedir(),
   });
 
-  // ── 项目指令：README 摘要 + .y-zero/agent.md / MEMORY.md 静态记忆 ──
+  // ── 项目指令：README 摘要 + .delta/agent.md / MEMORY.md 静态记忆 ──
   const loadInstructions = async (): Promise<{ readme: string; memory: string }> => {
     const root = getRoot();
     const [projectInstructions, staticMemory] = await Promise.all([
       readHead(path.join(root, 'README.md'), 2_000),
       readAll([
-        path.join(root, '.y-zero', 'agent.md'),
+        path.join(projectConfigDir(root), FILES.agentMd),
         path.join(root, 'MEMORY.md'),
       ]),
     ]);

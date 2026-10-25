@@ -1,6 +1,6 @@
-# y-zero-agent
+# delta-agent
 
-y-zero-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核心入口**、Vue Web 控制台为可视化前端，支持 **ReAct / Plan-and-Execute / Multi-Agent** 三种执行模式，通过 MCP 协议动态扩展工具能力，帮助开发者在终端与浏览器中完成编码、调试、重构等软件工程任务。
+delta-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核心入口**、Vue Web 控制台为可视化前端，支持 **ReAct / Plan-and-Execute / Multi-Agent** 三种执行模式，通过 MCP 协议动态扩展工具能力，帮助开发者在终端与浏览器中完成编码、调试、重构等软件工程任务。
 
 ## 核心特性
 
@@ -16,11 +16,11 @@ y-zero-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核�
 ## 仓库结构（pnpm monorepo）
 
 ```
-y-zero-agent/
+delta-agent/
 ├── packages/
-│   ├── cli/      # @y-zero/cli —— CLI 入口与 Ink TUI，bin 命令 yzero
-│   ├── core/     # @y-zero/core —— 引擎核心：会话、LLM 接入、工具、MCP、沙箱、记忆
-│   ├── shared/   # @y-zero/shared —— 跨包共享的类型与工具函数
+│   ├── cli/      # @delta/cli —— CLI 入口与 Ink TUI，bin 命令 delta
+│   ├── core/     # @delta/core —— 引擎核心：会话、LLM 接入、工具、MCP、沙箱、记忆
+│   ├── shared/   # @delta/shared —— 跨包共享的类型与工具函数
 │   └── web/      # Web 控制台（Vite + Vue）
 ├── docs/         # PRD、各功能 PRD（prd-f30~f36）与技术设计文档
 ├── prototype/    # 原型
@@ -41,7 +41,7 @@ pnpm install
 # 构建全部子包
 pnpm build
 
-# 配置模型 Provider（Key 加密存储于 ~/.y-zero/models.json）
+# 配置模型 Provider（Key 加密存储于 ~/.delta/models.json）
 node packages/cli/dist/index.js models add anthropic -k <API_KEY> --default
 # 或使用 openai 兼容网关
 node packages/cli/dist/index.js models add my-gateway -k <API_KEY> --base-url https://example.com/v1
@@ -52,10 +52,10 @@ node packages/cli/dist/index.js
 
 ## 常用命令
 
-根命令 `yzero`（开发阶段为 `node packages/cli/dist/index.js`）：
+根命令 `delta`（开发阶段为 `node packages/cli/dist/index.js`）：
 
 ```bash
-yzero [options]                     # 启动交互式 TUI 会话
+delta [options]                     # 启动交互式 TUI 会话
   -r, --resume [sessionId]          # 恢复指定会话（缺省恢复项目最近会话）
   -m, --model <model>               # 指定模型名
   -p, --provider <name>             # anthropic | deepseek | qwen | openai
@@ -63,19 +63,37 @@ yzero [options]                     # 启动交互式 TUI 会话
   --permission <mode>               # plan | default | yolo（yolo 需再叠加 --yolo）
   --git <mode>                      # off | suggest | auto
   --max-turns <n>                   # 单任务最大轮次（默认 50）
-  --db <path>                       # SQLite 路径（默认 ~/.y-zero/agent.db）
+  --db <path>                       # SQLite 路径（默认 ~/.delta/agent.db）
 ```
 
 子命令：
 
 | 子命令 | 说明 |
 |--------|------|
-| `yzero models add/list/remove` | 管理 Provider 配置（Key 加密存储） |
-| `yzero memory` | 管理 L2 长期动态记忆 |
-| `yzero sandbox status/enable/disable/pull/gc` | 沙箱运维（Seatbelt / Docker） |
-| `yzero notify status/enable/disable/test` | 桌面通知（macOS / Windows） |
+| `delta models add/list/remove` | 管理 Provider 配置（Key 加密存储） |
+| `delta memory` | 管理 L2 长期动态记忆 |
+| `delta sandbox status/enable/disable/pull/gc` | 沙箱运维（Seatbelt / Docker） |
+| `delta notify status/enable/disable/test` | 桌面通知（macOS / Windows） |
 
 另有 `usage`（费用统计）、`evals`（评测集）、onboarding（项目引导）等子命令，详见 `docs/PRD.md` 与各功能设计文档。
+
+## 从 y-zero-agent 更名
+
+项目原名 **y-zero-agent**，现更名 **delta-agent**。对应变化：
+
+| 项 | 旧 | 新 |
+|----|----|----|
+| 包 scope | `@y-zero/*` | `@delta/*` |
+| CLI 命令 | `yzero` | `delta` |
+| 配置目录 | `~/.y-zero/` | `~/.delta/` |
+| 环境变量 | `YZERO_*` | `DELTA_*` |
+| 容器 label | `yzero.created` 等 | `delta.created` 等 |
+
+升级后首次执行任意 `delta` 命令时，会自动把 `~/.y-zero/` 整体复制到 `~/.delta/`
+（**旧目录保留**，并写入 `MIGRATED_TO_DELTA` 标记文件；确认无误后可自行删除）。
+迁移只做一次：新目录已存在时不再覆盖，不会合并两边内容。
+
+项目内的 `.y-zero/` 目录不会被自动迁移，需要手动改名为 `.delta/`。
 
 ## 开发
 
@@ -90,8 +108,8 @@ pnpm clean        # 清理构建产物
 在单个子包内执行：
 
 ```bash
-pnpm --filter @y-zero/core test
-pnpm --filter @y-zero/cli build
+pnpm --filter @delta/core test
+pnpm --filter @delta/cli build
 ```
 
 ## 文档

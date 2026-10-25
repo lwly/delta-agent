@@ -97,8 +97,8 @@ describe('McpManager tool bridging', () => {
 
 describe('loadMcpConfig', () => {
   it('merges global and project configs, project wins', async () => {
-    const globalDir = path.join(os.homedir(), '.y-zero');
-    const projectDir = path.join(tmpRoot, '.y-zero');
+    const globalDir = path.join(os.homedir(), '.delta');
+    const projectDir = path.join(tmpRoot, '.delta');
     await fs.mkdir(projectDir, { recursive: true });
     // global file: write through real home only if writable — use a sandbox copy instead
     void globalDir;

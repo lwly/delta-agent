@@ -1,9 +1,9 @@
 /**
  * Skills / MCP 配置文件存取（设置中心 Skills / MCP 面板的后端）。
  *
- * Skills：三层目录（builtin 只读 / 用户级 <home>/.y-zero/skills / 项目级 <root>/.y-zero/skills），
+ * Skills：三层目录（builtin 只读 / 用户级 <home>/.delta/skills / 项目级 <root>/.delta/skills），
  *         每个 Skill 为「目录/SKILL.md（frontmatter + 主体）」，写端只开放用户级与项目级。
- * MCP：  ~/.y-zero/mcp.json（全局）与 <root>/.y-zero/mcp.json（项目级，同名覆盖），
+ * MCP：  ~/.delta/mcp.json（全局）与 <root>/.delta/mcp.json（项目级，同名覆盖），
  *         形如 { "mcpServers": { "<name>": { command, args?, env?, timeoutMs? } } }。
  *
  * 安全边界：名称白名单校验 + 写入目标必须落在对应层根目录内（防路径逃逸）；
@@ -12,6 +12,7 @@
 import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import { defaultBuiltinSkillsDir, readSkillDir, type SkillLayer, type SkillMeta } from '../skills/loader.js';
+import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 
 /** 合法 Skill / MCP server 名称：字母数字开头，允许 - _ ，2–64 字符 */
 export function validateConfigName(name: string): string | null {
@@ -41,10 +42,10 @@ export interface SkillLayers {
 function skillBaseDir(scope: 'user' | 'project', layers: SkillLayers): string {
   if (scope === 'user') {
     if (!layers.homeDir) throw new Error('用户层未启用');
-    return safeJoin(layers.homeDir, '.y-zero', 'skills');
+    return safeJoin(userConfigDir(layers.homeDir), FILES.skillsDir);
   }
   if (!layers.projectRoot) throw new Error('项目级 Skill 需要有效的项目');
-  return safeJoin(layers.projectRoot, '.y-zero', 'skills');
+  return safeJoin(projectConfigDir(layers.projectRoot), FILES.skillsDir);
 }
 
 /** 序列化 SKILL.md：frontmatter（description/triggers/tools_allowlist）+ 主体 */
@@ -108,8 +109,8 @@ export async function deleteSkill(
 export function skillLayerDirs(layers: SkillLayers): { builtin: string; user: string | null; project: string | null } {
   return {
     builtin: defaultBuiltinSkillsDir(),
-    user: layers.homeDir ? path.join(layers.homeDir, '.y-zero', 'skills') : null,
-    project: layers.projectRoot ? path.join(layers.projectRoot, '.y-zero', 'skills') : null,
+    user: layers.homeDir ? path.join(userConfigDir(layers.homeDir), FILES.skillsDir) : null,
+    project: layers.projectRoot ? path.join(projectConfigDir(layers.projectRoot), FILES.skillsDir) : null,
   };
 }
 
@@ -163,10 +164,10 @@ export interface McpConfigSnapshot {
 function mcpFilePath(scope: 'global' | 'project', layers: SkillLayers): string {
   if (scope === 'global') {
     if (!layers.homeDir) throw new Error('全局配置未启用');
-    return safeJoin(layers.homeDir, '.y-zero', 'mcp.json');
+    return safeJoin(userConfigDir(layers.homeDir), FILES.mcp);
   }
   if (!layers.projectRoot) throw new Error('项目级 MCP 配置需要有效的项目');
-  return safeJoin(layers.projectRoot, '.y-zero', 'mcp.json');
+  return safeJoin(projectConfigDir(layers.projectRoot), FILES.mcp);
 }
 
 async function readMcpFile(file: string): Promise<McpFileState> {

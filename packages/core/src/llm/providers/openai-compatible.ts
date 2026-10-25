@@ -6,7 +6,7 @@ import type {
   StreamEvent,
   ToolDefinition,
   Usage,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import { parseSse, openSseStream, isRetriableOpenError } from '../sse.js';
 import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 

@@ -6,7 +6,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { ChatMessage } from '@y-zero/shared';
+import type { ChatMessage } from '@delta/shared';
 import { SessionService } from '../src/session/service.js';
 import { SearchStore, ftsTokenize, buildFtsQuery, makeSnippet } from '../src/session/search.js';
 import { EmbeddingClient } from '../src/llm/embeddings.js';

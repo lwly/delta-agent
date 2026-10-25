@@ -7,7 +7,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@delta/shared';
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { SessionHub, createWebServer } from '../src/server/index.js';
@@ -40,10 +40,10 @@ beforeEach(async () => {
   await fs.mkdir(path.join(tmp, '.git'), { recursive: true });
   await fs.writeFile(path.join(tmp, '.git', 'config'), '');
   await fs.symlink(os.tmpdir(), path.join(tmp, 'evil-link'), 'dir');
-  // 用户级 skill：<home>/.y-zero/skills/demo/SKILL.md
-  await fs.mkdir(path.join(home, '.y-zero', 'skills', 'demo'), { recursive: true });
+  // 用户级 skill：<home>/.delta/skills/demo/SKILL.md
+  await fs.mkdir(path.join(home, '.delta', 'skills', 'demo'), { recursive: true });
   await fs.writeFile(
-    path.join(home, '.y-zero', 'skills', 'demo', 'SKILL.md'),
+    path.join(home, '.delta', 'skills', 'demo', 'SKILL.md'),
     '---\nname: demo\ndescription: 演示技能\n---\n正文',
   );
 
@@ -104,10 +104,10 @@ describe('GET /api/skills —— / 技能候选', () => {
   });
 
   it('携带 projectId 时包含项目层；未知项目不报错（跳过项目层）', async () => {
-    // 项目层 skill：<tmp>/.y-zero/skills/proj-skill/SKILL.md
-    await fs.mkdir(path.join(tmp, '.y-zero', 'skills', 'proj-skill'), { recursive: true });
+    // 项目层 skill：<tmp>/.delta/skills/proj-skill/SKILL.md
+    await fs.mkdir(path.join(tmp, '.delta', 'skills', 'proj-skill'), { recursive: true });
     await fs.writeFile(
-      path.join(tmp, '.y-zero', 'skills', 'proj-skill', 'SKILL.md'),
+      path.join(tmp, '.delta', 'skills', 'proj-skill', 'SKILL.md'),
       '---\nname: proj-skill\ndescription: 项目技能\n---\n正文',
     );
     const r = await api(`/api/skills?projectId=${projectId}`);

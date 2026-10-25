@@ -1,5 +1,5 @@
 /**
- * `yzero cron` 子命令组（F-22 定时任务/自动化，样例沿用 notify.ts / sandbox.ts）：
+ * `delta cron` 子命令组（F-22 定时任务/自动化，样例沿用 notify.ts / sandbox.ts）：
  *  - list            任务清单（id/名称/表达式/下次运行/上次结果）
  *  - add             新增任务（--name --cron --prompt [--dir] [--max-cost]）
  *  - remove          删除任务（id 或 name）
@@ -7,7 +7,7 @@
  *  - run             手动补跑：无 --id 跑全部到期任务；--id 强制跑指定任务一次
  *  - daemon          常驻调度进程（--tick-ms 默认 30s；--once 单轮补跑后退出）
  *
- * 执行复用 headless 语义（spawn `yzero run --json` 子进程，见 cron-executor.ts）。
+ * 执行复用 headless 语义（spawn `delta run --json` 子进程，见 cron-executor.ts）。
  */
 import {
   addCronJob,
@@ -18,7 +18,7 @@ import {
   startCronScheduler,
   updateCronJob,
   type CronRunRecord,
-} from '@y-zero/core';
+} from '@delta/core';
 import { createSpawnExecutor } from './cron-executor.js';
 
 /** list：任务清单（人类可读表格；--json 输出原始结构）。 */
@@ -30,7 +30,7 @@ export function cronListCommand(opts: { json?: boolean }): void {
   }
   for (const w of warnings) console.error(`⚠ ${w.message}`);
   if (jobs.length === 0) {
-    console.log('（暂无定时任务。添加：`yzero cron add --name 每日整理 --cron "30 8 * * *" --prompt "整理日报"`）');
+    console.log('（暂无定时任务。添加：`delta cron add --name 每日整理 --cron "30 8 * * *" --prompt "整理日报"`）');
     return;
   }
   const lines: string[] = [];
@@ -70,7 +70,7 @@ export function cronAddCommand(opts: {
     console.log(`✔ 已添加定时任务 ${job.name}（${job.id}）`);
     console.log(`  表达式：${job.cron}   下次运行：${job.nextRunAt ? formatTime(job.nextRunAt) : '待计算'}`);
     console.log(`  目录：${job.cwd}`);
-    if (!job.enabled) console.log('  （当前为停用状态，用 `yzero cron enable` 启用）');
+    if (!job.enabled) console.log('  （当前为停用状态，用 `delta cron enable` 启用）');
   } catch (e) {
     console.error(`✘ ${(e as Error).message}`);
     process.exitCode = 1;
@@ -138,7 +138,7 @@ export async function cronDaemonCommand(opts: { tickMs?: string; once?: boolean 
     tickMs,
     logger: (l) => console.error(l),
   });
-  console.log(`调度器已启动（tick ${tickMs}ms，配置 ~/.y-zero/cron.json）。Ctrl+C 退出。`);
+  console.log(`调度器已启动（tick ${tickMs}ms，配置 ~/.delta/cron.json）。Ctrl+C 退出。`);
   await new Promise<void>((resolve) => {
     const onSignal = () => {
       console.error('\n收到退出信号，停止调度器…');

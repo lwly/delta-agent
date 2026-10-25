@@ -12,8 +12,8 @@ import { startCronScheduler } from '../src/cron/scheduler.js';
 import { addCronJob, loadCronJobs, saveCronJobs, userCronConfigPath, type CronJob } from '../src/cron/store.js';
 
 function tmpHome(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-cron-run-'));
-  fs.mkdirSync(path.join(dir, '.y-zero'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-cron-run-'));
+  fs.mkdirSync(path.join(dir, '.delta'), { recursive: true });
   return dir;
 }
 

@@ -4,7 +4,7 @@
  * 职责：扫描任务清单，对到期任务逐个执行并落运行记录、推进 nextRunAt。
  * 约束：
  *  - 执行器经 CronExecutor 注入（core 不感知 CLI / 进程细节；测试用伪造执行器）；
- *    CLI 提供默认实现：spawn `yzero run -p <prompt> --json` 子进程（见 cli/cron-executor.ts）；
+ *    CLI 提供默认实现：spawn `delta run -p <prompt> --json` 子进程（见 cli/cron-executor.ts）；
  *  - 串行执行：同一时刻最多一个任务在跑，避免并发任务互相争抢预算/模型；
  *  - runningSince 锁：执行前写入、完成后清除；残留超过 STALE_RUNNING_MS 视为上次
  *    进程崩溃，自动清除后照常执行（防 daemon 与手动补跑并发重复执行）；

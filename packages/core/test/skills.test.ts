@@ -9,7 +9,7 @@ import { loadSkillTool, unloadSkillTool } from '../src/tools/builtin/skill.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import type { ToolContext, SkillRuntime } from '../src/tools/types.js';
 import type { SkillMeta } from '../src/skills/loader.js';
-import type { ToolCall } from '@y-zero/shared';
+import type { ToolCall } from '@delta/shared';
 
 let tmp = '';
 beforeEach(async () => {
@@ -79,15 +79,15 @@ describe('discoverSkills 三层覆盖', () => {
       '内置主体',
     );
     const user = await writeSkill(
-      path.join(tmp, 'home', '.y-zero', 'skills'), 'commit-review', 'name: commit-review\ndescription: 用户版',
+      path.join(tmp, 'home', '.delta', 'skills'), 'commit-review', 'name: commit-review\ndescription: 用户版',
       '用户主体',
     );
     const project = await writeSkill(
-      path.join(tmp, 'proj', '.y-zero', 'skills'), 'commit-review', 'name: commit-review\ndescription: 项目版',
+      path.join(tmp, 'proj', '.delta', 'skills'), 'commit-review', 'name: commit-review\ndescription: 项目版',
       '项目主体',
     );
     const onlyUser = await writeSkill(
-      path.join(tmp, 'home', '.y-zero', 'skills'), 'user-only', 'name: user-only\ndescription: 仅用户层',
+      path.join(tmp, 'home', '.delta', 'skills'), 'user-only', 'name: user-only\ndescription: 仅用户层',
     );
 
     const { skills, errors } = await discoverSkills({

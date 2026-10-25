@@ -83,7 +83,7 @@ export class WorktreeManager {
    */
   checkout(root: string, opts: { branch?: string; newBranch?: string }): Promise<GitOutcomeLike & { branch?: string }>;
 
-  /** 会话 worktree 目录约定路径：../<repoName>.worktrees/yzero-<sessionId 前 8 位> */
+  /** 会话 worktree 目录约定路径：../<repoName>.worktrees/delta-<sessionId 前 8 位> */
   worktreePathFor(sessionId: string): string;
 
   /**
@@ -166,7 +166,7 @@ export class SessionHub {
 // 勾选 worktree
 （系统提示：[环境] 工作根已切换：分支 <branch> @ <worktree 路径>（独立 worktree，主工作区改动不受影响））
 // 取消 worktree
-（系统提示：[环境] 已切回主工作区：<project root>；worktree 目录已保留（<path>），可用 yzero worktree remove 清理）
+（系统提示：[环境] 已切回主工作区：<project root>；worktree 目录已保留（<path>），可用 delta worktree remove 清理）
 ```
 
 ### 3.2 HTTP 端点（packages/core/src/server/http.ts）
@@ -230,7 +230,7 @@ sequenceDiagram
     Hub->>Hub: isRunning? 运行中→拒绝（含等待确认间隙）
     Hub->>DB: getSession + getProject
     Hub->>WM: addWorktree(sessionId, opts)
-    WM->>WM: worktreePathFor → ../<repo>.worktrees/yzero-<sid8>
+    WM->>WM: worktreePathFor → ../<repo>.worktrees/delta-<sid8>
     WM->>WM: 目录已存在且在 worktree list? → 直接返回（D10）
     WM->>WM: git worktree add [-b new] <path> <branch>（脏区不拦截，D9）
     WM-->>Hub: {ok:true, path}
@@ -243,7 +243,7 @@ sequenceDiagram
     Hub->>DB: setSessionWorktree(id, {worktreePath:null, worktreeBranch:null})
     Note over WM,DB: 目录保留，不执行 remove（PRD 裁决 #3）
     Hub->>DB: appendMessage(系统提示：已切回主工作区…)
-    Hub-->>U: git_notice（提示可用 yzero worktree remove 清理）
+    Hub-->>U: git_notice（提示可用 delta worktree remove 清理）
 ```
 
 ### 4.3 会话恢复还原绑定（CLI `-r` / Web 重开）
@@ -268,11 +268,11 @@ sequenceDiagram
 
 | # | 不明确点 | 假设 / 处理 |
 |---|---------|------------|
-| 1 | PRD 目录名示例 `yzero-a1b2c3d4` 与「`<sessionId 前 8 位>`」并存 | 按「容器 `../<repoName>.worktrees/`，其下会话目录 `yzero-<sid8>`」实现（示例口径），共享知识 §8 固化 |
+| 1 | PRD 目录名示例 `delta-a1b2c3d4` 与「`<sessionId 前 8 位>`」并存 | 按「容器 `../<repoName>.worktrees/`，其下会话目录 `delta-<sid8>`」实现（示例口径），共享知识 §8 固化 |
 | 2 | worktree 内 checkout 的脏区口径 PRD 只写了主工作区 | 按 D9 一致应用到当前工作根（更安全，拒绝成本仅一次提示） |
 | 3 | 交互运行（TUI/Web）当前未注入 `ctx.sandbox`（仅 headless/evals 链路有） | 本期不改变注入现状；D8 规则作为「若启用则必须重建」的接线约定写入 hub/toolContext 组装处注释，防止未来接线时踩坑 |
 | 4 | 切换是否需要写会话时间线（F-37-9，P1） | 本期仅注入系统提示消息（天然进回放时间线），独立的事件样式行留 P1 |
-| 5 | `yzero worktree list/remove/prune` 子命令组（F-37-8，P1） | 接口已在 WorktreeManager 备齐，子命令接线列为 T05 可选收尾（不阻塞 P0 验收） |
+| 5 | `delta worktree list/remove/prune` 子命令组（F-37-8，P1） | 接口已在 WorktreeManager 备齐，子命令接线列为 T05 可选收尾（不阻塞 P0 验收） |
 | 6 | Web 端 `/rollback` 的 projectRoot 基准 | Web 当前未暴露 rollback 端点；CLI 侧 `changes.rollbackTo` 第二参改为 workRootRef（T03），快照绝对路径辅助字段沿用既有 file_changes 表结构（不改表） |
 
 ## 6. Required Packages
@@ -289,15 +289,15 @@ sequenceDiagram
 |---------|--------|--------------|------|--------|
 | T01 | core 数据层与 git 原语：WorktreeManager + 可变根 + v4 迁移 + 会话字段 + hooks rebind。含 core 单测（临时目录建真实 git 仓库：列分支/脏区拦截/add 幂等/移除拒绝脏目录/prune；迁移 v3→v4；resolveWorkRoot 回退） | `packages/core/src/git/worktree.ts`(新)、`git/repo.ts`、`session/migrations.ts`、`session/store.ts`、`session/service.ts`、`hooks/manager.ts`、`src/index.ts`(导出)、`packages/core/test/worktree.test.ts`(新) | — | P0 |
 | T02 | core 编排与 Web API：hub 四方法（运行中守卫/落库/注入系统提示/git_notice）、http 4 端点、hub.send 改用 resolveWorkRoot（toolContext.projectRoot、buildPrompt cwd、done 时 GitIntegration 根）。自测：node 起服务 curl 四端点 + 运行中 409 | `packages/core/src/server/hub.ts`、`server/http.ts` | T01 | P0 |
-| T03 | CLI TUI：assemblePrompt getRoot/rebuild、app.tsx workRootRef（resume 还原绑定 + 丢失回退）、toolContext/gitRef//rollback 接线、底栏 worktree-bar、分支卡 branch-card、`/branch` `/worktree` 命令与行内反馈、`/help` 补条目。自测：`yzero` 双会话并行改文件互不可见、切回后主工作区状态不变 | `packages/cli/src/prompt.ts`、`cli/src/index.ts`、`cli/src/ui/app.tsx`、`cli/src/ui/worktree-bar.tsx`(新)、`cli/src/ui/branch-card.tsx`(新) | T01 | P0 |
-| T04 | Web 双端一致：api client + chat store 动作 + GitStatusBar.vue（三分段/分支下拉/新建分支/Worktree checkbox/运行中 disabled/loading）+ WorkbenchView 挂载与 toast + 会话列表 🌿 标识。自测：pnpm dev 对接 yzero serve 走通 4 端点 | `packages/web/src/api/client.ts`、`stores/chat.ts`、`components/GitStatusBar.vue`(新)、`views/WorkbenchView.vue` | T02 | P0 |
-| T05 | 集成回归与收尾：auto commit 跟随 worktree（worktree 内提交即 worktree 改动）、suggest 文案与底栏联动、会话恢复双端还原、并发会话同分支冲突提示、`yzero worktree list/remove/prune` 子命令接线（P1 顺手件）、设计偏差回填 | `packages/cli/src/index.ts`、`cli/src/worktree.ts`(新，P1 子命令)、`packages/core/src/server/hub.ts`(回归修正) | T02, T03, T04 | P0（P1 部分可选） |
+| T03 | CLI TUI：assemblePrompt getRoot/rebuild、app.tsx workRootRef（resume 还原绑定 + 丢失回退）、toolContext/gitRef//rollback 接线、底栏 worktree-bar、分支卡 branch-card、`/branch` `/worktree` 命令与行内反馈、`/help` 补条目。自测：`delta` 双会话并行改文件互不可见、切回后主工作区状态不变 | `packages/cli/src/prompt.ts`、`cli/src/index.ts`、`cli/src/ui/app.tsx`、`cli/src/ui/worktree-bar.tsx`(新)、`cli/src/ui/branch-card.tsx`(新) | T01 | P0 |
+| T04 | Web 双端一致：api client + chat store 动作 + GitStatusBar.vue（三分段/分支下拉/新建分支/Worktree checkbox/运行中 disabled/loading）+ WorkbenchView 挂载与 toast + 会话列表 🌿 标识。自测：pnpm dev 对接 delta serve 走通 4 端点 | `packages/web/src/api/client.ts`、`stores/chat.ts`、`components/GitStatusBar.vue`(新)、`views/WorkbenchView.vue` | T02 | P0 |
+| T05 | 集成回归与收尾：auto commit 跟随 worktree（worktree 内提交即 worktree 改动）、suggest 文案与底栏联动、会话恢复双端还原、并发会话同分支冲突提示、`delta worktree list/remove/prune` 子命令接线（P1 顺手件）、设计偏差回填 | `packages/cli/src/index.ts`、`cli/src/worktree.ts`(新，P1 子命令)、`packages/core/src/server/hub.ts`(回归修正) | T02, T03, T04 | P0（P1 部分可选） |
 
 ## 8. 共享知识（跨文件约定）
 
 ```
-1. worktree 目录约定：容器 = <仓库父目录>/<repoName>.worktrees/；会话目录 = yzero-<sessionId 前 8 位>；
-   绝对路径 = 容器/yzero-<sid8>。一会话一目录，会话删除不自动删目录（P1 提示策略）。
+1. worktree 目录约定：容器 = <仓库父目录>/<repoName>.worktrees/；会话目录 = delta-<sessionId 前 8 位>；
+   绝对路径 = 容器/delta-<sid8>。一会话一目录，会话删除不自动删目录（P1 提示策略）。
 2. 会话记录字段名：sessions.worktree_path / sessions.worktree_branch（v4 迁移 f37-worktree-binding），
    NULL = 主工作区。工作根解析唯一入口 = resolveWorkRoot(session, projectRoot)，禁止各端自行判断。
 3. API 路径前缀：/api/sessions/:id/git | /branches | /checkout | /worktree（均为 session 作用域，

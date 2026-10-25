@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent, ToolCall } from '@delta/shared';
 import { BudgetManager } from '../src/context/budget.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { taskTool, MAX_SUBAGENT_DEPTH } from '../src/tools/builtin/task.js';

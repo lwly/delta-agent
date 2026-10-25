@@ -22,16 +22,16 @@ import {
 } from '../src/cron/store.js';
 import { nextRun } from '../src/cron/parse.js';
 
-/** 临时 home 目录（含 .y-zero） */
+/** 临时 home 目录（含 .delta） */
 function tmpHome(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-cron-home-'));
-  fs.mkdirSync(path.join(dir, '.y-zero'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-cron-home-'));
+  fs.mkdirSync(path.join(dir, '.delta'), { recursive: true });
   return dir;
 }
 
 /** 临时项目目录（作为 cwd） */
 function tmpProject(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'yzero-cron-proj-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'delta-cron-proj-'));
 }
 
 const FROM = new Date(2026, 9, 1, 8, 0, 0, 0); // 2026-10-01 08:00 本地

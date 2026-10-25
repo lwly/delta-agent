@@ -1,4 +1,4 @@
-import type { StreamEvent } from '@y-zero/shared';
+import type { StreamEvent } from '@delta/shared';
 
 /**
  * Generic SSE parser shared by:

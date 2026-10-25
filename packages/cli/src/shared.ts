@@ -48,7 +48,7 @@ export function normalizeGitPolicy(mode?: string): 'off' | 'suggest' | 'auto' {
 
 /** L2 记忆召回块（memory-design §7 动态段；空则隐藏）。 */
 export function renderMemoryRecallBlock(
-  memory: import('@y-zero/core').MemoryStore | undefined,
+  memory: import('@delta/core').MemoryStore | undefined,
   input: string,
   scopes: string[],
 ): string {

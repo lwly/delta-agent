@@ -11,7 +11,7 @@ sequenceDiagram
         E->>N: notifyConfirm({tool, reason})
         N->>N: enabled && onConfirm ？（否则静默返回）
         N->>OS: spawn(detached, 10s 超时) —— 转义后命令
-        OS-->>U: 系统通知：y-zero-agent 需要确认
+        OS-->>U: 系统通知：delta-agent 需要确认
         U->>E: 回填决策（ConfirmCard / HTTP 端点）
     else 任务结束（run / send / runHeadless 返回）
         E->>N: notifyDone({status, durationMs, summary})

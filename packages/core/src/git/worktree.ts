@@ -4,7 +4,7 @@
  * - git worktree add（基于指定分支或就地新建分支）/ list / remove / prune
  * - 当前工作根查询（分支名 / 脏区 / 仓库探测）
  * worktree 目录约定（设计文档 §8 共享知识 1）：
- *   容器 = <仓库父目录>/<repoName>.worktrees/；会话目录 = yzero-<sessionId 前 8 位>
+ *   容器 = <仓库父目录>/<repoName>.worktrees/；会话目录 = delta-<sessionId 前 8 位>
  * 所有 git 调用复用 runWithShell（跨平台 ShellAdapter，15s 超时口径同 GitIntegration），
  * 失败一律 {ok:false, reason} 结构化返回，不 throw、不中断 UI。
  */
@@ -137,7 +137,7 @@ export class WorktreeManager {
     return { ok: true, branch };
   }
 
-  /** 会话 worktree 目录约定路径：../<repoName>.worktrees/yzero-<sessionId 前 8 位>。 */
+  /** 会话 worktree 目录约定路径：../<repoName>.worktrees/delta-<sessionId 前 8 位>。 */
   worktreePathFor(sessionId: string): string {
     const sid8 = sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 8);
     // 容器目录 realpath 归一：macOS tmpdir 是符号链接（/var → /private/var），
@@ -148,7 +148,7 @@ export class WorktreeManager {
     } catch {
       // 目录尚不存在时保持原路径
     }
-    return path.join(base, `${this.repoName()}.worktrees`, `yzero-${sid8 || 'session'}`);
+    return path.join(base, `${this.repoName()}.worktrees`, `delta-${sid8 || 'session'}`);
   }
 
   /**
@@ -264,5 +264,5 @@ export function worktreeOnMessage(branch: string, wtPath: string): string {
 
 /** 取消 worktree（切回主工作区；目录保留）。 */
 export function worktreeOffMessage(projectRoot: string, wtPath: string): string {
-  return `（系统提示：[环境] 已切回主工作区：${projectRoot}；worktree 目录已保留（${wtPath}），可用 yzero worktree remove 清理）`;
+  return `（系统提示：[环境] 已切回主工作区：${projectRoot}；worktree 目录已保留（${wtPath}），可用 delta worktree remove 清理）`;
 }

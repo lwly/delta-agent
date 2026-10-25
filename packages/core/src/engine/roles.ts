@@ -3,8 +3,8 @@
  * 角色不是独立进程，而是「系统提示词模板 + 工具白名单」组合：
  * 同一 Worker Pool 按节点 role 字段实例化不同上下文。
  */
-import type { ToolCall, ToolDefinition, ToolResult } from '@y-zero/shared';
-import type { TaskRole } from '@y-zero/shared';
+import type { ToolCall, ToolDefinition, ToolResult } from '@delta/shared';
+import type { TaskRole } from '@delta/shared';
 import type { ToolContext } from '../tools/types.js';
 
 export interface RoleTemplate {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Plan, TaskNode } from '@y-zero/shared';
+import type { Plan, TaskNode } from '@delta/shared';
 import {
   isReady,
   maxParallelism,
@@ -16,7 +16,7 @@ import {
 } from '../src/engine/planner.js';
 import { RestrictedRegistry } from '../src/engine/roles.js';
 import { ToolRegistry } from '../src/tools/registry.js';
-import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@y-zero/shared';
+import type { ChatMessage, ChatRequest, LLMProvider, StreamEvent } from '@delta/shared';
 
 function node(id: string, deps: string[] = [], over: Partial<TaskNode> = {}): TaskNode {
   return { id, goal: `goal ${id}`, deps, suggestedTools: [], status: 'pending', retries: 0, ...over };

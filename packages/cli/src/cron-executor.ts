@@ -1,12 +1,12 @@
 /**
- * F-22 定时任务 —— 默认执行器：spawn `yzero run -p <prompt> --json` 子进程。
+ * F-22 定时任务 —— 默认执行器：spawn `delta run -p <prompt> --json` 子进程。
  *
  * 职责：把一条 cron 任务映射为一次独立的 headless CLI 进程运行。
  * 约束：
  *  - 子进程隔离：每次运行全新进程（MCP / hooks / 预算 / 权限全部重新装配），
- *    崩溃不波及 daemon；复用 `yzero run` 的全部非交互语义与退出码协议；
+ *    崩溃不波及 daemon；复用 `delta run` 的全部非交互语义与退出码协议；
  *  - CLI 入口路径按本模块编译产物同级的 index.js 解析（bin 入口），dev 下退化为
- *    `yzero` 全局命令不可用时抛错收敛为 error 记录；
+ *    `delta` 全局命令不可用时抛错收敛为 error 记录；
  *  - 超时保护：默认 30 分钟，超时 SIGTERM 并记 timeout；
  *  - 执行器约定：**不抛出**，一切失败（目录不存在、启动失败、JSON 解析失败、超时）
  *    收敛为结构化 CronExecutorResult。
@@ -15,13 +15,13 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CronExecutor, CronExecutorResult, CronJob } from '@y-zero/core';
+import type { CronExecutor, CronExecutorResult, CronJob } from '@delta/core';
 
 /** 单次运行超时（默认 30 分钟） */
 export const DEFAULT_CRON_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
- * 任务字段 → `yzero run` 子进程参数（纯函数，executor 与单测共用）。
+ * 任务字段 → `delta run` 子进程参数（纯函数，executor 与单测共用）。
  * F-22b：任务级权限透传（沿用 F-23 resolvePermissionMode 语义）——
  *  - yolo → `--permission yolo --yolo` 双 flag（缺一会被降级告警）；
  *  - plan → `--permission plan`；
@@ -57,7 +57,7 @@ export function createSpawnExecutor(opts: SpawnExecutorOptions = {}): CronExecut
       return { status: 'error', exitCode: null, error: `运行目录不存在：${job.cwd}` };
     }
     if (!fs.existsSync(cliEntry)) {
-      return { status: 'error', exitCode: null, error: `CLI 入口不存在：${cliEntry}（请先构建 @y-zero/cli）` };
+      return { status: 'error', exitCode: null, error: `CLI 入口不存在：${cliEntry}（请先构建 @delta/cli）` };
     }
 
     const args = buildCronSpawnArgs(job);

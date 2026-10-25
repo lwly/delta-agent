@@ -13,7 +13,7 @@ import type {
   MessageImage,
   PlanDecision,
   ToolCall,
-} from '@y-zero/shared';
+} from '@delta/shared';
 import {
   BudgetManager,
   PromptBuilder,
@@ -43,6 +43,7 @@ import { distillMemories } from '../session/distill.js';
 import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
 import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
+import { FILES, projectConfigDir } from '../paths.js';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 
@@ -739,7 +740,7 @@ export class SessionHub {
     };
     const [readme, staticMemory] = await Promise.all([
       read(path.join(projectRoot, 'README.md'), 2_000),
-      read(path.join(projectRoot, '.y-zero', 'agent.md'), 4_000),
+      read(path.join(projectConfigDir(projectRoot), FILES.agentMd), 4_000),
     ]);
 
     const { skills } = await discoverSkills({ projectRoot, homeDir: os.homedir() });

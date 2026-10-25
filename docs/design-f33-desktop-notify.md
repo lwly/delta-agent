@@ -9,8 +9,8 @@
 | D1 | 触发点全部在**入口层**（TUI App / SessionHub / headless-run），引擎与工具零改动 | 对齐 F-30 D8「事件进 sink、由入口注入」；确认与完成事件本来就发生在入口的 confirm 回调与 run 生命周期里 |
 | D2 | 后端：macOS `osascript -e 'display notification …'`；Windows PowerShell `System.Windows.Forms.NotifyIcon.ShowBalloonTip`；Linux `notify-send`（best-effort）；其它平台 no-op | 三者均为系统自带零 npm 依赖；备选 node-notifier 引入原生依赖树，违背「可开源、装完即用」约束 |
 | D3 | 防噪：`done` 通知受 `minDurationMs`（默认 30_000）约束；`confirm` 通知不受时长约束 | PRD 语义是"长任务"；确认卡是等人事件，天然低频且必须尽快知晓 |
-| D4 | 默认 `enabled: true` | 功能价值即"切走后有感知"；30s 门槛 + 确认低频使噪声可控；`yzero notify disable` 一键关 |
-| D5 | 配置两级文件 `~/.y-zero/notify.json` < `.y-zero/notify.json`，逐字段覆盖 | 对齐 F-30 sandbox.json 惯例；无统一 settings.json（既有架构按特性分文件） |
+| D4 | 默认 `enabled: true` | 功能价值即"切走后有感知"；30s 门槛 + 确认低频使噪声可控；`delta notify disable` 一键关 |
+| D5 | 配置两级文件 `~/.delta/notify.json` < `.delta/notify.json`，逐字段覆盖 | 对齐 F-30 sandbox.json 惯例；无统一 settings.json（既有架构按特性分文件） |
 | D6 | 发送 fire-and-forget：`spawn(detached + unref)`、stdio ignore、10s 超时强杀、错误静默 | 通知失败绝不能影响任务主流程（AC-7）；detached 使 headless 进程退出后子进程仍能完成弹窗 |
 | D7 | `Notifier` 以可选依赖注入三端（`AppOptions.notify` / `SessionHubDeps.notify`），缺省不通知 | 与 hooks / modelRouter 同一注入模式；测试可伪造 |
 | D8 | 文本统一清洗：换行折叠为空格、正文截断 200 字符 | 系统通知面板对长文本展示差；AppleScript/PowerShell 字面量转义后不可含裸换行 |
@@ -38,7 +38,7 @@ export interface Notifier {
 ## 3. 配置
 
 ```jsonc
-// ~/.y-zero/notify.json（用户级） 或 .y-zero/notify.json（项目级，逐字段覆盖）
+// ~/.delta/notify.json（用户级） 或 .delta/notify.json（项目级，逐字段覆盖）
 {
   "enabled": true,        // 总开关（CLI enable/disable 只改此字段）
   "onDone": true,         // 任务结束通知
@@ -64,16 +64,16 @@ export interface Notifier {
 | 端 | 注入点 | done 触发 | confirm 触发 |
 |----|--------|-----------|--------------|
 | TUI | `AppOptions.notify`（cli/src/index.ts `start()` 构造） | `run()` finally（状态：completed / aborted / failed，时长 = 本轮 run 起止差） | `confirm` 回调（ConfirmCard 渲染前） |
-| Web | `SessionHubDeps.notify`（`yzero serve` 构造） | `send()` finally（状态含 aborted / failed 判定） | `toolContext.confirm` 回调（publish `confirm_request` 处） |
+| Web | `SessionHubDeps.notify`（`delta serve` 构造） | `send()` finally（状态含 aborted / failed 判定） | `toolContext.confirm` 回调（publish `confirm_request` 处） |
 | Headless | `runHeadlessCommand` 内直接构造 | `runHeadless` 返回后（status ∈ 全部终态，时长用 `outcome.durationMs`） | 不触发（headless 自动拒绝，无等人环节） |
 
 ## 6. CLI 子命令
 
 ```
-yzero notify status            生效配置 + 来源（用户/项目文件） + 平台后端 + 配置警告
-yzero notify enable            写 ~/.y-zero/notify.json enabled=true（其它字段保留）
-yzero notify disable           写 enabled=false
-yzero notify test              发送一条样例通知（人工验证端到端链路）
+delta notify status            生效配置 + 来源（用户/项目文件） + 平台后端 + 配置警告
+delta notify enable            写 ~/.delta/notify.json enabled=true（其它字段保留）
+delta notify disable           写 enabled=false
+delta notify test              发送一条样例通知（人工验证端到端链路）
 ```
 
 注册于 `cli/src/index.ts`，并加入 `KNOWN_SUBCOMMANDS`（裸任务路由白名单）。
@@ -101,7 +101,7 @@ yzero notify test              发送一条样例通知（人工验证端到端�
 
 | 风险 | 裁决 |
 |------|------|
-| macOS 未授权 yzero/终端发通知 | 通知静默丢弃不报错；`notify status` 提示检查「系统设置 → 通知」 |
+| macOS 未授权 delta/终端发通知 | 通知静默丢弃不报错；`notify status` 提示检查「系统设置 → 通知」 |
 | Windows PowerShell 启动慢（数百 ms） | detached + fire-and-forget，主流程零等待 |
-| CI 环境（无桌面会话）频繁误发 | headless 用户可 `yzero notify disable` 或项目级 `onDone:false`；发送失败静默 |
+| CI 环境（无桌面会话）频繁误发 | headless 用户可 `delta notify disable` 或项目级 `onDone:false`；发送失败静默 |
 | 通知内容泄漏敏感信息 | 正文只用状态/耗时/工具名/reason 前缀（reason 本就是给用户看的风险提示），不携带文件路径参数全文 |

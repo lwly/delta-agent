@@ -42,7 +42,7 @@ import {
  * （不会补 /private 前缀），而 Seatbelt 与 relativeCwdOf 都按真实路径判定。
  */
 function makeProject(): string {
-  return mkdtempSync(join(tmpdir(), 'yzero-sbx-project-'));
+  return mkdtempSync(join(tmpdir(), 'delta-sbx-project-'));
 }
 const PROBE_OK: SandboxProbeResult = {
   available: true,
@@ -59,7 +59,7 @@ const PROBE_MISSING: SandboxProbeResult = {
 };
 
 describe('buildSeatbeltProfile（纯函数）', () => {
-  const PROJECT = mkdtempSync(join(tmpdir(), 'yzero-sbx-prof-'));
+  const PROJECT = mkdtempSync(join(tmpdir(), 'delta-sbx-prof-'));
   const REAL = realpathOr(PROJECT);
 
   it('deny default 打头 + 读全放行 + 进程/系统调用白名单', () => {
@@ -163,7 +163,7 @@ describe('Runtime 路由（mode=seatbelt）', () => {
   ) {
     const cli = new FakeDockerCli(script);
     const notices: string[] = [];
-    const projectRoot = deps.projectRoot ?? mkdtempSync(join(tmpdir(), 'yzero-sbx-rt-'));
+    const projectRoot = deps.projectRoot ?? mkdtempSync(join(tmpdir(), 'delta-sbx-rt-'));
     const runtime = createSandboxRuntime({
       projectRoot,
       sessionId: 's-1',
@@ -195,7 +195,7 @@ describe('Runtime 路由（mode=seatbelt）', () => {
   it('cwd 逃逸（项目外绝对路径）→ 拒绝且零子进程调用（AC-30-4）', async () => {
     const { cli, runtime } = makeSeatbeltRuntime({});
     const r = await runtime.run('echo hi', {
-      cwd: '/tmp/outside-yzero-sbx-project',
+      cwd: '/tmp/outside-delta-sbx-project',
       timeoutMs: 5_000,
       signal: new AbortController().signal,
     });
@@ -207,7 +207,7 @@ describe('Runtime 路由（mode=seatbelt）', () => {
   it('Seatbelt 不可用（非 macOS 注入）+ fallback=deny → 拒绝且文案指向 docker 后端', async () => {
     const cli = new FakeDockerCli({});
     let t = 1_000;
-    const projectRoot = mkdtempSync(join(tmpdir(), 'yzero-sbx-rt-'));
+    const projectRoot = mkdtempSync(join(tmpdir(), 'delta-sbx-rt-'));
     const runtime = createSandboxRuntime({
       projectRoot,
       sessionId: 's-1',
@@ -235,8 +235,8 @@ describe('Runtime 路由（mode=seatbelt）', () => {
   });
 
   it('profile 文件真实落盘且内容含 deny default（0600）', async () => {
-    const profileRoot = mkdtempSync(join(tmpdir(), 'yzero-sbx-test-'));
-    const projectRoot = mkdtempSync(join(tmpdir(), 'yzero-sbx-rt-'));
+    const profileRoot = mkdtempSync(join(tmpdir(), 'delta-sbx-test-'));
+    const projectRoot = mkdtempSync(join(tmpdir(), 'delta-sbx-rt-'));
     try {
       const cli = new FakeDockerCli({});
       const runtime = createSandboxRuntime({

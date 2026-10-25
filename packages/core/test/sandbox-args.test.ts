@@ -17,7 +17,7 @@ import {
 } from '../src/sandbox/index.js';
 import { makeResolvedConfig } from './helpers/fake-docker.js';
 
-const PROJECT = '/Users/lwl/work/project/y-zero-agent';
+const PROJECT = '/Users/lwl/work/project/delta-agent';
 
 function spec(overrides: Partial<DockerRunSpec> = {}): DockerRunSpec {
   const resolved = makeResolvedConfig({ mode: 'docker' }, { explicit: true });
@@ -26,7 +26,7 @@ function spec(overrides: Partial<DockerRunSpec> = {}): DockerRunSpec {
     projectRoot: PROJECT,
     relativeCwd: '',
     command: 'pnpm test --coverage',
-    containerName: 'yzero-1a2b3c4d-9f8e7d',
+    containerName: 'delta-1a2b3c4d-9f8e7d',
     labels: {
       session: '1a2b3c4d-1111-2222-3333-444455556666',
       project: 'proj-1',
@@ -43,13 +43,13 @@ describe('buildDockerRunArgs：完整 argv（§5.2 表 24 段）', () => {
       'run',
       '--rm',
       '--name',
-      'yzero-1a2b3c4d-9f8e7d',
+      'delta-1a2b3c4d-9f8e7d',
       '--label',
-      'yzero.session=1a2b3c4d-1111-2222-3333-444455556666',
+      'delta.session=1a2b3c4d-1111-2222-3333-444455556666',
       '--label',
-      'yzero.project=proj-1',
+      'delta.project=proj-1',
       '--label',
-      'yzero.created=2026-10-23T02:10:11.000Z',
+      'delta.created=2026-10-23T02:10:11.000Z',
       '--read-only',
       '--cap-drop',
       'ALL',
@@ -195,10 +195,10 @@ describe('containerWorkdir / relativeCwdOf / normalizeMountSource', () => {
 });
 
 describe('containerName / redactArgv', () => {
-  it('containerName: yzero-<sid8>-<rand6>', () => {
-    expect(containerName('1a2b3c4d-1111-2222', '9f8e7d')).toBe('yzero-1a2b3c4d-9f8e7d');
-    expect(containerName('1a2b3c4d-1111-2222')).toMatch(/^yzero-1a2b3c4d-[0-9a-f]{6}$/);
-    expect(containerName('')).toMatch(/^yzero-session0-[0-9a-f]{6}$/);
+  it('containerName: delta-<sid8>-<rand6>', () => {
+    expect(containerName('1a2b3c4d-1111-2222', '9f8e7d')).toBe('delta-1a2b3c4d-9f8e7d');
+    expect(containerName('1a2b3c4d-1111-2222')).toMatch(/^delta-1a2b3c4d-[0-9a-f]{6}$/);
+    expect(containerName('')).toMatch(/^delta-session0-[0-9a-f]{6}$/);
   });
 
   it('redactArgv: -e NAME=VALUE → -e NAME=***，-e NAME 原样保留', () => {

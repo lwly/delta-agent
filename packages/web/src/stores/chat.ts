@@ -415,7 +415,7 @@ export const useChatStore = defineStore('chat', {
         this.notice(
           enabled
             ? `🌿 已切入 worktree：${r.branch} @ ${r.path}`
-            : '🌿 已切回主工作区（worktree 目录已保留，可用 yzero worktree remove 清理）',
+            : '🌿 已切回主工作区（worktree 目录已保留，可用 delta worktree remove 清理）',
         );
         await this.loadGitState(this.sessionId);
         return true;

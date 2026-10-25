@@ -9,6 +9,7 @@
  */
 import { runWithShell } from '../engine/shell.js';
 import { assertSafeWorkspaceRoot, realpathOr } from './config.js';
+import { LABELS } from '../paths.js';
 import {
   buildDockerRunArgs,
   containerName,
@@ -279,7 +280,7 @@ export class DockerExecutor implements SandboxExecutor {
         ok: false,
         image,
         pulled: false,
-        detail: `镜像 ${image} 本会话拉取失败过，不再重试（可用 yzero sandbox pull 手动预热）`,
+        detail: `镜像 ${image} 本会话拉取失败过，不再重试（可用 delta sandbox pull 手动预热）`,
       };
     }
     if (await this.hasImage(image)) {
@@ -288,7 +289,7 @@ export class DockerExecutor implements SandboxExecutor {
     return this.pullImage(image, { signal, pullTimeoutMs: cfg.pullTimeoutMs });
   }
 
-  /** 显式拉取（`yzero sandbox pull` / ensureImage 共用）。 */
+  /** 显式拉取（`delta sandbox pull` / ensureImage 共用）。 */
   async pullImage(
     image: string,
     opts: { signal?: AbortSignal; pullTimeoutMs?: number } = {},
@@ -333,7 +334,7 @@ export class DockerExecutor implements SandboxExecutor {
       const removed = this.cli.execSync(['rm', '-f', name], { timeoutMs: CLEANUP_TIMEOUT_MS });
       if (removed.code !== 0) {
         this.warn(
-          `[sandbox] 清理容器失败（docker rm -f ${name} 退出码 ${removed.code}），可用 yzero sandbox gc 兜底`,
+          `[sandbox] 清理容器失败（docker rm -f ${name} 退出码 ${removed.code}），可用 delta sandbox gc 兜底`,
         );
       }
     } catch (e) {
@@ -344,14 +345,14 @@ export class DockerExecutor implements SandboxExecutor {
   /** 残留容器（label 锚点 + 名称前缀双保险）。 */
   async listContainers(): Promise<string[]> {
     const r = await this.cli.exec(
-      ['ps', '-a', '--filter', 'label=yzero.created', '--format', '{{.Names}}'],
+      ['ps', '-a', '--filter', `label=${LABELS.created}`, '--format', '{{.Names}}'],
       { timeoutMs: LIST_TIMEOUT_MS },
     );
     if (r.code !== 0) return [];
     return r.stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((name) => name !== '' && name.startsWith('yzero-'));
+      .filter((name) => name !== '' && name.startsWith('delta-'));
   }
 
   /** 清理全部残留（并发 4 条；失败跳过并计数）。 */
@@ -399,7 +400,7 @@ export function buildHints(r: DockerResult, cfg: SandboxConfig, command: string)
   ) {
     hints.push(
       '[sandbox] network=none 下网络不可达。若该命令确需联网：加 --sandbox-network bridge，' +
-        '或设置 .y-zero/sandbox.json {"network":"bridge"}',
+        '或设置 .delta/sandbox.json {"network":"bridge"}',
     );
   }
   return hints;
