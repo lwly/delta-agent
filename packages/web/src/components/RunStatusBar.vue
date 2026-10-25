@@ -7,6 +7,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { api } from '../api/client';
 import { useChatStore } from '../stores/chat';
+import { toolLabel } from '../utils/toolNames';
 
 const emit = defineEmits<{ (e: 'resume'): void }>();
 const chat = useChatStore();
@@ -75,7 +76,7 @@ function onResume() {
     <span class="runbar-stripe" aria-hidden="true" />
     <span v-if="state === 'running'" class="run-dot" aria-hidden="true" />
     <span class="runbar-text">
-      <template v-if="state === 'running'">Agent 运行中<template v-if="latestCall"> · 正在执行第 {{ latestCall.seq }} 步 · 最近工具：{{ latestCall.name }}</template> · 已执行 {{ executedSteps }} 步工具调用</template>
+      <template v-if="state === 'running'">Agent 运行中<template v-if="latestCall"> · 正在执行第 {{ latestCall.seq }} 步 · 最近工具：{{ toolLabel(latestCall.name) }}</template> · 已执行 {{ executedSteps }} 步工具调用</template>
       <template v-else-if="state === 'paused'">⏸ 已暂停 · 发送消息以继续</template>
       <template v-else>■ 已停止 · 可重新发送任务或从停止点继续（直接输入即可）</template>
     </span>
