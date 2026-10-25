@@ -112,42 +112,48 @@ watch(() => [chat.sessionId, chat.running], () => {
       </div>
     </div>
 
-    <!-- 右：Worktree 开关 -->
-    <label class="seg wt" :title="wtEnabled ? `已切入：${gs.worktree.path ?? ''}（取消勾选切回主工作区，目录保留）` : '勾选后自动 git worktree add 独立目录并切换会话工作根'">
+    <!-- 右：Worktree 开关（pill 徽章形态，checkbox 语义保留——视觉隐藏但仍可键盘聚焦/切换） -->
+    <label
+      class="seg wt"
+      :class="{ on: wtEnabled }"
+      :title="wtEnabled ? `已切入：${gs.worktree.path ?? ''}（取消勾选切回主工作区，目录保留）` : '勾选后自动 git worktree add 独立目录并切换会话工作根'"
+    >
       <input
+        class="wt-check"
         type="checkbox"
         :checked="wtEnabled"
         :disabled="!gs.isRepo || disabled"
         @change="onWorktreeToggle"
       />
-      Worktree{{ wtEnabled ? ' ●' : '' }}
+      <span v-if="wtEnabled" class="wt-dot">●</span>
+      Worktree
     </label>
   </div>
 </template>
 
 <style scoped>
+/* 全宽扁平页脚：上侧 1px 分隔线，透明度最低的一档视觉权重 */
 .git-bar {
-  max-width: 860px;
-  margin: 0 auto 10px;
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 6px 16px;
+  border-top: 1px solid var(--border);
   background: var(--bg-panel);
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: 11.5px;
+  color: var(--text-faint);
 }
 .seg { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.seg.project { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
+.seg.project { color: var(--text-dim); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
 .branch-wrap { position: relative; flex: 1; display: flex; justify-content: center; }
 .branch-btn {
-  border: none; background: transparent; color: var(--accent);
-  font-size: 12px; font-family: var(--mono); cursor: pointer;
+  border: none; background: transparent; color: var(--text-dim);
+  font-size: 11.5px; font-family: var(--mono); cursor: pointer;
   padding: 3px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s;
 }
-.branch-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.branch-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .branch-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
 .caret { font-size: 9px; color: var(--text-faint); margin-left: 4px; }
 .branch-menu {
@@ -173,7 +179,19 @@ watch(() => [chat.sessionId, chat.running], () => {
   border: 1px solid var(--border); border-radius: 6px; outline: none;
 }
 .new-branch input:focus { border-color: rgba(88, 166, 255, 0.5); }
-.seg.wt { white-space: nowrap; cursor: pointer; }
-.seg.wt input[type='checkbox'] { accent-color: var(--green); cursor: pointer; }
-.seg.wt:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+/* Worktree：toggle 徽章（关闭=中性描边 pill；开启=accent-soft 底 + accent 字 + ●） */
+.seg.wt {
+  position: relative;
+  white-space: nowrap; cursor: pointer; user-select: none;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 2px 10px; color: var(--text-faint); font-size: 11px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.seg.wt:not(.on):hover { color: var(--text-dim); border-color: var(--border-strong); }
+.seg.wt.on { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); font-weight: 600; }
+.wt-dot { font-size: 9px; line-height: 1; }
+/* checkbox 视觉隐藏但保留键盘可达性；聚焦/禁用态走 label */
+.wt-check { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.seg.wt:has(.wt-check:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg.wt:has(.wt-check:disabled) { opacity: 0.5; cursor: not-allowed; }
 </style>

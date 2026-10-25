@@ -52,7 +52,12 @@ function open(sessionId: string) {
     <p v-if="error" class="error">✘ {{ error }}</p>
 
     <template v-if="searched">
-      <div v-if="sessionHits.length === 0 && messageHits.length === 0" class="empty">（无命中）</div>
+      <!-- 搜索空态：有输入但无命中时的引导 -->
+      <div v-if="sessionHits.length === 0 && messageHits.length === 0" class="empty">
+        <div class="empty-ico">🔍</div>
+        <div class="empty-text">未找到相关会话</div>
+        <div class="empty-hint">换个关键词试试，或检查项目是否已注册</div>
+      </div>
 
       <template v-if="sessionHits.length">
         <div class="group-title">会话命中（{{ sessionHits.length }}）</div>
@@ -80,7 +85,10 @@ function open(sessionId: string) {
 .searchbar { display: flex; gap: 8px; margin-bottom: 10px; }
 .searchbar input { flex: 1; }
 .error { color: var(--red); font-size: 13px; margin-bottom: 8px; }
-.empty { color: var(--text-faint); text-align: center; padding: 20px; font-size: 12.5px; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 20px; }
+.empty-ico { font-size: 24px; opacity: 0.6; }
+.empty-text { color: var(--text-dim); font-size: 13px; font-weight: 500; }
+.empty-hint { color: var(--text-faint); font-size: 11.5px; }
 .group-title { font-size: 12px; color: var(--text-dim); font-weight: 600; margin: 10px 0 6px; }
 .row {
   display: flex; align-items: flex-start; gap: 10px;
@@ -88,12 +96,13 @@ function open(sessionId: string) {
   border-radius: 10px; padding: 9px 13px; margin-bottom: 6px; cursor: pointer;
   transition: all 0.15s;
 }
-.row:hover { background: var(--bg-hover); border-color: rgba(88, 166, 255, 0.4); }
+.row:hover { background: var(--bg-hover); border-color: var(--accent-border); }
+.row:active { background: var(--bg-active); }
 .kind {
   font-size: 10px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px;
   background: var(--accent-soft); color: var(--accent); flex-shrink: 0; margin-top: 1px;
 }
-.kind.msg { background: var(--purple-soft); color: var(--purple); }
+.kind.msg { background: var(--bg-elevated); color: var(--text-dim); border: 1px solid var(--border); }
 .content { font-size: 12.5px; }
 .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .title { font-size: 12px; color: var(--text-dim); }

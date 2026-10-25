@@ -141,7 +141,7 @@ async function test(id: string) {
   width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 12px; color: #fff;
-  background: linear-gradient(135deg, #58a6ff, #bc8cff); font-family: var(--mono);
+  background: linear-gradient(135deg, #4c8dff, #2e6fe0); font-family: var(--mono);
 }
 .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }

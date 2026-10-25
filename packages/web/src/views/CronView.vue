@@ -302,7 +302,7 @@ h2 { margin: 0; font-size: 18px; }
   color: var(--text-dim); font-size: 12.5px; padding: 4px 14px; cursor: pointer;
 }
 .tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-color: #58a6ff; background: rgba(88, 166, 255, 0.12); }
+.tab.active { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .grow { flex: 1; }
 .meta { color: var(--text-faint); font-size: 11.5px; }
 .meta.running { color: #d29922; }

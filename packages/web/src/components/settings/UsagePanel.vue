@@ -171,7 +171,7 @@ h4 { font-size: 13px; color: var(--text); margin-bottom: 8px; }
 .name { min-width: 150px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 .name.mono { font-family: var(--mono); }
 .track { flex: 1; min-width: 100px; height: 9px; background: var(--bg); border-radius: 5px; overflow: hidden; }
-.fill { display: block; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); border-radius: 5px; }
+.fill { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
 .cost { color: var(--green); min-width: 80px; text-align: right; font-family: var(--mono); font-size: 12.5px; }
 .empty { color: var(--text-faint); text-align: center; padding: 14px; font-size: 12.5px; }
 </style>
