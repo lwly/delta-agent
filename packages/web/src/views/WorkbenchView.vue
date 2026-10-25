@@ -15,9 +15,13 @@ import SearchModal from '../components/SearchModal.vue';
 import GitStatusBar from '../components/GitStatusBar.vue';
 import ToolCallCard from '../components/ToolCallCard.vue';
 import RunStatusBar from '../components/RunStatusBar.vue';
+import FilePanel from '../components/FilePanel.vue';
+import { useFilePanelStore } from '../stores/filePanel';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
+// F-38 右侧文件面板：状态全在 store，本视图只做「作用域推导 + 联动失效」接线
+const panel = useFilePanelStore();
 const route = useRoute();
 
 /** 是否处于定时任务子路由：主区渲染 <router-view>，对话流/输入区不渲染 */
@@ -38,10 +42,16 @@ const showTrash = ref(false);
 const showSearch = ref(false);
 
 // ⌘K / Ctrl+K 全局快捷键：打开会话检索弹窗（仅新增入口，不改动既有逻辑）
+// ⌘B / Ctrl+B：开合右侧文件面板（F-38，与顶栏 📁 按钮等价）
 function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     showSearch.value = true;
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    panel.togglePanel();
   }
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
@@ -140,6 +150,53 @@ function relTime(iso: string): string {
   if (d < 30) return `${d} 天前`;
   return new Date(t).toLocaleDateString('zh-CN');
 }
+
+// ── F-38 右侧文件面板：作用域推导与联动失效（design D13 / T05）──────────
+/**
+ * 数据根 = 当前会话工作根（有会话）→ 当前项目根（无会话）→ 无（null）。
+ * 作用域变化由 store 的 setScope 内部统一 invalidateAll（清树缓存 + 关全部动态标签 + 重拉变更）。
+ */
+function syncPanelScope(): void {
+  if (chat.sessionId) panel.setScope({ kind: 'session', id: chat.sessionId });
+  else if (ws.activeProjectId) panel.setScope({ kind: 'project', id: ws.activeProjectId });
+  else panel.setScope(null);
+}
+watch([() => chat.sessionId, () => ws.activeProjectId], () => syncPanelScope());
+
+/** 分支 / worktree 变化 = 根变了：作用域不变但内容整体失效（D13） */
+const panelRootKey = computed(() => {
+  const gs = chat.gitState;
+  if (!gs) return 'none';
+  return `${gs.branch ?? ''}|${gs.worktree.enabled ? 1 : 0}|${gs.worktree.path ?? ''}`;
+});
+watch(panelRootKey, () => {
+  if (panel.scope) panel.invalidateAll();
+});
+
+/** 运行结束（running true→false）：300ms 去抖后刷新变更 + 重载当前预览/diff（树缓存保留） */
+let panelRefreshTimer: number | null = null;
+watch(
+  () => chat.running,
+  (now, prev) => {
+    if (prev !== true || now !== false || !panel.open || !panel.scope) return;
+    if (panelRefreshTimer) clearTimeout(panelRefreshTimer);
+    panelRefreshTimer = window.setTimeout(() => void panel.refreshAfterRun(), 300);
+  },
+);
+onUnmounted(() => {
+  if (panelRefreshTimer) clearTimeout(panelRefreshTimer);
+});
+
+/** 视口宽度同步：窄屏（<1200px）面板默认收起，宽度按 D11 重新夹取 */
+function onViewportResize(): void {
+  panel.syncViewport(window.innerWidth);
+}
+onMounted(() => {
+  onViewportResize();
+  syncPanelScope();
+  window.addEventListener('resize', onViewportResize);
+});
+onUnmounted(() => window.removeEventListener('resize', onViewportResize));
 
 // ── 初始化 ──────────────────────────────────────────────────
 onMounted(async () => {
@@ -893,7 +950,7 @@ watch(
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ 'panel-open': panel.open }">
     <!-- 项目菜单打开时的点击外部关闭层 -->
     <div v-if="projectMenuFor" class="menu-overlay" @click="projectMenuFor = ''" />
     <!-- ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ -->
@@ -1021,6 +1078,10 @@ watch(
           <div class="hero-actions">
             <button class="hero-btn primary" :disabled="!ws.activeProjectId" @click="newSession()">新建对话</button>
             <button class="hero-btn" @click="showNewProject = true">注册项目</button>
+            <!-- F-38：无会话时也可打开面板（数据根回落当前项目根） -->
+            <button class="hero-btn" :disabled="!ws.activeProjectId" @click="panel.togglePanel()">
+              📁 {{ panel.open ? '收起文件面板' : '项目文件' }}
+            </button>
             <span class="kbd-hint" title="打开会话检索"><span class="kbd">{{ isMac ? '⌘ K' : 'Ctrl K' }}</span> 快速搜索</span>
           </div>
           <div class="hero-features">
@@ -1059,6 +1120,15 @@ watch(
             :title="chat.messages.length === 0 ? '暂无可回放的会话内容' : '会话回放'"
             @click="onReplayClick"
           >▶ 回放</router-link>
+          <!-- F-38 面板开关：📁 图标按钮，激活态 --accent（PRD F-38-1） -->
+          <button
+            class="cfg-op panel-toggle"
+            :class="{ active: panel.open }"
+            type="button"
+            :title="panel.open ? '收起项目文件面板（⌘B）' : '项目文件（⌘B）'"
+            :aria-pressed="panel.open"
+            @click="panel.togglePanel()"
+          >📁</button>
         </div>
 
         <!-- 运行状态条（topbar 下、消息流上）：运行中/已暂停/已停止三态 + 暂停/停止/继续控制 -->
@@ -1345,6 +1415,9 @@ watch(
       </template>
     </main>
 
+    <!-- ══════════ F-38 右侧文件面板（第三栏：侧栏 + 主区 + 面板） ══════════ -->
+    <FilePanel v-if="panel.open" />
+
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
       <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。</p>
@@ -1376,7 +1449,9 @@ watch(
 </template>
 
 <style scoped>
-.app { display: flex; height: 100vh; }
+.app { display: flex; height: 100vh; position: relative; }
+/* F-38：面板展开时主区最小宽度 480px（PRD F-38-1）；窄屏覆盖式面板不挤压主区 */
+.app.panel-open .main { min-width: 480px; }
 
 /* ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ */
 .sidebar {
@@ -1630,6 +1705,17 @@ watch(
 .cfg-op.replay { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
 .cfg-op.replay.disabled,
 .cfg-op.replay.disabled:hover { color: var(--text-faint); cursor: not-allowed; background: var(--bg-elevated); border-color: var(--border); }
+/* F-38 面板开关：28×28 图标按钮；激活态 --accent（PRD §5.6 顶栏开关） */
+.cfg-op.panel-toggle {
+  width: 28px; height: 28px; min-width: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; font-size: 13px; line-height: 1;
+}
+.cfg-op.panel-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
 
 /* 消息流容器（含回到底部按钮的定位上下文） */
 .chat-area { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }

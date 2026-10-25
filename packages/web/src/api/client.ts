@@ -448,6 +448,100 @@ export interface HubInstallInput {
   url?: string;
 }
 
+// ── F-38 项目文件浏览器 + 变更文件面板（字段 snake_case，与 core REST 契约逐字对齐）──
+
+/** 面板作用域：有会话走会话工作根（含 worktree），无会话回落项目根 */
+export interface BrowseScope {
+  kind: 'session' | 'project';
+  id: string;
+}
+
+export interface BrowseEntry {
+  name: string;
+  type: 'dir' | 'file';
+  /** 仅 file */
+  size?: number;
+}
+
+export interface BrowseTreeResponse {
+  ok: true;
+  /** 请求的相对路径（根为 ''） */
+  path: string;
+  root_name: string;
+  entries: BrowseEntry[];
+  /** 过滤后的条目总数（截断前） */
+  total: number;
+  truncated: boolean;
+}
+
+export type PreviewKind = 'markdown' | 'text' | 'image' | 'binary' | 'oversize';
+
+export interface FilePreviewResponse {
+  ok: true;
+  path: string;
+  name: string;
+  size: number;
+  kind: PreviewKind;
+  modified_at: string;
+  content?: string;
+  language?: string;
+  mime?: string;
+  data_url?: string;
+  /** binary | oversize 的中文降级文案（服务端下发，前端原样展示） */
+  reason?: string;
+}
+
+export type ChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
+
+export interface ChangeFile {
+  /** 工作根相对路径（POSIX）；改名取新路径 */
+  path: string;
+  status: ChangeStatus;
+  added: number;
+  removed: number;
+  binary: boolean;
+  orig_path: string | null;
+}
+
+export interface ChangesResponse {
+  ok: boolean;
+  reason?: string;
+  is_repo: boolean;
+  root_name?: string;
+  files: ChangeFile[];
+  totals: { added: number; removed: number };
+  total_files: number;
+  truncated: boolean;
+}
+
+export type DiffRowType = 'hunk' | 'add' | 'del' | 'ctx';
+
+export interface DiffRow {
+  type: DiffRowType;
+  old_no: number | null;
+  new_no: number | null;
+  /** 不含行首标记 ' ' / '+' / '-'；hunk 行为完整 `@@ … @@` 头 */
+  text: string;
+}
+
+export interface DiffResponse {
+  ok: boolean;
+  reason?: string;
+  path: string;
+  status: ChangeStatus;
+  binary: boolean;
+  truncated: boolean;
+  added: number;
+  removed: number;
+  rows: DiffRow[];
+  /** 无 HEAD 的仓库（首个提交前） */
+  head_missing?: boolean;
+}
+
+/** browse 端点的作用域前缀（session 主 / project 回落） */
+const browseBase = (scope: BrowseScope): string =>
+  scope.kind === 'session' ? `/api/sessions/${scope.id}` : `/api/projects/${scope.id}`;
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -612,4 +706,16 @@ export const api = {
   hubSources: () => request<{ sources: HubSourceConfig[]; error?: string }>('GET', '/api/skill-hub/sources'),
   hubSaveSources: (sources: HubSourceConfig[]) =>
     request<{ ok: boolean; path: string }>('PUT', '/api/skill-hub/sources', { sources }),
+
+  // ── F-38 文件浏览器 + 变更面板（只读；path 一律工作根相对路径）──────────────
+  browseTree: (scope: BrowseScope, path = '') =>
+    request<BrowseTreeResponse>('GET', `${browseBase(scope)}/browse/tree?path=${encodeURIComponent(path)}`),
+  browseFile: (scope: BrowseScope, path: string) =>
+    request<FilePreviewResponse>('GET', `${browseBase(scope)}/browse/file?path=${encodeURIComponent(path)}`),
+  browseChanges: (scope: BrowseScope) => request<ChangesResponse>('GET', `${browseBase(scope)}/browse/changes`),
+  browseDiff: (scope: BrowseScope, path: string) =>
+    request<DiffResponse>('GET', `${browseBase(scope)}/browse/diff?path=${encodeURIComponent(path)}`),
+  /** 在系统文件管理器中显示（省略 path = 工作根）；唯一允许的 POST，不写任何项目文件 */
+  browseReveal: (scope: BrowseScope, path = '') =>
+    request<{ ok: boolean }>('POST', `${browseBase(scope)}/browse/reveal`, { path }),
 };

@@ -36,6 +36,9 @@ import {
   findCronJob,
 } from '../cron/store.js';
 import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
+// F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
+import { handleBrowseRoute, type BrowseDeps } from './browse-routes.js';
+import { BROWSE_IGNORED_DIRS } from '../files/browse.js';
 import {
   deriveNameFromUrl,
   findHubEntry,
@@ -66,18 +69,21 @@ export interface ServeOptions {
   skillsHomeDir?: string;
   /** Skills/MCP 配置读写根目录（缺省回落 skillsHomeDir 再缺省 os.homedir()；测试注入临时目录隔离） */
   configHomeDir?: string;
+  /**
+   * F-38：面板「在文件管理器中显示」执行器（缺省 = OS 命令 + unref()）。
+   * 测试注入以避免真的弹出系统窗口。
+   */
+  browseReveal?: (absPath: string, isDir: boolean) => void;
 }
 
 /**
  * Composer「@ 文件引用」候选收集（只读、白名单边界内）：
  * - 只返回相对路径；遍历范围锁定在项目根内，不跟随任何符号链接（防目录逃逸）
- * - 跳过构建产物/依赖目录（IGNORED_DIRS）与隐藏目录（. 开头），控制噪声
+ * - 跳过构建产物/依赖目录（BROWSE_IGNORED_DIRS，F-38 D5 共享常量）与隐藏目录（. 开头），控制噪声
  * - maxEntries 截断 + 最大深度限制，防止大仓库/深目录拖垮端点
+ * 注：点号目录由下方 `name.startsWith('.')` 兜底跳过，因此共享常量不含 .idea/.vscode，行为不变。
  */
-const IGNORED_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'target',
-  '__pycache__', '.venv', 'venv', '.next', '.nuxt', 'bin', 'obj', '.idea', '.vscode',
-]);
+const IGNORED_DIRS: ReadonlySet<string> = new Set(BROWSE_IGNORED_DIRS);
 const MAX_FILE_CANDIDATES = 500;
 const MAX_WALK_DEPTH = 8;
 
@@ -183,6 +189,12 @@ export function createWebServer(opts: ServeOptions): http.Server {
       });
     });
 
+  /**
+   * F-38 面板路由依赖：json/err/readBody 是 `createWebServer` 的内部闭包，刻意**不**传给
+   * `handleBrowseRoute`（它返回 `{status, body}`，由下方分发用既有 json() 写出）。
+   */
+  const browseDeps: BrowseDeps = opts.browseReveal ? { reveal: opts.browseReveal } : {};
+
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
     const parts = url.pathname.split('/').filter(Boolean);
@@ -207,6 +219,15 @@ export function createWebServer(opts: ServeOptions): http.Server {
           unsub();
         });
         return;
+      }
+
+      // ── F-38 文件浏览器 + 变更面板（只读：tree / file / changes / diff / reveal）──
+      // 两套作用域 /api/sessions/:sid/browse/* 与 /api/projects/:pid/browse/*，
+      // 根解析在 browse-routes 内统一走 resolveWorkRoot / project.root_path。
+      // 必须位于静态托管分支之前：否则 dist 存在的部署形态会先把 /api/... 吞成 SPA fallback。
+      if (parts[0] === 'api' && (parts[1] === 'sessions' || parts[1] === 'projects') && parts[3] === 'browse') {
+        const out = await handleBrowseRoute({ method, parts, url, req, service, browseDeps });
+        if (out) return json(res, out.status, out.body);
       }
 
       // ── projects ──────────────────────────────────────────────────────────

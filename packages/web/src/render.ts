@@ -24,3 +24,26 @@ const md = new MarkdownIt({
 export function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(md.render(text));
 }
+
+/**
+ * F-38 文件预览：代码文本 → 高亮后的 HTML 片段（与消息流同一条 DOMPurify 消毒链路）。
+ *
+ * - 语言标识不合法 / hljs 未收录 → 纯转义文本（仍走消毒，绝不直出原文）
+ * - 返回的是 `<span class="hljs-…">` 片段，**不含** `<pre>` / `<code>`：
+ *   包裹层与行号 gutter 由 FilePreview.vue 负责（保证只读、可横向滚动的排版）
+ * - 调用方必须用 `v-html` 渲染本函数的结果，且**不得**把文件原文直接交给 v-html
+ */
+export function renderCode(text: string, lang?: string): string {
+  const language = lang && hljs.getLanguage(lang) ? lang : '';
+  let escaped: string;
+  if (!language) {
+    escaped = md.utils.escapeHtml(text);
+  } else {
+    try {
+      escaped = hljs.highlight(text, { language }).value;
+    } catch {
+      escaped = md.utils.escapeHtml(text);
+    }
+  }
+  return DOMPurify.sanitize(escaped);
+}
