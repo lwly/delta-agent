@@ -334,6 +334,37 @@ export class SessionService {
     }
   }
 
+  /**
+   * 回收站批量彻底清除：逐条调用 purgeTrash，单条失败不影响其余条目。
+   * 先对照回收站列表校验存在性（硬删本身对缺失 id 静默成功，需在此拦截），
+   * 非法 kind/id 或不在回收站的条目计入 failed 而不抛错；items 为空由 HTTP 层校验拒绝。
+   */
+  purgeTrashBatch(items: Array<{ kind: 'project' | 'session'; id: string }>): {
+    purged: number;
+    failed: Array<{ kind: string; id: string; error: string }>;
+  } {
+    const inTrash = new Set(this.store.listTrash().map((t) => `${t.kind}:${t.id}`));
+    let purged = 0;
+    const failed: Array<{ kind: string; id: string; error: string }> = [];
+    for (const item of items) {
+      if ((item.kind !== 'project' && item.kind !== 'session') || typeof item.id !== 'string' || !item.id) {
+        failed.push({ kind: String(item.kind), id: String(item.id), error: 'invalid kind or id' });
+        continue;
+      }
+      if (!inTrash.has(`${item.kind}:${item.id}`)) {
+        failed.push({ kind: item.kind, id: item.id, error: `${item.kind} not found in trash` });
+        continue;
+      }
+      try {
+        this.purgeTrash(item.kind, item.id);
+        purged++;
+      } catch (e) {
+        failed.push({ kind: item.kind, id: item.id, error: (e as Error).message });
+      }
+    }
+    return { purged, failed };
+  }
+
   listTrash(): TrashItem[] {
     return this.store.listTrash();
   }

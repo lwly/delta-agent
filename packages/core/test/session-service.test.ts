@@ -219,3 +219,70 @@ describe('renameSession', () => {
     expect(() => svc.renameSession('nope', 'x')).toThrow(/not found/);
   });
 });
+
+describe('回收站批量彻底清除', () => {
+  it('purgeTrashBatch：混合 project+session 全部成功', () => {
+    const p1 = svc.ensureProject('/tmp/proj-a');
+    const p2 = svc.ensureProject('/tmp/proj-b');
+    const p3 = svc.ensureProject('/tmp/proj-c');
+    const s = svc.createSession(p3.id, { title: 's1' });
+    svc.removeProject(p1.id, 'proj-a');
+    svc.removeProject(p2.id, 'proj-b');
+    svc.removeSession(s.id);
+    expect(svc.listTrash()).toHaveLength(3); // 2 项目 + 1 独立软删会话
+
+    const result = svc.purgeTrashBatch([
+      { kind: 'project', id: p1.id },
+      { kind: 'project', id: p2.id },
+      { kind: 'session', id: s.id },
+    ]);
+    expect(result.purged).toBe(3);
+    expect(result.failed).toHaveLength(0);
+    expect(svc.listTrash()).toHaveLength(0);
+    expect(svc.listProjects().map((x) => x.id)).toEqual([p3.id]); // 未勾选项目不受影响
+  });
+
+  it('purgeTrashBatch：单条失败不影响其余（部分失败场景）', () => {
+    const p = svc.ensureProject('/tmp/proj-a');
+    const s1 = svc.createSession(p.id, { title: 'ok-1' });
+    const s2 = svc.createSession(p.id, { title: 'ok-2' });
+    svc.removeSession(s1.id);
+    svc.removeSession(s2.id);
+
+    // no-such-id 不在回收站 → 计入 failed；bogus 为非法 kind → 计入 failed
+    const result = svc.purgeTrashBatch([
+      { kind: 'session', id: 'no-such-id' },
+      { kind: 'session', id: s1.id },
+      { kind: 'bogus' as 'session', id: 'x' },
+    ]);
+    expect(result.purged).toBe(1);
+    expect(result.failed).toHaveLength(2);
+    expect(result.failed[0]).toMatchObject({ kind: 'session', id: 'no-such-id' });
+    expect(result.failed[1]).toMatchObject({ kind: 'bogus', error: 'invalid kind or id' });
+    expect(svc.listTrash()).toHaveLength(1); // s2 仍在回收站
+    expect(() => svc.restore('session', 'no-such-id')).toThrow(/not found/);
+  });
+
+  it('purgeTrashBatch：空列表返回 0 成功 0 失败', () => {
+    const result = svc.purgeTrashBatch([]);
+    expect(result.purged).toBe(0);
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('purgeTrashBatch：项目与其级联软删会话同批清除（purgeTrash 级联路径）', () => {
+    const p = svc.ensureProject('/tmp/proj-a');
+    const s1 = svc.createSession(p.id, { title: 's1' });
+    const s2 = svc.createSession(p.id, { title: 's2' });
+    svc.removeProject(p.id, 'proj-a'); // 级联软删 s1/s2，三者均在回收站
+
+    // 前端允许同时勾选项目与其会话：项目硬删会级联硬删会话，后续会话清除应静默成功
+    const result = svc.purgeTrashBatch([
+      { kind: 'project', id: p.id },
+      { kind: 'session', id: s1.id },
+      { kind: 'session', id: s2.id },
+    ]);
+    expect(result.failed).toHaveLength(0);
+    expect(svc.listTrash()).toHaveLength(0);
+    expect(svc.listProjects()).toHaveLength(0);
+  });
+});

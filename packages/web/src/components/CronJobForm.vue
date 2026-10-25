@@ -304,7 +304,7 @@ input, select, textarea {
   color: var(--text); padding: 7px 10px; font-size: 13px; width: 100%; box-sizing: border-box;
 }
 textarea { resize: vertical; font-family: inherit; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: #58a6ff; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-border); }
 .row { display: flex; gap: 8px; align-items: center; }
 .row .mode { flex: 1; }
 .row .time { width: 130px; }
@@ -316,7 +316,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: #58a6ff
   color: var(--text-dim); font-size: 12px; padding: 4px 12px; cursor: pointer;
 }
 .chip:hover { color: var(--text); }
-.chip.on { color: var(--text); border-color: #58a6ff; background: rgba(88, 166, 255, 0.12); }
+.chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .day { width: 140px; }
 .custom { font-family: var(--mono); font-size: 12.5px; }
 .yolo-hint { color: #d29922; font-size: 11.5px; }
@@ -325,7 +325,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: #58a6ff
   border: 1px solid #d29922; background: rgba(210, 153, 34, 0.08);
   border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text);
 }
-.link { border: none; background: transparent; color: #58a6ff; font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }
+.link { border: none; background: transparent; color: var(--accent); font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }
 .err { color: var(--red); font-size: 11.5px; }
 .warn { color: #d29922; font-size: 11.5px; }
 .error { color: var(--red); font-size: 12.5px; margin: 0; }

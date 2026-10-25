@@ -141,9 +141,9 @@ function describeRun(r: CronRunRecordView): string {
 <style scoped>
 .job { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
 .job.disabled { opacity: 0.6; }
-.job.picked { border-color: #58a6ff; }
+.job.picked { border-color: var(--accent); }
 .head { display: flex; align-items: center; gap: 8px; }
-.pick { accent-color: #58a6ff; }
+.pick { accent-color: var(--accent); }
 .name { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .perm { font-size: 10.5px; border-radius: 4px; padding: 1px 6px; flex: none; }
 .perm.yolo { color: #d29922; border: 1px solid #d29922; }
@@ -159,7 +159,7 @@ function describeRun(r: CronRunRecordView): string {
 .cwd { color: var(--text-faint); font-size: 11px; font-family: var(--mono); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bottom { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .desc { color: var(--text-dim); font-size: 11.5px; }
-.cron-raw { font-family: var(--mono); font-size: 11px; color: #58a6ff; background: var(--bg); padding: 1px 6px; border-radius: 4px; }
+.cron-raw { font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--bg); padding: 1px 6px; border-radius: 4px; }
 .badge { color: var(--text-faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 10.5px; flex: none; }
 .countdown { color: var(--text-faint); font-size: 11.5px; flex: none; }
 .ops { display: flex; align-items: center; gap: 8px; margin-top: 8px; }

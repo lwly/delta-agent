@@ -260,3 +260,49 @@ describe('providers 端点（设置中心）', () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe('回收站批量彻底删除（POST /api/trash/purge-batch）', () => {
+  it('批量清除：混合 project+session，返回 purged 与空 failed', async () => {
+    const created = await api('POST', `/api/projects/${projectId}/sessions`, { title: 'b1' });
+    const sid = (created.json as { id: string }).id;
+    await api('DELETE', `/api/sessions/${sid}`);
+    await api('DELETE', `/api/projects/${projectId}`, { confirmName: path.basename(tmp) });
+
+    const r = await api('POST', '/api/trash/purge-batch', {
+      items: [
+        { kind: 'project', id: projectId },
+        { kind: 'session', id: sid },
+      ],
+    });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, purged: 2, failed: [] });
+    expect(await api('GET', '/api/trash')).toMatchObject({ json: [] } as never);
+  });
+
+  it('部分失败：不存在的条目计入 failed，其余照常清除，仍返回 200', async () => {
+    const created = await api('POST', `/api/projects/${projectId}/sessions`, { title: 'b2' });
+    const sid = (created.json as { id: string }).id;
+    await api('DELETE', `/api/sessions/${sid}`);
+
+    const r = await api('POST', '/api/trash/purge-batch', {
+      items: [
+        { kind: 'session', id: sid },
+        { kind: 'session', id: 'no-such-id' },
+      ],
+    });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, purged: 1 });
+    expect((r.json.failed as unknown[])[0]).toMatchObject({ kind: 'session', id: 'no-such-id' });
+  });
+
+  it('items 为空或含非对象条目 → 400', async () => {
+    expect((await api('POST', '/api/trash/purge-batch', { items: [] })).status).toBe(400);
+    expect((await api('POST', '/api/trash/purge-batch', {})).status).toBe(400);
+    expect(
+      (await api('POST', '/api/trash/purge-batch', { items: [{ kind: 'session' }] })).status,
+    ).toBe(400);
+    expect(
+      (await api('POST', '/api/trash/purge-batch', { items: [{ kind: 'folder', id: 'x' }] })).status,
+    ).toBe(400); // 非法 kind 值同样拒绝
+  });
+});
