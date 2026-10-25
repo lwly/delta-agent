@@ -3,6 +3,7 @@
 // 状态徽章 / 耗时 / 步骤序号 / 主参数摘要 / 结果摘要-全文切换 / 复制（含 1.5s「已复制 ✓」局部反馈）。
 // 诚实性口径：耗时为本地计时（store pendingCalls startedAt 差值）；序号为本地递增计数；不做伪造。
 import { computed, ref } from 'vue';
+import { toolLabel } from '../utils/toolNames';
 
 type ToolStatus = 'running' | 'ok' | 'fail';
 
@@ -51,6 +52,9 @@ const icon = computed(() => {
 const statusLabel = computed(
   () => ({ running: '运行中', ok: '成功', fail: '失败' })[props.status],
 );
+
+/** 工具名中文标签（主显示），原名保留为小字次级展示 */
+const label = computed(() => toolLabel(props.name));
 
 // ── 主参数摘要行 ─────────────────────────────────────────────
 function parseArgs(): Record<string, unknown> {
@@ -152,7 +156,8 @@ function copyOut() {
     <!-- 首行：图标 + 工具名 + 状态徽章 + 耗时 + 步骤序号 + 折叠/复制 -->
     <div class="tcard-head" role="button" tabindex="0" :title="open ? '点击折叠' : '点击展开'" @click="open = !open" @keydown.enter.prevent="open = !open">
       <span class="tcard-ico">{{ icon }}</span>
-      <span class="tcard-name">{{ name }}</span>
+      <span class="tcard-name" :title="name">{{ label }}</span>
+      <span v-if="label !== name" class="tcard-en">{{ name }}</span>
       <span class="tbadge" :class="`b-${status}`">{{ statusLabel }}</span>
       <span v-if="durationLabel" class="tcard-dur">{{ durationLabel }}</span>
       <span v-if="seq != null" class="tcard-seq">第 {{ seq }} 步</span>
@@ -217,7 +222,8 @@ function copyOut() {
 }
 .tcard-head:hover { background: var(--bg-hover); }
 .tcard-ico { font-size: 13px; flex: none; width: 18px; text-align: center; }
-.tcard-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.tcard-name { font-size: 12.5px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.tcard-en { font-family: var(--mono); font-size: 10px; color: var(--text-dim); white-space: nowrap; opacity: 0.85; }
 .tcard-dur { font-family: var(--mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .tcard-seq { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .tcard-spring { flex: 1; min-width: 0; }

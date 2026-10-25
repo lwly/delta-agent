@@ -1337,10 +1337,10 @@ watch(
             </div>
             <div class="rsz bottom" title="拖动调整输入框高度" @pointerdown="startComposerResize('bottom', $event)"></div>
           </div>
-        </div>
 
-        <!-- F-37 底部状态条：全宽扁平页脚（项目名 ｜ 当前分支 ｜ Worktree 开关） -->
-        <GitStatusBar v-if="chat.sessionId" />
+          <!-- F-37 底部状态条：吸附输入框正下方（项目名 ｜ 当前分支 ｜ Worktree 开关） -->
+          <GitStatusBar v-if="chat.sessionId" />
+        </div>
       </template>
       </template>
     </main>
@@ -1821,7 +1821,7 @@ watch(
 .ask-input { width: 100%; margin-top: 8px; padding: 8px 11px; }
 
 /* ══════════ 输入区 ══════════ */
-.composer-wrap { padding: 0 24px 14px; }
+.composer-wrap { padding: 0 24px 10px; }
 .composer {
   max-width: 860px; margin: 0 auto; position: relative;
   background: var(--bg-elevated); border: 1px solid var(--border);
