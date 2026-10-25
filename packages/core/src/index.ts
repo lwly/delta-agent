@@ -527,3 +527,60 @@ export {
   type StartCronSchedulerOptions,
   type CronSchedulerHandle,
 } from './cron/scheduler.js';
+
+// F-38 项目文件浏览器 + 变更文件面板：只读文件原语 + unified diff 解析 + git 变更统计 + 只读路由
+// 详见 docs/design-f38-project-file-panel.md（browse 无 SessionService 依赖，可直接单测）
+export {
+  BROWSE_IGNORED_DIRS,
+  isBrowseIgnored,
+  MAX_DIR_ENTRIES,
+  PATH_REJECT_MESSAGE,
+  NOT_FOUND_MESSAGE,
+  DENIED_MESSAGE,
+  OVERSIZE_REASON,
+  BINARY_REASON,
+  normalizeRelPath,
+  resolveInRoot,
+  mapFsError,
+  listDir,
+  readFileForPreview,
+  type RelPathOk,
+  type RelPathFail,
+  type RelPathResult,
+  type RootResolve,
+  type RootResolveFailure,
+  type RootResolveErrorCode,
+  type BrowseEntry,
+  type DirListing,
+  type PreviewKind,
+  type FilePreview,
+} from './files/browse.js';
+export {
+  parseUnifiedDiff,
+  buildAllAddedRows,
+  DIFF_MAX_ROWS,
+  DIFF_MAX_BYTES,
+  type DiffRow,
+  type DiffRowType,
+  type ParsedPatch,
+} from './files/patch.js';
+export {
+  listWorkspaceChanges,
+  readFileDiff,
+  parseStatusEntries,
+  parseNumstat,
+  normalizeStatus,
+  MAX_CHANGE_FILES,
+  GIT_TIMEOUT_REASON,
+  NOT_A_REPO_REASON,
+  type ChangeStatus,
+  type ChangeFile,
+  type ChangesResult,
+  type FileDiffResult,
+} from './files/changes.js';
+export {
+  handleBrowseRoute,
+  type BrowseDeps,
+  type BrowseRouteInput,
+  type BrowseRouteOutcome,
+} from './server/browse-routes.js';
