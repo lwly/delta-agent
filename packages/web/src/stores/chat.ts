@@ -30,6 +30,17 @@ export const useChatStore = defineStore('chat', {
     notices: [] as Array<{ id: number; text: string }>,
     unsub: null as null | (() => void),
     noticeId: 1,
+    // ── UI 本地状态（不来自服务端协议，见各字段注释）──────────────────
+    /** 本地停止标志：点击停止置位（协议不回传"已停止"）；send / state(running=true) / done 时清除 */
+    stopped: false,
+    /** 上一次 done 事件的任务 token 用量（协议口径，状态条展示，不做假实时） */
+    lastUsage: null as null | { inputTokens: number; outputTokens: number },
+    /** callId → 调用元信息（tool_call_start 记录；结果卡配对 / 运行中卡片 / 本地耗时计算的数据源） */
+    pendingCalls: {} as Record<string, { name: string; argsJson: string; startedAt: number; seq: number }>,
+    /** 本次会话内工具调用递增序号（open 时归零；第 N 步展示口径） */
+    toolSeq: 0,
+    /** thinking_delta 流式思考文本累积（随其后落库的 assistant 消息保留；后端不下发则恒为空） */
+    thinkingText: '',
   }),
   actions: {
     async open(sessionId: string) {
@@ -46,6 +57,12 @@ export const useChatStore = defineStore('chat', {
       this.messages = detail.messages;
       this.streamingText = '';
       this.running = false;
+      // UI 本地状态随会话切换重置（序号 / 计时 / 停止标志 / 思考文本均属会话作用域）
+      this.stopped = false;
+      this.lastUsage = null;
+      this.pendingCalls = {};
+      this.toolSeq = 0;
+      this.thinkingText = '';
       // PASI-9：打开会话时同步暂停态（status 落库值）
       this.paused = detail.session.status === 'paused';
       // 会话级权限模式（失败保持默认，不阻塞会话打开）
@@ -79,6 +96,11 @@ export const useChatStore = defineStore('chat', {
       this.pendingConfirm = null;
       this.pendingPlan = null;
       this.pendingAsk = null;
+      this.stopped = false;
+      this.lastUsage = null;
+      this.pendingCalls = {};
+      this.toolSeq = 0;
+      this.thinkingText = '';
     },
     notice(text: string) {
       this.notices.push({ id: this.noticeId++, text });
@@ -88,6 +110,8 @@ export const useChatStore = defineStore('chat', {
       switch (ev.type) {
         case 'state':
           this.running = ev.running === true;
+          // 本地停止标志：新一轮运行开始即清除（用户点停止后又触发续跑的场景）
+          if (this.running) this.stopped = false;
           // PASI-9：paused 仅在事件携带时更新（运行开始/暂停时服务端都会显式给出）
           if ('paused' in ev) this.paused = ev.paused === true;
           if (!this.running && this.streamingText) {
@@ -99,16 +123,33 @@ export const useChatStore = defineStore('chat', {
           this.streamingText += String(ev.text ?? '');
           break;
         case 'thinking_delta':
+          // 思考流式文本累积（后端不下发则恒为空，UI 区块自然不出现）
+          this.thinkingText += String(ev.text ?? '');
           break;
         case 'turn_start':
           break;
         case 'tool_call_start': {
           const call = ev.call as { id: string; name: string; argsJson: string };
-          // 助手消息（携带已累积的流式文本）落一条，工具调用跟随其后的 tool 消息展示
+          // 助手消息（携带已累积的流式文本）落一条，工具调用跟随其后渲染为工具卡
           if (this.streamingText) {
-            this.messages.push({ role: 'assistant', content: this.streamingText, toolCalls: [call] });
+            this.messages.push({
+              role: 'assistant',
+              content: this.streamingText,
+              toolCalls: [call],
+              ts: Date.now(),
+              ...(this.thinkingText ? { thinking: this.thinkingText } : {}),
+            });
             this.streamingText = '';
+            this.thinkingText = '';
           }
+          // 记录调用元信息：结果未到时渲染「运行中」卡片，结果到达时配对并计算本地耗时
+          this.toolSeq += 1;
+          this.pendingCalls[call.id] = {
+            name: call.name,
+            argsJson: call.argsJson,
+            startedAt: Date.now(),
+            seq: this.toolSeq,
+          };
           break;
         }
         case 'tool_result': {
@@ -119,10 +160,15 @@ export const useChatStore = defineStore('chat', {
             content: string;
             meta?: { sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean } };
           };
+          const callMeta = this.pendingCalls[result.callId];
           this.messages.push({
             role: 'tool',
             content: result.content,
             toolCallId: result.callId,
+            // UI 本地字段：本地接收时间 / 本地计时耗时 / 调用序号 / ok 原值
+            ts: Date.now(),
+            ok: result.ok,
+            ...(callMeta ? { durationMs: Date.now() - callMeta.startedAt, toolSeq: callMeta.seq } : {}),
             // F-30 沙箱徽标（R8）：只在显式启用沙箱时存在，随实时 SSE 展示
             ...(result.meta?.sandbox ? { sandboxMeta: result.meta.sandbox } : {}),
           });
@@ -204,15 +250,42 @@ export const useChatStore = defineStore('chat', {
         case 'done': {
           // done 前最后一次 text_delta 已累积 → 落为 assistant 消息（与桥的落库一致）
           if (this.streamingText) {
-            this.messages.push({ role: 'assistant', content: this.streamingText });
+            this.messages.push({
+              role: 'assistant',
+              content: this.streamingText,
+              ts: Date.now(),
+              ...(this.thinkingText ? { thinking: this.thinkingText } : {}),
+            });
             this.streamingText = '';
+            this.thinkingText = '';
           }
           const usage = ev.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-          if (usage) this.notice(`本任务 token：${usage.inputTokens ?? 0} 入 / ${usage.outputTokens ?? 0} 出`);
-          // 以服务端落库为准，重拉一次（期间会话已切换则丢弃过期响应，防止旧会话消息覆盖新会话）
+          if (usage) {
+            this.lastUsage = { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 };
+            this.notice(`本任务 token：${this.lastUsage.inputTokens} 入 / ${this.lastUsage.outputTokens} 出`);
+          }
+          this.stopped = false;
+          // 以服务端落库为准重拉一次（期间会话已切换则丢弃过期响应，防止旧会话消息覆盖新会话）。
+          // 本地 UI 字段（ts/thinking/durationMs/toolSeq/ok）按 role+content 回带：
+          // 数据仍来自本地真实记录，仅避免「运行结束瞬间时间戳/耗时消失」的回退观感
+          const carry = new Map<string, Partial<ChatMessage>>();
+          for (const m of this.messages) {
+            const extras: Partial<ChatMessage> = {};
+            if (m.ts != null) extras.ts = m.ts;
+            if (m.thinking) extras.thinking = m.thinking;
+            if (m.durationMs != null) extras.durationMs = m.durationMs;
+            if (m.toolSeq != null) extras.toolSeq = m.toolSeq;
+            if (m.ok != null) extras.ok = m.ok;
+            if (Object.keys(extras).length > 0) carry.set(`${m.role}\u0000${m.content}`, extras);
+          }
           const sid = this.sessionId;
           const detail = await api.getSession(sid);
-          if (this.sessionId === sid) this.messages = detail.messages;
+          if (this.sessionId === sid) {
+            this.messages = detail.messages.map((m) => {
+              const ex = carry.get(`${m.role}\u0000${m.content}`);
+              return ex ? { ...m, ...ex } : m;
+            });
+          }
           break;
         }
         default:
@@ -221,11 +294,13 @@ export const useChatStore = defineStore('chat', {
     },
     async send(input: string, images?: MessageImage[]) {
       if (!this.sessionId || this.running) return;
-      const userMessage: ChatMessage = { role: 'user', content: input };
+      const userMessage: ChatMessage = { role: 'user', content: input, ts: Date.now() };
       if (images?.length) userMessage.images = images; // F-25 多模态
       this.messages.push(userMessage);
       this.streamingText = '';
       this.paused = false; // PASI-9：发送即恢复（服务端 hub.send 同步清除 paused 落库）
+      this.stopped = false; // 本地停止标志：重新发送即清除（含从停止点继续的场景）
+      this.thinkingText = '';
       try {
         await api.send(this.sessionId, input, images);
       } catch (e) {
@@ -255,7 +330,17 @@ export const useChatStore = defineStore('chat', {
       await api.answer(this.sessionId, ask.requestId, answer);
     },
     async abort() {
-      await api.abort(this.sessionId);
+      // 本地停止标志（协议不回传"已停止"）：状态条 / composer 据此转「已停止」态；
+      // 下一次 send / state(running=true) / done 自动清除。
+      // 加固：abort 请求失败时回滚标志（避免 UI 卡在「已停止」假态）并以 notice 反馈；
+      // state 事件随后仍会按服务端真实状态兜底校准
+      this.stopped = true;
+      try {
+        await api.abort(this.sessionId);
+      } catch (e) {
+        this.stopped = false;
+        this.notice(`✘ 停止失败：${(e as Error).message}`);
+      }
     },
     /** PASI-9：暂停当前会话执行（状态经 SSE state 事件回推 paused:true） */
     async pause() {

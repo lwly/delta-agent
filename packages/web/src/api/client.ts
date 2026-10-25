@@ -69,6 +69,17 @@ export interface ChatMessage {
     ms?: number;
     degraded?: boolean;
   };
+  // ── 以下均为 Web UI 本地字段（非服务端协议），仅对 SSE 实时到达的消息记录 ──
+  /** UI-本地：消息本地接收时间（ms）；历史会话拉回的消息无此字段 → 不显示时间戳 */
+  ts?: number;
+  /** UI-本地：thinking_delta 累积的思考文本（随其后落库的 assistant 消息保留展示） */
+  thinking?: string;
+  /** UI-本地：工具本地计时耗时（ms）；tool_call_start→tool_result 差值，非服务端口径 */
+  durationMs?: number;
+  /** UI-本地：本次会话内工具调用序号（store 递增计数，按 callId 关联） */
+  toolSeq?: number;
+  /** UI-本地：tool_result 事件 ok 原值（落库不含 ok，重拉后由 store 回带） */
+  ok?: boolean;
 }
 
 export interface TrashItem {
@@ -77,6 +88,20 @@ export interface TrashItem {
   name: string;
   deleted_at: string;
   project_id?: string;
+}
+
+/** 回收站批量彻底清除：单条失败明细 */
+export interface PurgeBatchFailure {
+  kind: string;
+  id: string;
+  error: string;
+}
+
+/** 回收站批量彻底清除结果：ok 恒为 true，部分失败看 failed */
+export interface PurgeBatchResult {
+  ok: boolean;
+  purged: number;
+  failed: PurgeBatchFailure[];
 }
 
 export interface ConfirmRequest {
@@ -315,6 +340,114 @@ export interface SkillCandidate {
   layer: 'builtin' | 'user' | 'project';
 }
 
+// ── Skills / MCP 配置中心（设置页面板）──────────────────────────────────────
+
+/** Skill 完整视图（GET /api/skills/detail；body 供编辑器回填） */
+export interface SkillDetailView {
+  name: string;
+  description: string;
+  triggers: string[];
+  toolsAllowlist: string[];
+  layer: 'builtin' | 'user' | 'project';
+  dir: string;
+  references: string[];
+  body: string;
+  /** 当前层同名覆盖的低层来源（如 project 覆盖 user → 'user'） */
+  shadowing?: 'builtin' | 'user' | 'project';
+}
+
+export interface SkillDetailResponse {
+  skills: SkillDetailView[];
+  /** 逐层原始发现（未经同名覆盖合并），供展示覆盖关系 */
+  layers: Record<string, SkillDetailView[]>;
+  /** name → 该 Skill 存在于哪些层（低层同名内容被高层覆盖后仍保留在磁盘） */
+  availability: Record<string, string[]>;
+  errors: string[];
+}
+
+export interface SkillSaveInput {
+  scope: 'user' | 'project';
+  projectId?: string;
+  description: string;
+  triggers: string[];
+  toolsAllowlist: string[];
+  body: string;
+}
+
+export interface McpServerEntry {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  /** 保留字段（当前仅支持 stdio 传输），原样存取 */
+  url?: string;
+}
+
+export interface McpFileState {
+  path: string;
+  exists: boolean;
+  parseError?: string;
+  servers: Record<string, McpServerEntry>;
+}
+
+export interface McpConfigResponse {
+  global: McpFileState;
+  project: McpFileState | null;
+  /** 合并视图（项目覆盖全局），值带 __source 标注来源 */
+  merged: Record<string, McpServerEntry & { __source: 'global' | 'project' }>;
+  projectEnabled: boolean;
+}
+
+// ── Skill Hub（技能市场：目录浏览 / 预览 / 一键安装 / 远程源管理）────────────
+
+/** Hub 目录条目（GET /api/skill-hub items 元素；含完整 body 供本地预览兜底） */
+export interface HubEntryView {
+  name: string;
+  description: string;
+  category: string;
+  version: string;
+  author: string;
+  triggers: string[];
+  toolsAllowlist: string[];
+  body: string;
+  /** 来源：'builtin' 或远程源名 */
+  source: string;
+  /** 已安装层（本地 SKILL.md 无版本字段，不做版本对比 → UI 口径为「覆盖重装」） */
+  installedIn: { user?: boolean; project?: boolean; builtin?: boolean };
+}
+
+/** 远程源拉取状态 */
+export interface HubSourceStatus {
+  name: string;
+  url: string;
+  status: 'ok' | 'error';
+  error?: string;
+  count: number;
+}
+
+export interface HubListResponse {
+  items: HubEntryView[];
+  sources: HubSourceStatus[];
+  errors: string[];
+}
+
+/** 远程源配置（skill-hub.json sources 数组元素） */
+export interface HubSourceConfig {
+  name: string;
+  url: string;
+}
+
+/** 安装入参：url 模式（导入 SKILL.md 原文）与目录模式（source+name）二选一 */
+export interface HubInstallInput {
+  scope: 'user' | 'project';
+  projectId?: string;
+  /** 目录模式：来源（'builtin' 或源名）+ 名称 */
+  source?: string;
+  name?: string;
+  /** url 模式：SKILL.md raw 原文地址（可选显式 name，缺省从 URL 推导） */
+  url?: string;
+}
+
 export const api = {
   // projects
   listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
@@ -378,6 +511,8 @@ export const api = {
   listTrash: () => request<TrashItem[]>('GET', '/api/trash'),
   restore: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('POST', `/api/trash/restore/${kind}/${id}`),
   purgeTrash: (kind: 'project' | 'session', id: string) => request<{ ok: boolean }>('DELETE', `/api/trash/${kind}/${id}`),
+  purgeTrashBatch: (items: Array<{ kind: 'project' | 'session'; id: string }>) =>
+    request<PurgeBatchResult>('POST', '/api/trash/purge-batch', { items }),
   search: (q: string) => request<SessionRow[]>('GET', `/api/search?q=${encodeURIComponent(q)}`),
   // F-17 对话检索：全文/语义搜索历史消息
   searchMessages: (q: string, mode?: 'auto' | 'fulltext' | 'semantic') => {
@@ -435,4 +570,46 @@ export const api = {
   cronUpdate: (id: string, patch: CronJobPatch) => request<CronJobView>('PATCH', `/api/cron/${id}`, patch),
   cronRemove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/cron/${id}`),
   cronRun: (id: string) => request<{ ok: boolean; running: boolean }>('POST', `/api/cron/${id}/run`),
+
+  // skills / mcp 配置中心（设置页面板）
+  skillDetails: (projectId?: string) =>
+    request<SkillDetailResponse>(
+      'GET',
+      `/api/skills/detail${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  saveSkill: (name: string, input: SkillSaveInput) =>
+    request<{ ok: boolean; path: string }>('POST', `/api/skills/${encodeURIComponent(name)}`, input),
+  deleteSkill: (name: string, scope: 'user' | 'project', projectId?: string) => {
+    const q = new URLSearchParams({ scope });
+    if (projectId) q.set('projectId', projectId);
+    return request<{ ok: boolean }>('DELETE', `/api/skills/${encodeURIComponent(name)}?${q.toString()}`);
+  },
+  mcpConfigs: (projectId?: string) =>
+    request<McpConfigResponse>(
+      'GET',
+      `/api/mcp${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  saveMcpServers: (scope: 'global' | 'project', mcpServers: Record<string, McpServerEntry>, projectId?: string) =>
+    request<{ ok: boolean; path: string }>('PUT', '/api/mcp', {
+      scope,
+      mcpServers,
+      ...(projectId ? { projectId } : {}),
+    }),
+
+  // skill hub（技能市场；安装/卸载落盘走 writeSkill/deleteSkill，口径与 Skills 面板一致）
+  hubList: (projectId?: string) =>
+    request<HubListResponse>(
+      'GET',
+      `/api/skill-hub${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  hubItem: (source: string, name: string, projectId?: string) => {
+    const q = new URLSearchParams({ source, name });
+    if (projectId) q.set('projectId', projectId);
+    return request<HubEntryView>('GET', `/api/skill-hub/item?${q.toString()}`);
+  },
+  hubInstall: (input: HubInstallInput) =>
+    request<{ ok: boolean; name: string; path: string }>('POST', '/api/skill-hub/install', input),
+  hubSources: () => request<{ sources: HubSourceConfig[]; error?: string }>('GET', '/api/skill-hub/sources'),
+  hubSaveSources: (sources: HubSourceConfig[]) =>
+    request<{ ok: boolean; path: string }>('PUT', '/api/skill-hub/sources', { sources }),
 };

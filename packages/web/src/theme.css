@@ -1,23 +1,40 @@
-/* 全局主题：与 prototype/index.html 高保真原型同一套设计系统（GitHub Dark 色系） */
+/* 全局主题：单色强调色系（#4C8DFF）+ 三级文本层级 + 4px 间距栅格（仅用 4/8/12/16/24） */
 :root {
-  --bg: #0d1117;
-  --bg-panel: #161b22;
-  --bg-elevated: #1c2128;
-  --bg-hover: #22272e;
-  --border: #2d333b;
-  --text: #e6edf3;
-  --text-dim: #8b949e;
-  --text-faint: #6e7681;
-  --accent: #58a6ff;
-  --accent-soft: rgba(88, 166, 255, 0.12);
+  /* ── 背景四级 ── */
+  --bg: #0f1115;            /* 全局背景 */
+  --bg-panel: #131619;      /* 侧边栏 / 面板 */
+  --bg-elevated: #1a1d23;   /* 卡片 / 条目 */
+  --bg-hover: #22262e;      /* hover */
+  --bg-active: #2a2f3a;     /* 选中 / active */
+
+  /* ── 边框 ── */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  /* ── 三级文本 ── */
+  --text: #e6e8eb;          /* 主文本（14px/600 标题、13px/400 正文） */
+  --text-dim: #9aa0a6;      /* 次级文本（11-12px） */
+  --text-faint: #6b7280;    /* 弱化信息 */
+
+  /* ── 唯一强调色 ── */
+  --accent: #4c8dff;
+  --accent-strong: #2e6fe0; /* hover 加深一档 */
+  --accent-press: #2a63c7;  /* active 再加深一档 */
+  --accent-soft: rgba(76, 141, 255, 0.14);
+  --accent-border: rgba(76, 141, 255, 0.4);
+
+  /* ── 语义状态色（仅用于运行中 / 暂停 / 危险操作，不作装饰） ── */
   --green: #3fb950;
   --green-soft: rgba(63, 185, 80, 0.12);
   --orange: #d29922;
   --orange-soft: rgba(210, 153, 34, 0.12);
   --red: #f85149;
   --red-soft: rgba(248, 81, 73, 0.12);
+
+  /* 兼容保留：设置页记忆类型徽标仍引用 */
   --purple: #bc8cff;
   --purple-soft: rgba(188, 140, 255, 0.12);
+
   --mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
   --sans: -apple-system, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
 }
@@ -32,9 +49,21 @@ body {
   overflow: hidden;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+/* 滚动条：6px 半透明，hover 加深 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 通用键盘焦点态：2px 强调色 outline + offset（可点击元素三态之一） */
+:where(button, a, [role='button'], [tabindex]):focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* 通用暗色表单控件（弹窗内复用） */
 input, textarea, select, button { font-family: inherit; }
@@ -47,37 +76,38 @@ input, textarea, select {
   font-size: 13px;
   outline: none;
 }
-input:focus, textarea:focus, select:focus { border-color: rgba(88, 166, 255, 0.5); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent-border); }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 
-/* 通用按钮 */
+/* 通用按钮三档：主（实心强调色）/ 次（描边中性）/ 危险（红字描边） */
 .btn {
   padding: 7px 14px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--bg-elevated);
   color: var(--text); font-size: 12.5px; cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.btn:hover { background: var(--bg-hover); border-color: #444c56; }
+.btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+.btn:active:not(:disabled) { background: var(--bg-active); }
 .btn.primary {
-  background: linear-gradient(135deg, #58a6ff, #4c8dff);
-  border: none; color: #fff; font-weight: 600;
+  background: var(--accent); border-color: transparent; color: #fff; font-weight: 600;
 }
-.btn.primary:hover { opacity: 0.88; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+.btn.primary:active:not(:disabled) { background: var(--accent-press); }
 .btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.danger { color: var(--red); }
-.btn.danger:hover { border-color: rgba(248, 81, 73, 0.5); background: var(--red-soft); }
+.btn.danger:hover:not(:disabled) { border-color: rgba(248, 81, 73, 0.5); background: var(--red-soft); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* 会话模式徽标（react / plan / multi 三色） */
+/* 会话模式徽标（react / plan / multi 三态：语义色仅作状态区分，不装饰） */
 .mode-tag { font-size: 9.5px; padding: 1px 5px; border-radius: 4px; font-family: var(--mono); }
 .mode-tag.react { background: var(--green-soft); color: var(--green); }
 .mode-tag.plan { background: var(--orange-soft); color: var(--orange); }
-.mode-tag.multi { background: var(--purple-soft); color: var(--purple); }
+.mode-tag.multi { background: var(--accent-soft); color: var(--accent); }
 /* PASI-9：会话运行态徽标（执行中 / 已暂停） */
 .mode-tag.running { background: var(--accent-soft); color: var(--accent); }
 .mode-tag.paused { background: var(--orange-soft); color: var(--orange); }
 
-/* 记忆类型徽标配色 */
+/* 记忆类型徽标配色（设置页引用，保持不变） */
 .mem-kind { font-size: 9.5px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px; flex-shrink: 0; }
 .mem-kind.preference { background: var(--purple-soft); color: var(--purple); }
 .mem-kind.fact { background: var(--accent-soft); color: var(--accent); }
