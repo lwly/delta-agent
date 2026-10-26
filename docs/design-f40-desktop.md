@@ -49,3 +49,10 @@
 - 自动更新（electron-updater）、safeStorage 迁移评估；
 - CI matrix（macos/windows 构建 + better-sqlite3 双平台 ABI 缓存）与签名配置随证书到位补充；
 - 桌面端 SkillRuntime 绑定启动时 home（项目级 skills 需 UI 创建项目后重启生效）—— v1 已知限制。
+
+## 6. v1.1 增量（2026-10-26）
+
+| 项 | 决策 |
+|----|------|
+| 深色标题栏 | `nativeTheme.themeSource = 'dark'`（控制台为纯深色 UI，强制原生主题深色渲染 Windows 标题栏/窗框）；BrowserWindow `backgroundColor: '#0f1115'` 对齐 web `--bg` 消除首帧白闪。不采用 `titleBarStyle: hidden`（需页面拖拽区改造，收益低） |
+| 注册项目目录选择 | preload（`src/preload.ts`）经 contextBridge 暴露 `window.deltaDesktop.pickDirectory()` → IPC `dialog:pick-directory` → main `dialog.showOpenDialog({ properties: ['openDirectory'] })`，仅回传绝对路径字符串；web 侧 `utils/desktop.ts` 探测桥接，注册项目弹窗桥接可用时展示「浏览…」回填输入框，浏览器形态（CLI serve）无桥接自动隐藏、保留手输（浏览器安全模型拿不到绝对路径）。安全基线不变：sandbox 开启、仅白名单单一通道、注册仍走 `POST /api/projects` 鉴权 |
