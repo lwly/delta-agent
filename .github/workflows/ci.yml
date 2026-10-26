@@ -1,8 +1,7 @@
 # M5 跨平台加固：双平台跑同一套 typecheck + 单测 + 冒烟（technical-design §9）
 #
-# 分支说明：仓库主分支为 master（gitee 远端），此处同时监听 main / master，
-# 便于未来镜像到 GitHub 时零改动复用。
-# 注意：GitHub Actions 不会在 gitee 上运行，本地质量闸门由 pre-push 钩子兜底
+# 分支说明：默认分支为 master，此处同时监听 main，便于 fork / 镜像场景零改动复用。
+# 注意：若托管平台不支持 GitHub Actions，本地质量闸门由 pre-push 钩子兜底
 # （见 scripts/hooks/pre-push 与 package.json 的 prepare:hooks）。
 name: ci
 

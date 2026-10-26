@@ -663,7 +663,7 @@ export function redactArgv(argv: string[]): string[];
  "--read-only","--cap-drop","ALL","--security-opt","no-new-privileges",
  "--network","none",
  "--memory","2048m","--memory-swap","2048m","--cpus","2","--pids-limit","512",
- "--mount","type=bind,source=/Users/dev/work/project/delta-agent,target=/workspace",
+ "--mount","type=bind,source=/path/to/project,target=/workspace",
  "--tmpfs","/tmp","--tmpfs","/home/node",
  "--user","1000:1000",
  "-e","LANG=C.UTF-8","-e","TZ=Asia/Shanghai",
