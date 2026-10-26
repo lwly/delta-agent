@@ -57,3 +57,12 @@
 | 深色标题栏 | `nativeTheme.themeSource = 'dark'`（控制台为纯深色 UI，强制原生主题深色渲染 Windows 标题栏/窗框）；BrowserWindow `backgroundColor: '#0f1115'` 对齐 web `--bg` 消除首帧白闪。不采用 `titleBarStyle: hidden`（需页面拖拽区改造，收益低） |
 | 注册项目目录选择 | preload（`src/preload.ts`）经 contextBridge 暴露 `window.deltaDesktop.pickDirectory()` → IPC `dialog:pick-directory` → main `dialog.showOpenDialog({ properties: ['openDirectory'] })`，仅回传绝对路径字符串；web 侧 `utils/desktop.ts` 探测桥接，注册项目弹窗桥接可用时展示「浏览…」回填输入框，浏览器形态（CLI serve）无桥接自动隐藏、保留手输（浏览器安全模型拿不到绝对路径）。安全基线不变：sandbox 开启、仅白名单单一通道、注册仍走 `POST /api/projects` 鉴权 |
 | 应用图标 | 源 `packages/desktop/icons/icon.svg`（与 web favicon.svg 同款：品牌渐变圆角方块 + 白描边 Δ，外扩 11% 留白）；生成 `icon.icns`（iconutil，1024 起）与 `icon.ico`（png-to-ico，16/32/48/256）、`icon.png`（512，BrowserWindow 开发态）；electron-builder 显式 `mac.icon` / `win.icon`。置于 `icons/`（`.gitignore` 全局忽略 `build/`） |
+
+## 7. v1.2 修复（2026-10-26，真机打包暴露）
+
+| 项 | 结论 |
+|----|------|
+| **preload 必须是 CommonJS** | 本包 `package.json` 为 `"type": "module"`，`src/preload.ts` 会被 tsc 编成 ESM（`import`）。而 `sandbox: true` 的窗口**只接受 CJS preload**，ESM preload 被 Electron 静默忽略 → `window.deltaDesktop` 不存在 → 注册项目弹窗的目录选择入口整体消失（现象：只能手打绝对路径）。修复：源文件改名 `src/preload.cts`，tsc（module: NodeNext）产出 `preload.cjs`，main 侧 `preload` 指向 `preload.cjs` | 
+| 注册项目交互（桌面形态） | 桥接可用时输入框改为 `readonly`（仅展示所选路径，不允许手打），主按钮改为「选择文件夹…」并采用 primary 样式；提示文案改为引导点选。浏览器形态（CLI serve，无桥接）保持原手输 + 说明文案，因为浏览器安全模型拿不到绝对路径 |
+| 打包配置 | `asarUnpack` 移除（pnpm workspace 软链下源文件真实路径不含 `node_modules` 段，`createFilter` 会抛「must be under packages/desktop」；`.node` 由 `smartUnpack` 自动解包）；`files` 追加排除 `.tmp-test/`、`*.timestamp-*.mjs` 与依赖内 test/examples/docs/benchmark、`*.test.*`、`*.spec.*` |
+| 打包环境注意 | ① `node-gyp` 需 `npm_config_python=/usr/bin/python3`（系统 3.9，含 distutils；本机默认 3.13 无 distutils）；② electron zip 可先由 pnpm postinstall 缓存到 `~/Library/Caches/electron/<sha>/`，再复制到该缓存根目录（app-builder 只认根目录扁平文件名）；③ WorkBuddy 会话内 `*.asar` 写入被文件代理拒绝，需 `-c.asar=false` 出目录形态包，正式包应在普通终端构建 |
