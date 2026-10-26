@@ -957,7 +957,7 @@ watch(
     <aside class="sidebar">
       <!-- 品牌区：图标 + 名称 + 版本，紧凑成组 -->
       <div class="brand">
-        <span class="brand-logo">y0</span>
+        <span class="brand-logo">Δ</span>
         <span class="brand-text">
           <span class="brand-name">delta-agent</span>
           <span class="brand-sub">AI Coding Agent · v0.1.0</span>
@@ -1072,7 +1072,7 @@ watch(
       <template v-else>
         <!-- 空态 hero：图标 / 产品名 / 价值主张 / 主行动 + 快捷键提示 / 次级入口 / 三特性卡 -->
         <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
-          <div class="hero-logo">y0</div>
+          <div class="hero-logo">Δ</div>
           <h1>delta-agent</h1>
           <p class="hero-tagline">在本地仓库中推理、规划并执行你的开发任务</p>
           <div class="hero-actions">
@@ -1179,7 +1179,7 @@ watch(
 
               <!-- 助手消息 -->
               <div v-else-if="m.role === 'assistant'" class="msg msg-ai">
-                <span class="avatar ai">y0</span>
+                <span class="avatar ai">Δ</span>
                 <div class="ai-col">
                   <div class="msg-meta">
                     <span class="role-tag assistant">◆ ASSISTANT</span>
@@ -1215,7 +1215,7 @@ watch(
 
             <!-- 流式中的助手输出：打字机光标 ▍（CSS blink） -->
             <div v-if="chat.streamingText" class="msg msg-ai">
-              <span class="avatar ai">y0</span>
+              <span class="avatar ai">Δ</span>
               <div class="ai-col">
                 <div class="msg-meta">
                   <span class="role-tag assistant">◆ ASSISTANT</span>
