@@ -21,8 +21,9 @@ delta-agent/
 │   ├── cli/      # @delta/cli —— CLI 入口与 Ink TUI，bin 命令 delta
 │   ├── core/     # @delta/core —— 引擎核心：会话、LLM 接入、工具、MCP、沙箱、记忆
 │   ├── shared/   # @delta/shared —— 跨包共享的类型与工具函数
-│   └── web/      # Web 控制台（Vite + Vue）
-├── docs/         # PRD、各功能 PRD（prd-f30~f36）与技术设计文档
+│   ├── web/      # Web 控制台（Vite + Vue）
+│   └── desktop/  # 桌面壳（Electron，方案 B：main 进程进程内托管 core serve 运行时）
+├── docs/         # PRD、各功能 PRD（prd-f30~f40）与技术设计文档
 ├── prototype/    # 原型
 └── scripts/      # 构建/冒烟/钩子安装脚本
 ```
@@ -116,6 +117,7 @@ pnpm --filter @delta/cli build
 
 - [docs/PRD.md](docs/PRD.md) —— 产品需求文档总览
 - [docs/technical-design.md](docs/technical-design.md) —— 总体技术设计
-- `docs/prd-f30~f36*.md` / `docs/design-f30~f36*.md` —— 各功能（容器沙箱、费用报告、模型路由、桌面通知、项目引导、CLI TUI）的 PRD 与设计
+- `docs/prd-f30~f40*.md` / `docs/design-f30~f40*.md` —— 各功能（容器沙箱、费用报告、模型路由、桌面通知、项目引导、CLI TUI、桌面化）的 PRD 与设计
+- [docs/design-f40-desktop.md](docs/design-f40-desktop.md) —— F-40 桌面化（Electron 方案 B）技术设计
 - [docs/prompt-design.md](docs/prompt-design.md) —— 提示词设计
 - [docs/memory-design.md](docs/memory-design.md) —— 三层记忆设计
