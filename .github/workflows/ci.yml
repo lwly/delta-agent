@@ -1,8 +1,8 @@
 # M5 跨平台加固：双平台跑同一套 typecheck + 单测 + 冒烟（technical-design §9）
 #
-# 分支说明：默认分支为 master，此处同时监听 main，便于 fork / 镜像场景零改动复用。
+# 分支说明：默认分支为 main，此处同时监听 master 以兼容 fork / 镜像场景。
 # 注意：若托管平台不支持 GitHub Actions，本地质量闸门由 pre-push 钩子兜底
-# （见 scripts/hooks/pre-push 与 package.json 的 prepare:hooks）。
+# （见 scripts/hooks/pre-push 与 package.json 的 prepare 脚本）。
 name: ci
 
 on:
@@ -37,6 +37,8 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # 注意顺序：typecheck 会先构建 shared/core 的 .d.ts（build:deps），
+      # 因为 workspace 包的类型入口指向 dist；全新 clone 必须先有声明文件才能过 tsc。
       - name: Typecheck
         run: pnpm typecheck
 

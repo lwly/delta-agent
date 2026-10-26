@@ -83,10 +83,12 @@ delta [options]                     # 启动交互式 TUI 会话
 ```bash
 pnpm build        # 构建全部子包
 pnpm test         # 运行全部测试（core 使用 vitest）
-pnpm typecheck    # 类型检查
+pnpm typecheck    # 类型检查（会先产出 shared/core 的 .d.ts，故全新 clone 也能直接跑）
 pnpm smoke        # 冒烟验证（web 冒烟：pnpm smoke:web）
 pnpm clean        # 清理构建产物
 ```
+
+> 注：`@delta/shared`、`@delta/core` 的类型入口指向各自的 `dist/*.d.ts`，因此 tsc 需要它们先构建过；`pnpm typecheck` 已内置这一步（`build:deps`），单独跑某个包的 `typecheck` 前需先 `pnpm build:deps`。
 
 在单个子包内执行：
 
