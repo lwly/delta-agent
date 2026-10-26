@@ -1,12 +1,5 @@
 export * from '@delta/shared';
 export * from './paths.js';
-export {
-  migrateLegacyConfig,
-  LEGACY_CONFIG_DIR,
-  MIGRATION_MARKER,
-  type MigrateConfigResult,
-  type MigrateConfigOptions,
-} from './migrate-config.js';
 
 export { estimateTextTokens, estimateMessagesTokens } from './context/tokens.js';
 export {
