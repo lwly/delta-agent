@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "electron .",
+    "icons": "electron scripts/gen-icons.cjs",
     "dist": "electron-builder --config electron-builder.yml"
   },
   "dependencies": {

@@ -56,7 +56,7 @@
 |----|------|
 | 深色标题栏 | `nativeTheme.themeSource = 'dark'`（控制台为纯深色 UI，强制原生主题深色渲染 Windows 标题栏/窗框）；BrowserWindow `backgroundColor: '#0f1115'` 对齐 web `--bg` 消除首帧白闪。不采用 `titleBarStyle: hidden`（需页面拖拽区改造，收益低） |
 | 注册项目目录选择 | preload（`src/preload.ts`）经 contextBridge 暴露 `window.deltaDesktop.pickDirectory()` → IPC `dialog:pick-directory` → main `dialog.showOpenDialog({ properties: ['openDirectory'] })`，仅回传绝对路径字符串；web 侧 `utils/desktop.ts` 探测桥接，注册项目弹窗桥接可用时展示「浏览…」回填输入框，浏览器形态（CLI serve）无桥接自动隐藏、保留手输（浏览器安全模型拿不到绝对路径）。安全基线不变：sandbox 开启、仅白名单单一通道、注册仍走 `POST /api/projects` 鉴权 |
-| 应用图标 | 源 `packages/desktop/icons/icon.svg`（与 web favicon.svg 同款：品牌渐变圆角方块 + 白描边 Δ，外扩 11% 留白）；生成 `icon.icns`（iconutil，1024 起）与 `icon.ico`（png-to-ico，16/32/48/256）、`icon.png`（512，BrowserWindow 开发态）；electron-builder 显式 `mac.icon` / `win.icon`。置于 `icons/`（`.gitignore` 全局忽略 `build/`） |
+| 应用图标 | 源 `packages/desktop/icons/icon.svg`（与 web favicon.svg 同款：品牌渐变圆角方块 + 白描边 Δ，外扩 11% 留白对齐 macOS 图标网格）；由 `scripts/gen-icons.cjs` 统一生成 `icon.png`（512，BrowserWindow 开发态）、`icon.icns`（iconutil，16→1024 全集）、`icon.ico`（自建 ICO 容器，内嵌 PNG 16/24/32/48/64/128/256）；electron-builder 显式 `mac.icon` / `win.icon`。重生成：`pnpm --filter @delta/desktop icons`。脚本用 Electron 离屏渲染，**画布必须透明**（`transparent: true` + `backgroundColor: '#00000000'`），并内置角像素 alpha 断言——系统截图 / 在线转换默认填白底，会让 Dock 与应用切换器里出现白方块 |
 
 ## 7. v1.2 修复（2026-10-26，真机打包暴露）
 
