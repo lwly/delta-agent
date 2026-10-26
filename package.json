@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "delta-agent - AI Coding Agent (CLI core)",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
