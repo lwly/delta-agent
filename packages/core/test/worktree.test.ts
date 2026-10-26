@@ -213,7 +213,7 @@ describe('resolveWorkRoot 与会话绑定（v4）', () => {
     const dbFile = path.join(tmpBase, 'test.db');
     const svc = new SessionService(dbFile);
     try {
-      expect(svc.store.schemaVersion).toBe(4);
+      expect(svc.store.schemaVersion).toBe(5);
       const pid = svc.ensureProject(repoRoot).id;
       const s = svc.createSession(pid);
       // 默认两列为 NULL（主工作区）

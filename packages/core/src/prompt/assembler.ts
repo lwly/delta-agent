@@ -17,7 +17,12 @@ import type {
 } from './types.js';
 import { estimateTextTokens } from '../context/tokens.js';
 
-export const ASSEMBLER_VERSION = 'm3.1';
+/**
+ * 组装器版本。m3.2：F-39 新增静态层 `expert` —— 层结构变化会改变所有会话的
+ * staticFingerprint 计算基数，必须 bump，否则「同 version 不同层结构」的两个
+ * 指纹空间会混用，排查时无法区分。
+ */
+export const ASSEMBLER_VERSION = 'm3.2';
 
 export interface PromptAssemblerOptions {
   /** 自定义层列表（默认 7 层）；用于测试注入 */
@@ -44,6 +49,7 @@ export class PromptAssembler {
       const base = layer.build(ctx);
       const { value, warnings: layerWarnings } = applyOverrides(layer, base, overrides);
       warnings.push(...layerWarnings);
+      const source = layer.source?.(ctx);
       sections.push({
         id: layer.id,
         title: layer.title,
@@ -51,6 +57,7 @@ export class PromptAssembler {
         locked: layer.locked,
         kind: layer.kind,
         tokens: estimateTextTokens(renderValue(value)),
+        ...(source ? { source } : {}),
       });
     }
 

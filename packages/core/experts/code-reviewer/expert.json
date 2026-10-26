@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "delta-agent builtin"
+  },
+  "name": "code-reviewer",
+  "description": "严格的代码评审官（纯只读，证明性只读包：白名单 4 项）",
+  "expertType": "agent",
+  "agentName": "code-reviewer-agent",
+  "agents": [
+    "agents/code-reviewer-agent.md"
+  ],
+  "displayName": {
+    "en": "Code Reviewer",
+    "zh": "代码评审官"
+  },
+  "profession": {
+    "en": "Review",
+    "zh": "质量保障"
+  },
+  "tools": [
+    "read_file",
+    "list_dir",
+    "glob_search",
+    "grep_search"
+  ],
+  "keywords": [
+    "评审",
+    "review",
+    "代码质量"
+  ]
+}

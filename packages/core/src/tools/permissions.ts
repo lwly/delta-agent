@@ -13,7 +13,7 @@ export type { PermissionMode };
 /** 工具能力分类（权限判定用；未知工具保守按 exec 处理）。 */
 export type ToolCapability = 'read' | 'write' | 'exec';
 
-const TOOL_CAPABILITY: Record<string, ToolCapability> = {
+export const TOOL_CAPABILITY: Record<string, ToolCapability> = {
   // 只读/无副作用
   read_file: 'read',
   list_dir: 'read',
@@ -25,6 +25,8 @@ const TOOL_CAPABILITY: Record<string, ToolCapability> = {
   load_skill: 'read',
   unload_skill: 'read',
   recall_memory: 'read',
+  // 派生只读子代理：工具本身无写副作用（子代理的写权限由它自己的 PermissionState 判定）
+  task: 'read',
   // 写状态
   write_file: 'write',
   edit_file: 'write',

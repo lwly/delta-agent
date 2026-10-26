@@ -16,6 +16,23 @@ export interface Migration {
   name: string;
   /** 幂等 DDL，可多条语句 */
   sql: string;
+  /**
+   * 可选：执行前的结构检查。返回 true = 目标结构已存在（典型场景：`user_version` 被外部工具
+   * 改小，迁移被重放），此时跳过 `sql` 但仍把 `user_version` 推到本版本 —— 让
+   * 「旧版本号的历史库」与「已迁移但版本号错乱的库」都能安全收敛。
+   *
+   * 背景：`ALTER TABLE ADD COLUMN` 本身不幂等（重复执行抛 duplicate column name），
+   * 只靠版本门禁时，手工改过 user_version 的库会直接起不来。
+   */
+  skipIf?: (db: Database.Database) => boolean;
+  /** 可选：`skipIf` 命中时仍需执行的幂等 DDL（如 CREATE INDEX IF NOT EXISTS），避免「跳过 → 漏建索引」 */
+  repairSql?: string;
+}
+
+/** PRAGMA table_info 检查列存在性。table 名只在调用点以字面量传入（不拼接外部输入） */
+export function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  return rows.some((r) => r.name === column);
 }
 
 /** v1 基线：F-17 之前的核心表结构（technical-design §8.1） */
@@ -155,11 +172,27 @@ ALTER TABLE sessions ADD COLUMN worktree_path TEXT DEFAULT NULL;
 ALTER TABLE sessions ADD COLUMN worktree_branch TEXT DEFAULT NULL;
 `;
 
+/** v5：F-39 专家会话级绑定——sessions 加 expert / expert_type（NULL = 无专家，零回归） */
+const MIGRATION_V5_F39_EXPERT_BINDING = `
+ALTER TABLE sessions ADD COLUMN expert TEXT DEFAULT NULL;
+ALTER TABLE sessions ADD COLUMN expert_type TEXT DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'baseline-core-tables', sql: MIGRATION_V1_BASELINE },
   { version: 2, name: 'f17-search-indexes', sql: MIGRATION_V2_F17_SEARCH },
   { version: 3, name: 'f31-usage-report', sql: MIGRATION_V3_F31_USAGE_REPORT },
   { version: 4, name: 'f37-worktree-binding', sql: MIGRATION_V4_F37_WORKTREE_BINDING },
+  {
+    version: 5,
+    name: 'f39-expert-binding',
+    sql: MIGRATION_V5_F39_EXPERT_BINDING,
+    // 列已存在 = 「user_version 被外部工具改小」后重放。跳过 ALTER，但仍推进版本号
+    skipIf: (db) => hasColumn(db, 'sessions', 'expert') && hasColumn(db, 'sessions', 'expert_type'),
+    // 跳过时不能连带漏建索引（幂等语句，可安全重复执行）
+    repairSql: 'CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);',
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
@@ -197,7 +230,12 @@ export function migrate(db: Database.Database): MigrateResult {
   for (const m of MIGRATIONS) {
     if (m.version <= from) continue;
     const step = db.transaction(() => {
-      db.exec(m.sql);
+      if (m.skipIf?.(db)) {
+        // 结构已存在：只补幂等对象，但仍推进版本号（否则每轮都会重试同一迁移）
+        if (m.repairSql) db.exec(m.repairSql);
+      } else {
+        db.exec(m.sql);
+      }
       db.pragma(`user_version = ${m.version}`);
     });
     step();

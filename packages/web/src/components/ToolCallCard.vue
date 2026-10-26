@@ -18,6 +18,8 @@ interface Props {
   /** 本地步骤序号（第 N 步） */
   seq?: number | null;
   sandboxMeta?: { mode: string; network?: string; ms?: number; degraded?: boolean } | null;
+  /** F-39：专家团成员显示名（「由 X 执行」角标；实时 = meta.agent_name，回放 = content 前缀解析） */
+  agentName?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -25,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
   durationMs: null,
   seq: null,
   sandboxMeta: null,
+  agentName: null,
 });
 
 /** 展开态：默认展开显示结果摘要（全文 DOM 仍由 showAll v-if 控制，不渲染） */
@@ -161,6 +164,7 @@ function copyOut() {
       <span class="tbadge" :class="`b-${status}`">{{ statusLabel }}</span>
       <span v-if="durationLabel" class="tcard-dur">{{ durationLabel }}</span>
       <span v-if="seq != null" class="tcard-seq">第 {{ seq }} 步</span>
+      <span v-if="agentName" class="tcard-agent" title="专家团成员">由 {{ agentName }} 执行</span>
       <span
         v-if="sandboxMeta"
         class="sandbox-badge"
@@ -312,4 +316,5 @@ function copyOut() {
   white-space: pre-wrap; word-break: break-word;
   max-height: 240px; overflow: auto; min-width: 0;
 }
+.tcard-agent { font-size: 11px; color: var(--text-faint); }
 </style>

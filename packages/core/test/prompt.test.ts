@@ -79,18 +79,18 @@ describe('applyOverrides', () => {
 });
 
 describe('PromptAssembler', () => {
-  it('按 7 层顺序输出 section', () => {
+  it('按 8 层顺序输出 section（F-39 新增 expert 层）', () => {
     const r = new PromptAssembler().assemble(makeCtx());
     expect(r.sections.map((s) => s.id)).toEqual([
-      'identity', 'environment', 'project', 'tools', 'skills', 'memory', 'session',
+      'identity', 'environment', 'project', 'tools', 'expert', 'skills', 'memory', 'session',
     ]);
     expect(r.warnings).toHaveLength(0);
   });
 
-  it('静态/动态分段：前 4 层 static，后 3 层 dynamic', () => {
+  it('静态/动态分段：前 5 层 static，后 3 层 dynamic', () => {
     const r = new PromptAssembler().assemble(makeCtx());
-    expect(r.sections.slice(0, 4).every((s) => s.kind === 'static')).toBe(true);
-    expect(r.sections.slice(4).every((s) => s.kind === 'dynamic')).toBe(true);
+    expect(r.sections.slice(0, 5).every((s) => s.kind === 'static')).toBe(true);
+    expect(r.sections.slice(5).every((s) => s.kind === 'dynamic')).toBe(true);
     expect(r.text.startsWith('<static>')).toBe(true);
     expect(r.text.indexOf('<dynamic>')).toBeGreaterThan(r.text.indexOf('</static>'));
   });
@@ -152,9 +152,9 @@ describe('PromptAssembler', () => {
     expect(text).toContain('extra_tool');
   });
 
-  it('默认 7 层工厂与组装器一致', () => {
+  it('默认 8 层工厂与组装器一致', () => {
     expect(createDefaultLayers().map((l) => l.id)).toEqual([
-      'identity', 'environment', 'project', 'tools', 'skills', 'memory', 'session',
+      'identity', 'environment', 'project', 'tools', 'expert', 'skills', 'memory', 'session',
     ]);
     expect(new IdentityLayer().locked).toBe(true);
   });

@@ -23,6 +23,73 @@ export interface SessionRow {
   /** F-37：worktree 绑定路径；NULL = 主工作区（会话列表 🌿 标识数据源） */
   worktree_path: string | null;
   worktree_branch: string | null;
+  /** F-39：绑定专家 name；NULL = 无专家 */
+  expert: string | null;
+  expert_type: string | null;
+}
+
+// ── F-39 专家 / 专家团（与 core ExpertListItem / 详情 DTO 同构）────────────
+
+export interface LocalizedText {
+  en: string;
+  zh: string;
+}
+
+export type ExpertType = 'agent' | 'team';
+
+export interface ExpertListItem {
+  name: string;
+  displayName: LocalizedText;
+  profession: LocalizedText;
+  expertType: ExpertType;
+  layer: 'builtin' | 'user' | 'project';
+  description: string;
+  keywords: string[];
+  categoryId: string | null;
+  memberCount: number;
+  missingMcp: string[];
+  hasAvatar: boolean;
+}
+
+export interface ExpertMemberView {
+  id: string;
+  name: LocalizedText;
+  profession: LocalizedText;
+  role: 'lead' | 'member';
+  avatar: boolean;
+  skills: string[];
+}
+
+export interface ExpertDetail {
+  name: string;
+  version: string;
+  description: string;
+  author: { name: string; email?: string };
+  expertType: ExpertType;
+  displayName: LocalizedText;
+  profession: LocalizedText;
+  layer: 'builtin' | 'user' | 'project';
+  skills: string[];
+  tools: string[] | null;
+  tool_stats: { restricted: number; total: number; unrestricted: boolean };
+  keywords: string[];
+  members: ExpertMemberView[];
+  prompt_preview: string;
+  prompt_stats: { chars: number; tokens: number; truncated: boolean };
+  hasAvatar: boolean;
+}
+
+export interface SessionExpertState {
+  bound: null | {
+    name: string;
+    displayName?: LocalizedText;
+    profession?: LocalizedText;
+    expertType?: ExpertType;
+    layer?: 'builtin' | 'user' | 'project';
+    hasAvatar?: boolean;
+  };
+  missing: boolean;
+  mode_forced: boolean;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（与 core SessionGitState 同构）────
@@ -72,6 +139,8 @@ export interface ChatMessage {
   // ── 以下均为 Web UI 本地字段（非服务端协议），仅对 SSE 实时到达的消息记录 ──
   /** UI-本地：消息本地接收时间（ms）；历史会话拉回的消息无此字段 → 不显示时间戳 */
   ts?: number;
+  /** F-39：专家团成员显示名（UI 本地字段；实时 = meta.agent_name，回放由 content 前缀解析回填） */
+  agentName?: string;
   /** UI-本地：thinking_delta 累积的思考文本（随其后落库的 assistant 消息保留展示） */
   thinking?: string;
   /** UI-本地：工具本地计时耗时（ms）；tool_call_start→tool_result 差值，非服务端口径 */
@@ -564,8 +633,20 @@ export const api = {
 
   // sessions
   listSessions: (projectId: string) => request<SessionRow[]>('GET', `/api/projects/${projectId}/sessions`),
-  createSession: (projectId: string, opts?: { title?: string; model?: string; mode?: string }) =>
+  createSession: (projectId: string, opts?: { title?: string; model?: string; mode?: string; expert?: string }) =>
     request<SessionRow>('POST', `/api/projects/${projectId}/sessions`, opts),
+  // F-39 专家库（列表不含 body/头像内容；头像按 name 拉取后前端缓存）
+  listExperts: (projectId?: string) =>
+    request<{ experts: ExpertListItem[]; errors: string[] }>(
+      'GET',
+      `/api/experts${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  getExpert: (name: string) => request<ExpertDetail>('GET', `/api/experts/${encodeURIComponent(name)}`),
+  getExpertAvatar: (name: string) =>
+    request<{ data_url: string | null }>('GET', `/api/experts/${encodeURIComponent(name)}/avatar`),
+  // 会话绑定状态（唯一权威来源：包删除 → missing:true）
+  getSessionExpert: (sessionId: string) =>
+    request<SessionExpertState>('GET', `/api/sessions/${sessionId}/expert`),
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
   removeSession: (id: string, hard = false) =>

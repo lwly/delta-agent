@@ -25,10 +25,17 @@ import {
   GitIntegration,
   WorktreeManager,
   discoverSkills,
+  ExpertStore,
   branchSwitchMessage,
   worktreeOnMessage,
   worktreeOffMessage,
   resolveWorkRoot,
+  buildAssembleContext,
+  resolveToolAllow,
+  restrictRegistry,
+  seedExpertSkills,
+  toTeamRuntime,
+  type ExpertRecord,
   type SkillRuntime,
   type PermissionMode,
   type GitPolicy,
@@ -191,6 +198,20 @@ export class SessionHub {
   /** 设置会话级权限模式（仅影响该会话后续的运行，不影响进行中的一轮）。 */
   setPermissionMode(sessionId: string, mode: PermissionMode): void {
     this.sessionPermissionModes.set(sessionId, mode);
+  }
+
+  /** F-39：按项目根缓存的专家库（指纹缓存内建，进程内复用） */
+  private expertStores = new Map<string, ExpertStore>();
+  /** F-39：已做预置技能装载的会话（每会话一次） */
+  private expertSeeded = new Set<string>();
+
+  private expertStoreFor(projectRoot: string): ExpertStore {
+    let store = this.expertStores.get(projectRoot);
+    if (!store) {
+      store = new ExpertStore({ projectRoot, homeDir: os.homedir() });
+      this.expertStores.set(projectRoot, store);
+    }
+    return store;
   }
 
   /** 会话是否处于暂停态（status 落库为 paused；执行中止即本轮结束，不占运行中）。 */
@@ -497,10 +518,32 @@ export class SessionHub {
       }
 
       const budget = new BudgetManager();
+
+      // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
+      // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）
+      const expert: ExpertRecord | undefined = session.expert
+        ? await this.expertStoreFor(workRoot).get(session.expert)
+        : undefined;
+      const allow = resolveToolAllow(
+        expert?.tools ?? null,
+        this.deps.registry.definitions().map((d) => d.name),
+      );
+      const runRegistry = restrictRegistry(this.deps.registry, allow.allow);
+
+      // 预置技能：每会话首轮装载一次（进程级共享 buffer 是已知限制，design §16-1）
+      if (expert && expert.skills.length > 0 && this.deps.skills && !this.expertSeeded.has(sessionId)) {
+        this.expertSeeded.add(sessionId);
+        const seeded = await seedExpertSkills(this.deps.skills, expert.skills);
+        for (const w of seeded.warnings) {
+          this.publish(sessionId, { type: 'git_notice', message: w });
+        }
+      }
+
       const { staticText, dynamicText } = await this.buildPrompt(
         workRoot,
         session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
-        this.deps.registry.definitions(),
+        runRegistry.definitions(),
+        expert,
       );
       const askId = `ask_${sessionId}_${Date.now()}`;
 
@@ -527,7 +570,7 @@ export class SessionHub {
         maxTurns: this.deps.maxTurns ?? 50,
         signal: ac.signal,
         provider,
-        registry: this.deps.registry,
+        registry: runRegistry, // F-39：白名单收窄后的视图（L4 与执行同源）
         toolContext: {
           // F-37：沙箱根 = 当前工作根（共享知识 6）。resolveInSandbox(ctx.projectRoot)
           // 自动跟随；SandboxExecutor 构造期固化 projectRoot，若未来在本链路注入
@@ -568,7 +611,11 @@ export class SessionHub {
           // F-27 Hook 系统：工具执行挂钩（PreToolUse 可阻断 / PostToolUse 记录）
           hooks: this.deps.hooks,
           // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写本运行预算）
-          registry: this.deps.registry,
+          registry: runRegistry,
+          // F-39：专家团运行时（主理人调度；baseRegistry = 未收窄完整表，成员白名单独立裁定）
+          expertTeam: expert && expert.expertType === 'team' ? toTeamRuntime(expert, this.deps.registry) : undefined,
+          // F-39：委派事件透传 SSE（Web 成员卡 / CLI 单行）
+          emit: (ev) => this.publish(sessionId, ev),
           subagent: {
             provider,
             model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
@@ -721,11 +768,12 @@ export class SessionHub {
     }
   }
 
-  /** 组装静态/动态分段提示词（与 CLI 同源：7 层 + Skill 索引）。 */
+  /** 组装静态/动态分段提示词（与 CLI 同源：8 层 + Skill 索引；F-39 起共用 buildAssembleContext）。 */
   private async buildPrompt(
     projectRoot: string,
     model: string,
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>,
+    expert?: ExpertRecord,
   ): Promise<{ staticText: string; dynamicText: string }> {
     const { promises: fs } = await import('node:fs');
     const assembler = new SplitPromptAssembler();
@@ -744,19 +792,20 @@ export class SessionHub {
     ]);
 
     const { skills } = await discoverSkills({ projectRoot, homeDir: os.homedir() });
-    const ctx = {
+    const ctx = buildAssembleContext({
       projectName: path.basename(projectRoot),
       projectInstructions: readme,
       staticMemory,
-      tools: tools.map((t) => ({ name: t.name, description: t.description, schema: t.parameters })),
+      tools,
       skillIndex: skills.map((s) => ({ name: s.name, description: s.description, triggers: s.triggers })),
+      ...(expert ? { expert } : {}),
       session: {
         cwd: projectRoot,
         now: new Date(),
         model,
         contextWindow: this.deps.windowTokens ?? 200_000,
       },
-    };
+    });
     const split = assembler.assemble(ctx);
     const final = new PromptBuilder().build(split);
     return { staticText: final.staticText, dynamicText: final.dynamicText };

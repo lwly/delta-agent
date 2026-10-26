@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "delta-agent builtin"
+  },
+  "name": "product-manager",
+  "description": "产品经理：把口语需求整理成 PRD / 验收标准 / 任务拆分",
+  "expertType": "agent",
+  "agentName": "product-manager-agent",
+  "agents": [
+    "agents/product-manager-agent.md"
+  ],
+  "displayName": {
+    "en": "Product Manager",
+    "zh": "产品经理"
+  },
+  "profession": {
+    "en": "Product",
+    "zh": "产品"
+  },
+  "tools": [
+    "read_file",
+    "list_dir",
+    "glob_search",
+    "grep_search",
+    "task"
+  ],
+  "skills": [
+    "commit-review",
+    "project-summarize"
+  ],
+  "keywords": [
+    "需求",
+    "PRD",
+    "拆解",
+    "验收"
+  ]
+}

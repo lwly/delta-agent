@@ -15,6 +15,11 @@ import { BudgetManager } from '../../context/budget.js';
 import { PermissionState } from '../permissions.js';
 import { RestrictedRegistry } from '../../engine/roles.js';
 import { runReAct, type RunContext } from '../../engine/react.js';
+import {
+  buildMemberSystemPrompt,
+  delegationPrefix,
+  MAX_DELEGATIONS_PER_RUN,
+} from '../../experts/team.js';
 
 /** 子代理可用工具（只读 + 信息收集） */
 export const SUBAGENT_TOOLS = [
@@ -54,6 +59,10 @@ export const taskTool: AgentTool = {
         description: '给子代理的完整任务描述：目标、范围、期望产出格式',
       },
       max_turns: { type: 'number', description: `子代理最大轮次（默认 ${DEFAULT_SUBAGENT_TURNS}，上限 ${MAX_SUBAGENT_TURNS}）` },
+      agent: {
+        type: 'string',
+        description: '专家团成员 id（仅团队专家会话可用）；缺省 = 普通只读探索子代理',
+      },
     },
     required: ['description', 'prompt'],
   },
@@ -70,19 +79,70 @@ export const taskTool: AgentTool = {
     if (!prompt) {
       return fail('缺少 prompt 参数：请描述子代理要完成的任务', 'invalid_args');
     }
+    // ── F-39：专家团成员解析（不传 agent 时以下分支全部跳过，行为与历史一致）──
+    const agentId = String(args['agent'] ?? '').trim();
+    const member = agentId ? ctx.expertTeam?.members.find((m) => m.id === agentId) : undefined;
+    if (agentId && !member) {
+      const available = (ctx.expertTeam?.members ?? []).map((m) => m.id);
+      return fail(
+        ctx.expertTeam
+          ? `未知成员：${agentId}。可选成员：${available.join(', ') || '（空）'}`
+          : `当前会话未绑定专家团，不支持 agent 参数（agent=${agentId}）`,
+        'unknown_agent',
+      );
+    }
+    let delegationPrefixText = '';
+    let delegationStartedAt = 0;
+    if (member) {
+      const counter = ctx.expertTeam!.delegations;
+      if (counter.count >= MAX_DELEGATIONS_PER_RUN) {
+        return fail(
+          `本轮委派次数已达上限（${MAX_DELEGATIONS_PER_RUN} 次），请先汇总已有成员产出`,
+          'delegation_limit',
+        );
+      }
+      counter.count += 1;
+      delegationPrefixText = `${delegationPrefix(member)}\n`;
+      delegationStartedAt = Date.now();
+      ctx.emit?.({
+        type: 'expert_delegate_start',
+        memberId: member.id,
+        memberName: member.name.zh || member.name.en,
+        profession: member.profession.zh || member.profession.en,
+        role: member.role,
+        goal: (description || prompt).slice(0, 120),
+        startedAt: delegationStartedAt,
+      });
+    }
+    const withPrefix = (text: string): string => (delegationPrefixText ? `${delegationPrefixText}${text}` : text);
+
+    const requestedTurns = member?.maxTurns ?? Number(args['max_turns'] ?? DEFAULT_SUBAGENT_TURNS);
     const maxTurns = Math.min(
-      Math.max(Math.floor(Number(args['max_turns'] ?? DEFAULT_SUBAGENT_TURNS) || DEFAULT_SUBAGENT_TURNS), 1),
+      Math.max(Math.floor(Number(requestedTurns) || DEFAULT_SUBAGENT_TURNS), 1),
       MAX_SUBAGENT_TURNS,
     );
 
-    const registry = new RestrictedRegistry(ctx.registry, new Set<string>(SUBAGENT_TOOLS));
+    // 成员：成员白名单 ∩ 完整注册表（主理人视图不含写工具，不能作为成员基座）
+    const baseRegistry = member ? (ctx.expertTeam?.baseRegistry ?? ctx.registry) : ctx.registry;
+    let allow: Set<string> = new Set<string>(SUBAGENT_TOOLS);
+    if (member) {
+      if (member.tools.length > 0) {
+        const names = new Set(baseRegistry.definitions().map((d) => d.name));
+        allow = new Set(member.tools.filter((t) => names.has(t)));
+        if (allow.size === 0) allow = new Set<string>(SUBAGENT_TOOLS);
+      }
+    }
+    const registry = new RestrictedRegistry(baseRegistry, allow);
     const budget = new BudgetManager(ctx.subagent.budgetConfig ?? {});
+    const parentMode = ctx.permissions?.policy.mode ?? 'default';
     const childCtx: RunContext = {
       sessionId: ctx.sessionId ?? '',
       projectId: ctx.projectId ?? '',
       mode: 'react',
       model: ctx.subagent.model,
-      systemPrompt: SUBAGENT_SYSTEM,
+      systemPrompt: member
+        ? buildMemberSystemPrompt(member, { teamName: ctx.expertTeam!.teamName, teamDisplayName: ctx.expertTeam!.teamDisplayName }, prompt)
+        : SUBAGENT_SYSTEM,
       maxTurns,
       signal: ctx.signal,
       provider: ctx.subagent.provider,
@@ -91,13 +151,25 @@ export const taskTool: AgentTool = {
         ...ctx,
         signal: ctx.signal,
         todos: [],
-        // 双保险：白名单之外再叠 plan 只读模式（未来白名单扩充也拦得住写/执行）
-        permissions: new PermissionState({ mode: 'plan' }),
-        // 子代理无交互对象：提问自动应答、确认自动拒绝
-        confirm: async () => ({ kind: 'reject', reason: '子代理为只读探索环境，无确认流' }),
-        askUser: async () => '（子代理无用户可交互，请基于已有信息自行决策）',
+        // 普通子代理：plan 只读双保险；团队成员：克隆父模式（写操作走父确认通道，D4）
+        permissions: member
+          ? new PermissionState({
+              mode: parentMode,
+              ...(ctx.permissions?.policy.allowlist ? { allowlist: ctx.permissions.policy.allowlist } : {}),
+            })
+          : new PermissionState({ mode: 'plan' }),
+        // 子代理无交互对象：提问自动应答、确认自动拒绝；成员继承父会话通道
+        confirm: member
+          ? ctx.confirm
+          : async () => ({ kind: 'reject', reason: '子代理为只读探索环境，无确认流' }),
+        askUser: member
+          ? ctx.askUser
+          : async () => '（子代理无用户可交互，请基于已有信息自行决策）',
         registry, // 深度防线已由 depth 拒绝，此处保持一致视图
         subagent: { ...ctx.subagent, depth: (ctx.subagent.depth ?? 0) + 1 },
+        // D12：成员不能再派生（编译期/配置期的第二道防线）
+        expertTeam: undefined,
+        emit: undefined,
       },
       budget,
       windowTokens: ctx.subagent.windowTokens ?? 200_000,
@@ -154,19 +226,36 @@ export const taskTool: AgentTool = {
     // 用量回写父预算：会话级费用口径包含子代理消耗
     ctx.subagent.budget?.record(usageTotal);
 
+    const emitDone = (status: 'ok' | 'failed' | 'canceled', summary: string): void => {
+      if (!member) return;
+      ctx.emit?.({
+        type: 'expert_delegate_done',
+        memberId: member.id,
+        memberName: member.name.zh || member.name.en,
+        status,
+        usage: usageTotal,
+        ms: Date.now() - delegationStartedAt,
+        summary: summary.slice(0, 400),
+        ...(parentMode === 'plan' ? { readonlyDegraded: true } : {}),
+      });
+    };
+
     if (ctx.signal.aborted) {
       const partial = clip(blocks.join(''));
-      return fail(partial || '子代理被中断', 'canceled');
+      emitDone('canceled', partial);
+      return fail(withPrefix(partial || '子代理被中断'), 'canceled');
     }
     const finalText = current || (blocks.length > 0 ? blocks[blocks.length - 1]! : '');
     if (!finalText.trim()) {
-      return fail(clip(error ?? '子代理未产出任何汇报'), error ? 'subagent_failed' : 'empty_result');
+      emitDone('failed', error ?? '子代理未产出任何汇报');
+      return fail(withPrefix(clip(error ?? '子代理未产出任何汇报')), error ? 'subagent_failed' : 'empty_result');
     }
+    emitDone('ok', finalText);
     return {
       callId: '',
       name: 'task',
       ok: true,
-      content: clip(finalText),
+      content: withPrefix(clip(finalText)),
       meta: {
         description,
         turns,
@@ -174,6 +263,15 @@ export const taskTool: AgentTool = {
         failed_tool_calls: failedToolCount,
         usage: usageTotal,
         error,
+        ...(member
+          ? {
+              agent: member.id,
+              agent_name: member.name.zh || member.name.en,
+              agent_profession: member.profession.zh || member.profession.en,
+              agent_role: member.role,
+              readonly_degraded: parentMode === 'plan',
+            }
+          : {}),
       },
     };
   },

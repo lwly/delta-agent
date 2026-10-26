@@ -7,12 +7,13 @@
  * 三级覆盖：builtin < project(.delta/) < session(runtime)
  */
 
-/** 层 id，按拼装顺序排列（即 7 层架构 L1–L7） */
+/** 层 id，按拼装顺序排列（F-39 新增静态层 `expert`，位于 tools 与 skills 之间） */
 export type LayerId =
   | 'identity'
   | 'environment'
   | 'project'
   | 'tools'
+  | 'expert'
   | 'skills'
   | 'memory'
   | 'session';
@@ -41,6 +42,8 @@ export interface PromptSection {
   kind: 'static' | 'dynamic';
   /** 估算 token 数 */
   tokens: number;
+  /** 段内容来源标注（如 "expert:code-architect"；--debug-prompt 用） */
+  source?: string;
 }
 
 /** 最终系统提示词 */
@@ -90,6 +93,22 @@ export interface AssembleResult extends SystemPrompt {
     model: string;
     contextWindow: number;
   };
+  /**
+   * F-39：专家段（缺省 = 无专家会话，ExpertLayer 返回空串）。
+   * 内容已由 `experts/prompt.ts` 完成剥离/转义/截断/包装前处理。
+   */
+  expert?: ExpertSegmentInput;
+}
+
+/** 专家段输入（团队只带成员 4 字段，成员正文在类型层面就进不了主会话） */
+export interface ExpertSegmentInput {
+  name: string;
+  displayName: string;
+  profession: string;
+  /** 已剥离 frontmatter、已转义保留标记、已按 6000 字截断的正文 */
+  body: string;
+  truncated: boolean;
+  members?: Array<{ id: string; name: string; profession: string; role: 'lead' | 'member' }>;
 }
 
 /** 记忆召回条目（memory-design.md §5 评分召回的输出单元） */
@@ -109,7 +128,9 @@ export interface RecalledMemory {
   readonly title: string;
   /** locked 层忽略覆盖请求并告警 */
   readonly locked: boolean;
-  /** 静态段（identity/environment/project/tools）或动态段（skills/memory/session） */
+  /** 静态段（identity/environment/project/tools/expert）或动态段（skills/memory/session） */
   readonly kind: 'static' | 'dynamic';
   build(ctx: AssembleContext): LayerValue;
+  /** 可选：段来源标注（仅 ExpertLayer 实现，其余 7 层不实现、零影响） */
+  source?(ctx: AssembleContext): string | undefined;
 }

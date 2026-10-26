@@ -23,9 +23,15 @@ import {
   MIGRATIONS,
   LATEST_SCHEMA_VERSION,
   migrateLegacyConfig,
+  ExpertStore,
+  resolveToolAllow,
+  restrictRegistry,
+  toTeamRuntime,
+  type ExpertRecord,
 } from '@delta/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
+import { expertListCommand, expertShowCommand } from './expert.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
 import {
@@ -90,6 +96,7 @@ interface CliOpts {
   maxTurns: string;
   db?: string;
   mode?: string;
+  expert?: string;
 }
 
 const program = new Command();
@@ -112,10 +119,25 @@ program
   .option('--debug-prompt', '启动时打印系统提示词与上下文统计')
   .option('--max-turns <n>', '单任务最大轮次', '50')
   .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
+  .option('--expert <name>', 'F-39 召唤专家（会话级绑定；专家库 = 内置 < ~/.delta/experts < .delta/experts）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: CliOpts) => {
     await start(opts);
   });
+
+// ── delta expert：F-39 专家库查看（P0：list/show；导入导出/创建归 P1 T15）──
+
+const expert = program.command('expert').description('F-39 专家库：三层发现 + 会话级召唤');
+expert
+  .command('list')
+  .description('列出全部专家（--verbose 显示被覆盖项与解析错误）')
+  .option('--verbose', '显示被覆盖项与 errors')
+  .action((opts: { verbose?: boolean }) => expertListCommand({ projectRoot: process.cwd(), homeDir: process.env.HOME, verbose: opts.verbose }));
+expert
+  .command('show')
+  .description('查看专家详情（成员 / 工具 / 技能 / 提示词摘要）')
+  .argument('<name>', '专家包名')
+  .action((name: string) => expertShowCommand(name, { projectRoot: process.cwd(), homeDir: process.env.HOME }));
 
 // ── delta models：Provider Key 本地管理（F-04a）──────────────────────────
 
@@ -589,6 +611,45 @@ async function start(opts: CliOpts): Promise<void> {
     session = { ...session, model: opts.model };
   }
 
+  // ── F-39：专家解析与绑定（会话级、创建时绑定；恢复会话沿用落库绑定）──────
+  const expertStore = new ExpertStore({ projectRoot: cwd, homeDir: process.env.HOME });
+  let expert: ExpertRecord | undefined;
+  if (opts.expert) {
+    if (opts.resume) {
+      console.error('✘ 专家绑定在会话创建时确定：--expert 不能与 --resume 同用（请去掉 -r 或去掉 --expert）');
+      process.exit(1);
+    }
+    expert = await expertStore.get(opts.expert);
+    if (!expert) {
+      const names = (await expertStore.list()).experts.map((e) => e.name);
+      console.error(`✘ 未找到专家 ${opts.expert}。可选：${names.join(', ') || '（专家库为空）'}`);
+      process.exit(1);
+    }
+    session = service.createSession(project.id, {
+      title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,
+      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
+      mode: expert.expertType === 'team' ? 'react' : normalizeMode(opts.mode),
+      expert: expert.name,
+      expertType: expert.expertType,
+    });
+  } else if (session.expert) {
+    // 恢复历史会话：包可能已被删除（AC-9 降级：警告 + 无专家运行）
+    expert = await expertStore.get(session.expert);
+    if (!expert) {
+      console.error(`⚠ 原绑定专家 ${session.expert} 已不存在，本次按无专家运行`);
+    }
+  }
+
+  // F-39：白名单收窄（收窄点唯一；L4 工具清单与执行共用同一视图）
+  const allow = resolveToolAllow(
+    expert?.tools ?? null,
+    registry.definitions().map((d) => d.name),
+  );
+  const runRegistry = restrictRegistry(registry, allow.allow) as typeof registry;
+  if (expert && allow.unknown.length > 0) {
+    console.error(`⚠ 专家声明的未知工具（已忽略）：${allow.unknown.join(', ')}`);
+  }
+
   // M5: 启动时孤儿任务恢复（running 且租约过期 → queued，retries+1）
   const recovered = service.recoverTasks(session.id);
   if (recovered > 0) console.error(`♻ 已恢复 ${recovered} 个中断任务（重新排队）`);
@@ -620,11 +681,13 @@ async function start(opts: CliOpts): Promise<void> {
   // F-37（D6）：projectRoot 传 getter——动态段 CWD 每轮取 workRootRef 实时值，
   // 切换分支/worktree 后由 App 调 rebuild() 重读静态段
   const model = session.model || 'claude-sonnet-4-5-20250929';
+  const expertRef: { current: ExpertRecord | null } = { current: expert ?? null };
   const promptAssembly = await assemblePrompt({
     projectRoot: () => workRootRef.current,
     model,
     contextWindow: 200_000,
-    tools: registry.definitions(),
+    tools: runRegistry.definitions(),
+    expertRef,
   });
 
   if (opts.debugPrompt) {
@@ -637,7 +700,11 @@ async function start(opts: CliOpts): Promise<void> {
     service,
     session,
     provider,
-    registry,
+    registry: runRegistry,
+    // F-39：团队委派基座（未收窄完整表）+ 底栏专家标签 + /expert 就地改绑
+    baseRegistry: registry,
+    expertRef,
+    expertLabel: expert ? `◆ ${expert.displayName.zh || expert.displayName.en}` : null,
     systemPrompt: promptAssembly.parts.staticText,
     systemPromptParts: promptAssembly.parts,
     refreshDynamic: promptAssembly.refreshDynamic,
@@ -984,7 +1051,7 @@ worktree
 
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'help']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

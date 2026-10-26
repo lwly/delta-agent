@@ -1,0 +1,34 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "delta-agent builtin"
+  },
+  "name": "code-architect",
+  "description": "系统架构视角的代码分析与方案设计专家（只读，不改文件）",
+  "expertType": "agent",
+  "agentName": "code-architect-agent",
+  "agents": [
+    "agents/code-architect-agent.md"
+  ],
+  "displayName": {
+    "en": "Code Architect",
+    "zh": "代码架构师"
+  },
+  "profession": {
+    "en": "Architecture",
+    "zh": "系统架构"
+  },
+  "tools": [
+    "read_file",
+    "list_dir",
+    "glob_search",
+    "grep_search",
+    "task"
+  ],
+  "keywords": [
+    "架构",
+    "设计",
+    "重构方案",
+    "architecture"
+  ]
+}

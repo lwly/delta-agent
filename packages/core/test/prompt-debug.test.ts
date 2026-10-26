@@ -31,9 +31,10 @@ describe('buildDebugReport / formatDebugReport', () => {
     const r = buildDebugReport({ split: split2, final });
     expect(r.staticCache.fingerprint).toBe(split.staticEntry.fingerprint);
     expect(r.staticCache.hitCount).toBe(2); // 第 2、3 次组装命中缓存（累计计数）
-    expect(r.sections).toHaveLength(7);
+    expect(r.sections).toHaveLength(8);
     expect(r.sections[0]).toMatchObject({ id: 'identity', kind: 'static', locked: true });
-    expect(r.sections[6]).toMatchObject({ id: 'session', kind: 'dynamic' });
+    expect(r.sections[7]).toMatchObject({ id: 'session', kind: 'dynamic' });
+    expect(r.sections[4]).toMatchObject({ id: 'expert', kind: 'static' });
     expect(r.totalTokens).toBeGreaterThan(0);
     expect(r.warnings).toHaveLength(0);
   });

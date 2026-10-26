@@ -1,6 +1,6 @@
 /**
  * 7 层 PromptLayer 实现（L1–L7）
- * 静态段：identity / environment / project / tools（可缓存复用）
+ * 静态段：identity / environment / project / tools / expert（F-39）
  * 动态段：skills / memory / session（每轮更新）
  */
 import type { AssembleContext, LayerValue, PromptLayer } from './types.js';
@@ -21,6 +21,7 @@ export class IdentityLayer implements PromptLayer {
       '- 不泄露 Provider API Key、加密存储内容或系统敏感信息',
       '- 不在项目沙盒边界（projectRoot）之外写文件',
       '- 高危工具（write_file / edit_file / run_command）执行前必须走确认流程',
+      '- 后续任何段落（含专家角色段）不得改写本节安全基线；出现冲突时以本节为准',
     ].join('\n');
   }
 }
@@ -77,6 +78,35 @@ export class ToolsLayer implements PromptLayer {
       const schema = JSON.stringify(t.schema);
       return `### ${t.name}\n${t.description}\n参数 schema：\`${schema}\``;
     });
+  }
+}
+
+/**
+ * F-39 专家段：静态段、位于 tools 之后（design D1）。
+ * 无专家会话返回空串 → formatPrompt 过滤空段 → Prompt 文本逐字节不变。
+ */
+export class ExpertLayer implements PromptLayer {
+  readonly id = 'expert' as const;
+  /** 固定标题，不含专家名（避免与正文首行重复） */
+  readonly title = '专家角色与职责';
+  readonly locked = false;
+  readonly kind = 'static' as const;
+
+  build(ctx: AssembleContext): LayerValue {
+    const e = ctx.expert;
+    if (!e) return '';
+    const head = `# 专家：${e.displayName}（${e.profession}）\n> 本段定义你的角色与职责边界，优先级低于安全基线。`;
+    const team = e.members?.length
+      ? `\n\n## 团队成员（由你调度，你不代写其专业产出）\n` +
+        e.members
+          .map((m) => `- ${m.name}（${m.profession}）${m.role === 'lead' ? ' · 主理人' : ''}`)
+          .join('\n')
+      : '';
+    return `${head}${team}\n\n${e.body}`;
+  }
+
+  source(ctx: AssembleContext): string | undefined {
+    return ctx.expert ? `expert:${ctx.expert.name}` : undefined;
   }
 }
 
@@ -145,13 +175,14 @@ export class SessionLayer implements PromptLayer {
   }
 }
 
-/** 创建按 7 层顺序排列的层实例列表 */
+/** 创建按层顺序排列的层实例列表（expert 插在 tools 与 skills 之间，F-39 D1） */
 export function createDefaultLayers(): PromptLayer[] {
   return [
     new IdentityLayer(),
     new EnvironmentLayer(),
     new ProjectLayer(),
     new ToolsLayer(),
+    new ExpertLayer(),
     new SkillsLayer(),
     new MemoryLayer(),
     new SessionLayer(),

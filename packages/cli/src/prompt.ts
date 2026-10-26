@@ -20,9 +20,11 @@ import {
   suggestSkill,
   buildDebugReport,
   formatDebugReport,
+  buildAssembleContext,
+  seedExpertSkills,
+  type ExpertRecord,
   type SkillMeta,
   type SkillRuntime,
-  type AssembleContext,
 } from '@delta/core';
 
 export interface AssemblePromptOptions {
@@ -30,8 +32,13 @@ export interface AssemblePromptOptions {
   projectRoot: string | (() => string);
   model: string;
   contextWindow: number;
-  /** L4 工具清单（registry.definitions()） */
+  /** L4 工具清单（registry.definitions()，F-39 起为收窄后的视图） */
   tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
+  /**
+   * F-39：专家记录的可变引用（cli/index.ts 持有；`/expert` 就地改绑后改写并触发 rebuild）。
+   * 缺省 = 无专家会话。
+   */
+  expertRef?: { current: ExpertRecord | null };
 }
 
 export interface PromptAssembly {
@@ -77,51 +84,63 @@ export async function assemblePrompt(opts: AssemblePromptOptions): Promise<Promp
   };
   let instructions = await loadInstructions();
 
-  const ctx = (): AssembleContext => ({
-    projectName: path.basename(getRoot()),
-    projectInstructions: instructions.readme,
-    staticMemory: instructions.memory,
-    tools: opts.tools.map((t) => ({ name: t.name, description: t.description, schema: t.parameters })),
-    skillIndex: skillsMeta.map((s) => ({
-      name: s.name,
-      description: s.description,
-      triggers: s.triggers,
-    })),
-    loadedSkills: buffer.list().map((s) => ({ name: s.name, content: s.content })),
-    session: {
-      // L7 SessionLayer（运行环境）CWD：每轮取 getRoot() 实时值（D6 动态段自动跟随）
-      cwd: getRoot(),
-      now: new Date(),
-      model: opts.model,
-      contextWindow: opts.contextWindow,
-    },
-  });
+  const ctx = () =>
+    buildAssembleContext({
+      projectName: path.basename(getRoot()),
+      projectInstructions: instructions.readme,
+      staticMemory: instructions.memory,
+      tools: opts.tools,
+      skillIndex: skillsMeta.map((s) => ({
+        name: s.name,
+        description: s.description,
+        triggers: s.triggers,
+      })),
+      loadedSkills: buffer.list().map((s) => ({ name: s.name, content: s.content })),
+      expert: opts.expertRef?.current ?? undefined,
+      session: {
+        // L7 SessionLayer（运行环境）CWD：每轮取 getRoot() 实时值（D6 动态段自动跟随）
+        cwd: getRoot(),
+        now: new Date(),
+        model: opts.model,
+        contextWindow: opts.contextWindow,
+      },
+    });
 
   const assembled = assembler.assemble(ctx());
   const final = new PromptBuilder().build(assembled);
   // parts 对象引用被 App 持有：rebuild() 原地更新字段即可让下一轮生效
   const parts = { staticText: final.staticText, dynamicText: final.dynamicText };
 
+  const skillsRuntime: SkillRuntime = {
+    async load(name: string) {
+      const skill = skillsMeta.find((s) => s.name === name);
+      if (!skill) return { ok: false, content: `未找到 Skill：${name}。可用：${skillsMeta.map((s) => s.name).join(', ') || '（无）'}` };
+      const entry = buffer.load(skill);
+      return { ok: true, content: `Skill ${name} 已加载（下一轮生效）。\n\n${entry.content}` };
+    },
+    unload(name: string) {
+      return buffer.unload(name)
+        ? { ok: true, content: `Skill ${name} 已卸载（下一轮生效）。` }
+        : { ok: false, content: `未加载 Skill：${name}` };
+    },
+    async suggest(query: string) {
+      const top = suggestSkill(skillsMeta, query);
+      return top ? { name: top.skill.name, description: top.skill.description } : undefined;
+    },
+  };
+
+  // F-39：专家预置技能装载（每会话一次；warnings 进 --debug-prompt）
+  const seedWarnings: string[] = [];
+  const currentExpert = opts.expertRef?.current;
+  if (currentExpert && currentExpert.skills.length > 0) {
+    const seeded = await seedExpertSkills(skillsRuntime, currentExpert.skills);
+    seedWarnings.push(...seeded.warnings);
+  }
+
   return {
     parts,
     skillsMeta,
-    skills: {
-      async load(name: string) {
-        const skill = skillsMeta.find((s) => s.name === name);
-        if (!skill) return { ok: false, content: `未找到 Skill：${name}。可用：${skillsMeta.map((s) => s.name).join(', ') || '（无）'}` };
-        const entry = buffer.load(skill);
-        return { ok: true, content: `Skill ${name} 已加载（下一轮生效）。\n\n${entry.content}` };
-      },
-      unload(name: string) {
-        return buffer.unload(name)
-          ? { ok: true, content: `Skill ${name} 已卸载（下一轮生效）。` }
-          : { ok: false, content: `未加载 Skill：${name}` };
-      },
-      async suggest(query: string) {
-        const top = suggestSkill(skillsMeta, query);
-        return top ? { name: top.skill.name, description: top.skill.description } : undefined;
-      },
-    },
+    skills: skillsRuntime,
     refreshDynamic: () => assembler.assemble(ctx()).dynamic.text,
     rebuild: async () => {
       instructions = await loadInstructions(); // 重读 README / agent.md / MEMORY.md
@@ -132,7 +151,8 @@ export async function assemblePrompt(opts: AssemblePromptOptions): Promise<Promp
     },
     debugReport: () => {
       const s = assembler.assemble(ctx());
-      return formatDebugReport(buildDebugReport({ split: s, final: new PromptBuilder().build(s) }));
+      const report = formatDebugReport(buildDebugReport({ split: s, final: new PromptBuilder().build(s) }));
+      return seedWarnings.length > 0 ? `${report}\n─── 预置技能 ───\n${seedWarnings.map((w) => `⚠ ${w}`).join('\n')}` : report;
     },
   };
 }

@@ -46,6 +46,11 @@ export interface ChatMessage {
   images?: MessageImage[];
   /** rough token estimate kept alongside the message */
   tokens?: number;
+  /**
+   * F-39：专家团成员的显示名（UI 本地字段，与 ts/ok/durationMs 同族）。
+   * 实时来自 tool_result.meta.agent_name；回放由 content 前缀解析后回填。
+   */
+  agentName?: string;
 }
 
 export interface Usage {
@@ -173,6 +178,31 @@ export type AgentEvent =
   | { type: 'sandbox_notice'; kind: 'degraded' | 'pulled' | 'unavailable' | 'gc_suggest'; detail: string }
   /** F-31：usage 事件附带当轮模型（引擎填 ctx.model；老消费端可忽略） */
   | { type: 'usage'; usage: Usage; model?: string }
+  /**
+   * F-39：专家团成员委派开始（不落库；回放靠 tool 消息 content 的 `[expert:<id>]` 前缀）。
+   * goal = 目标摘要（≤120 字，来自 task 的 description / prompt 前 120 字）。
+   */
+  | {
+      type: 'expert_delegate_start';
+      memberId: string;
+      memberName: string;
+      profession: string;
+      role: 'lead' | 'member';
+      goal: string;
+      startedAt: number;
+    }
+  /** F-39：专家团成员委派结束（summary = 成员最终汇报的截断，≤400 字） */
+  | {
+      type: 'expert_delegate_done';
+      memberId: string;
+      memberName: string;
+      status: 'ok' | 'failed' | 'canceled';
+      usage: Usage;
+      ms: number;
+      summary: string;
+      /** 父会话为 plan 模式时的只读降级标记（成员卡角标） */
+      readonlyDegraded?: boolean;
+    }
   | { type: 'done'; usage: Usage }
   | { type: 'error'; message: string; fatal: boolean };
 

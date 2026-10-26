@@ -12,11 +12,14 @@ import type {
 } from '@delta/shared';
 import {
   BudgetManager,
+  ExpertStore,
   GitIntegration,
   PermissionState,
   SessionService,
   ToolRegistry,
   WorktreeManager,
+  toTeamRuntime,
+  type ExpertRecord,
   compactDiff,
   diffLines,
   formatSearchHits,
@@ -78,8 +81,14 @@ export interface AppOptions {
   service: SessionService;
   session: SessionRow;
   provider: Awaited<ReturnType<typeof import('@delta/core').resolveProviderFromEnv>>;
-  /** pre-built registry (with MCP tools attached by the CLI entry) */
+  /** pre-built registry（F-39 起为收窄后的视图，with MCP tools attached by the CLI entry） */
   registry?: ToolRegistry;
+  /** F-39：未收窄的完整注册表（团队成员委派基座；主理人视图不含写工具，不能作成员基座） */
+  baseRegistry?: ToolRegistry;
+  /** F-39：专家记录可变引用（/expert 就地改绑后改写并 rebuild） */
+  expertRef?: { current: ExpertRecord | null };
+  /** F-39：底栏专家标签（--expert 绑定时传入；/expert 就地改绑后由组件内 state 接管） */
+  expertLabel?: string | null;
   systemPrompt: string;
   /** M3：静态/动态分段系统提示词（优先于 systemPrompt） */
   systemPromptParts?: { staticText: string; dynamicText: string };
@@ -163,6 +172,8 @@ export function App(props: AppOptions) {
     path: props.session.worktree_path,
     branch: props.session.worktree_branch,
   });
+  // F-39：底栏第 4 段（专家标签；/expert 就地改绑后更新）
+  const [expertLabel, setExpertLabel] = useState<string | null>(props.expertLabel ?? null);
   // 底栏三段式状态（WorktreeBar）
   const [gitBar, setGitBar] = useState<{
     projectName: string;
@@ -340,6 +351,19 @@ export function App(props: AppOptions) {
           permissions: permsRef.current ?? undefined,
           // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写会话预算）
           registry: registryRef.current,
+          // F-39：专家团运行时（主理人调度）+ 委派事件 → 会话行
+          expertTeam:
+            props.expertRef?.current && props.expertRef.current.expertType === 'team'
+              ? toTeamRuntime(props.expertRef.current, props.baseRegistry ?? registryRef.current)
+              : undefined,
+          emit: (ev) => {
+            if (ev.type === 'expert_delegate_start') {
+              addItem({ kind: 'tool', text: `◆ 委派 ${ev.memberName}（${ev.profession}）▸ ${ev.goal}`, pending: true });
+            } else if (ev.type === 'expert_delegate_done') {
+              const tail = ev.status === 'ok' ? `done ${(ev.ms / 1000).toFixed(1)}s` : ev.status;
+              addItem({ kind: 'system', text: `◆ ${ev.memberName} ${tail}${ev.readonlyDegraded ? ' · 只读降级' : ''}\n${ev.summary}` });
+            }
+          },
           subagent: {
             provider: props.provider,
             model: props.session.model || 'claude-sonnet-4-5-20250929',
@@ -710,6 +734,7 @@ export function App(props: AppOptions) {
               '  /rollback [id] 回滚变更（缺省全部；id = 回滚该变更之后）',
               '  /branch  弹出分支列表切换会话工作分支（F-37，n 新建 / Esc 取消）',
               '  /worktree [分支|off] 切换 Worktree 隔离工作区（F-37；无参 = 开/关切换）',
+              '  /expert [name|off] 查看/切换专家（F-39；空会话就地改绑，已有消息请用 delta --expert 新开）',
               '  /search <词> 全文/语义搜索历史对话（F-17）',
               '  /image <路径...> 附图片到下一条消息（F-25，最多 5 张；png/jpeg/gif/webp，单张 ≤4MB）',
               '  /exit    退出',
@@ -744,6 +769,69 @@ export function App(props: AppOptions) {
                 ? '下一次任务将跳过规划直接执行'
                 : '已恢复自动路由（简单任务检测决定是否规划）';
           addItem({ kind: 'system', text: tip });
+          return true;
+        }
+        case 'expert': {
+          // F-39：/expert 无参 = 列表；<name> = 空会话就地改绑；off = 解绑
+          void (async () => {
+            const root = props.workRootRef?.current ?? process.cwd();
+            const store = new ExpertStore({ projectRoot: root, homeDir: process.env.HOME });
+            const arg = rest[0];
+            if (!arg) {
+              const { experts, errors } = await store.list();
+              const lines = experts.map(
+                (e) =>
+                  `  ${e.expertType === 'team' ? '▣' : '◆'} ${e.name.padEnd(22)} ${e.displayName.zh || e.displayName.en}（${e.profession.zh || e.profession.en}）· ${e.layer}`,
+              );
+              addItem({
+                kind: 'system',
+                text: [
+                  `专家库（${experts.length} 个；内置 < 用户 < 项目）：`,
+                  ...lines,
+                  ...(errors.length ? [`⚠ ${errors.join('\n⚠ ')}`] : []),
+                  '',
+                  '用法：/expert <name> 就地绑定（仅空会话）；/expert off 解绑；已有消息的会话请退出后 delta --expert <name>。',
+                ].join('\n'),
+              });
+              return;
+            }
+            if (arg === 'off') {
+              if (props.service.getHistory(props.session.id).length > 0) {
+                addItem({ kind: 'system', text: '✘ 会话已有消息，专家绑定不能中途解除（请退出后新开会话）' });
+                return;
+              }
+              props.service.setSessionExpert(props.session.id, { expert: null, expertType: null });
+              if (props.expertRef) props.expertRef.current = null;
+              setExpertLabel(null);
+              await props.rebuildPrompt?.();
+              addItem({ kind: 'system', text: '已解绑专家（空会话就地生效）' });
+              return;
+            }
+            const record = await store.get(arg);
+            if (!record) {
+              const names = (await store.list()).experts.map((e) => e.name);
+              addItem({ kind: 'system', text: `✘ 未找到专家 ${arg}。可选：${names.join(', ') || '（空）'}` });
+              return;
+            }
+            if (props.service.getHistory(props.session.id).length > 0) {
+              addItem({ kind: 'system', text: `✘ 会话已有消息，专家绑定在会话创建时确定（请退出后 delta --expert ${arg} 新开会话）` });
+              return;
+            }
+            props.service.setSessionExpert(props.session.id, {
+              expert: record.name,
+              expertType: record.expertType,
+            });
+            if (props.expertRef) props.expertRef.current = record;
+            setExpertLabel(`◆ ${record.displayName.zh || record.displayName.en}`);
+            await props.rebuildPrompt?.();
+            addItem({
+              kind: 'system',
+              text:
+                record.expertType === 'team'
+                  ? `已绑定专家团「${record.displayName.zh || record.displayName.en}」（${record.members.length} 名成员；主理人调度，模式固定 ReAct）`
+                  : `已绑定专家「${record.displayName.zh || record.displayName.en}」（工具${record.tools ? ` ${record.tools.length}/${16}` : ' 不收窄'}）`,
+            });
+          })();
           return true;
         }
         case 'changes': {
@@ -1022,6 +1110,7 @@ export function App(props: AppOptions) {
         branch={gitBar.branch}
         worktreeEnabled={gitBar.worktreeEnabled}
         worktreePath={gitBar.worktreePath}
+        expertLabel={expertLabel}
       />
     </Box>
   );
