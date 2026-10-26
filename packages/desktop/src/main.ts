@@ -47,6 +47,15 @@ function resolveWebDistDir(): string | undefined {
   return candidates.find((d) => fs.existsSync(path.join(d, 'index.html')));
 }
 
+/**
+ * 窗口图标（win/linux 开发态任务栏；打包形态由 electron-builder 写入可执行文件资源，
+ * 打包后 icons/ 不进 asar（files 仅 dist/**），解析失败静默回退默认图标）。
+ */
+function resolveWindowIcon(): string | undefined {
+  const iconPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../icons/icon.png');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
+}
+
 async function bootstrap(): Promise<void> {
   const authToken = crypto.randomBytes(32).toString('hex');
   let runtime: ServeRuntime;
@@ -73,6 +82,7 @@ async function bootstrap(): Promise<void> {
     autoHideMenuBar: true,
     // 与 web 主题 --bg 对齐：消除首帧白闪与深色标题栏下的色差
     backgroundColor: '#0f1115',
+    icon: resolveWindowIcon(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

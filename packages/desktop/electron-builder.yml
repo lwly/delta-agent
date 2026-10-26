@@ -18,9 +18,12 @@ extraResources:
 mac:
   target: dmg
   category: public.app-category.developer-tools
+  # 应用图标（源 icons/icon.svg；.gitignore 全局忽略 build/，故放 icons/）
+  icon: icons/icon.icns
   # 签名挂起：证书到位后补 identity 与 notarize 段
 win:
   target: nsis
+  icon: icons/icon.ico
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
