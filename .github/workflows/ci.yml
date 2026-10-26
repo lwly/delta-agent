@@ -42,8 +42,23 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # 失败时把用例名打成 annotation：check-run 的 annotations 接口可匿名读取，
+      # 而 job 日志接口需要 admin 权限，靠 annotation 才能让外部协作者定位红灯。
       - name: Unit tests
-        run: pnpm test
+        shell: bash
+        run: |
+          # 用 /tmp：macOS 与 Windows 的 git bash 都能映射，避免 $RUNNER_TEMP 反斜杠路径问题
+          pnpm test 2>&1 | tee /tmp/unit-test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "==== 失败用例 ===="
+            grep -aE "FAIL " /tmp/unit-test.log | sed 's/\r$//' | head -10 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            echo "==== 日志尾部 ===="
+            tail -50 /tmp/unit-test.log
+            exit "$status"
+          fi
 
       - name: Build
         run: pnpm build
