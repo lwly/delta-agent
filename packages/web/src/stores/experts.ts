@@ -9,6 +9,8 @@ export const useExpertsStore = defineStore('experts', {
     list: [] as ExpertListItem[],
     /** 发现期警告（坏包等），面板内联展示 */
     errors: [] as string[],
+    /** P1：停用清单（召唤面板过滤；设置页展示开关状态） */
+    disabled: [] as string[],
     details: {} as Record<string, ExpertDetail>,
     /** name → data_url|null（null = 无头像已确认，避免重复请求） */
     avatars: {} as Record<string, string | null>,
@@ -29,6 +31,7 @@ export const useExpertsStore = defineStore('experts', {
         const r = await api.listExperts(projectId);
         this.list = r.experts;
         this.errors = r.errors;
+        this.disabled = (r as { disabled?: string[] }).disabled ?? [];
         this.loaded = true;
       } catch (e) {
         this.error = (e as Error).message;

@@ -667,3 +667,23 @@ export {
   listExpertNames,
   type ExpertsRouteDeps,
 } from './server/experts-routes.js';
+export {
+  expertsConfigPath,
+  readExpertsConfig,
+  writeExpertsConfig,
+  toolsHashOf,
+  isTrusted,
+  recordTrust,
+  revokeTrust,
+  setDisabled,
+  type TrustedEntry,
+  type ExpertsConfig,
+} from './experts/trust.js';
+export {
+  installExpertFromBytes,
+  exportExpertToBytes,
+  scaffoldExpert,
+  expertsLayerDir,
+  type ImportResult,
+  type ScaffoldOptions,
+} from './experts/io.js';

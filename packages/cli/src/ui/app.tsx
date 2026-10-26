@@ -13,6 +13,8 @@ import type {
 import {
   BudgetManager,
   ExpertStore,
+  readExpertsConfig,
+  isTrusted,
   GitIntegration,
   PermissionState,
   SessionService,
@@ -715,6 +717,53 @@ export function App(props: AppOptions) {
   );
 
   // ── slash commands ──────────────────────────────────────────────────────
+  /** F-39：/expert <name> 绑定（信任门 + 空会话门禁 + 团队 mode 校正） */
+  const bindExpert = useCallback(
+    async (name: string) => {
+      const root = props.workRootRef?.current ?? process.cwd();
+      const store = new ExpertStore({ projectRoot: root, homeDir: process.env.HOME });
+      const record = await store.get(name);
+      if (!record) {
+        const names = (await store.list()).experts.map((e) => e.name);
+        addItem({ kind: 'system', text: `✘ 未找到专家 ${name}。可选：${names.join(', ') || '（空）'}` });
+        return;
+      }
+      // 信任门（builtin 免确认）：未信任 → 拒绝并给出显式信任命令
+      if (record.layer !== 'builtin') {
+        const cfg = await readExpertsConfig(process.env.HOME ?? '');
+        if (!isTrusted(cfg, record)) {
+          addItem({
+            kind: 'system',
+            text: `✘ 专家「${record.displayName.zh || record.displayName.en}」尚未信任（工具：${record.tools ? record.tools.join(', ') : '不收窄'}）。请先运行 delta expert trust ${name} 完成首次确认`,
+          });
+          return;
+        }
+      }
+      if (props.service.getHistory(props.session.id).length > 0) {
+        addItem({ kind: 'system', text: `✘ 会话已有消息，专家绑定在会话创建时确定（请退出后 delta --expert ${name} 新开会话）` });
+        return;
+      }
+      props.service.setSessionExpert(props.session.id, {
+        expert: record.name,
+        expertType: record.expertType,
+      });
+      if (record.expertType === 'team' && props.session.mode !== 'react') {
+        props.service.setSessionMode(props.session.id, 'react');
+      }
+      if (props.expertRef) props.expertRef.current = record;
+      setExpertLabel(`◆ ${record.displayName.zh || record.displayName.en}`);
+      await props.rebuildPrompt?.();
+      addItem({
+        kind: 'system',
+        text:
+          record.expertType === 'team'
+            ? `已绑定专家团「${record.displayName.zh || record.displayName.en}」（${record.members.length} 名成员；主理人调度，模式固定 ReAct）`
+            : `已绑定专家「${record.displayName.zh || record.displayName.en}」（工具${record.tools ? ` ${record.tools.length}/${16}` : ' 不收窄'}）`,
+      });
+    },
+    [props, addItem],
+  );
+
   const handleCommand = useCallback(
     (cmd: string): boolean => {
       const [name, ...rest] = cmd.slice(1).split(/\s+/);
@@ -777,6 +826,17 @@ export function App(props: AppOptions) {
             const root = props.workRootRef?.current ?? process.cwd();
             const store = new ExpertStore({ projectRoot: root, homeDir: process.env.HOME });
             const arg = rest[0];
+            // F-39：数字选择（/expert 2 = 列表第 2 项），先解析再走绑定流程
+            if (/^\d+$/.test(arg)) {
+              const { experts } = await store.list();
+              const picked = experts[Number(arg) - 1];
+              if (!picked) {
+                addItem({ kind: 'system', text: `✘ 序号超出范围（1-${experts.length}）` });
+                return;
+              }
+              await bindExpert(picked.name);
+              return;
+            }
             if (!arg) {
               const { experts, errors } = await store.list();
               const lines = experts.map(
@@ -807,30 +867,7 @@ export function App(props: AppOptions) {
               addItem({ kind: 'system', text: '已解绑专家（空会话就地生效）' });
               return;
             }
-            const record = await store.get(arg);
-            if (!record) {
-              const names = (await store.list()).experts.map((e) => e.name);
-              addItem({ kind: 'system', text: `✘ 未找到专家 ${arg}。可选：${names.join(', ') || '（空）'}` });
-              return;
-            }
-            if (props.service.getHistory(props.session.id).length > 0) {
-              addItem({ kind: 'system', text: `✘ 会话已有消息，专家绑定在会话创建时确定（请退出后 delta --expert ${arg} 新开会话）` });
-              return;
-            }
-            props.service.setSessionExpert(props.session.id, {
-              expert: record.name,
-              expertType: record.expertType,
-            });
-            if (props.expertRef) props.expertRef.current = record;
-            setExpertLabel(`◆ ${record.displayName.zh || record.displayName.en}`);
-            await props.rebuildPrompt?.();
-            addItem({
-              kind: 'system',
-              text:
-                record.expertType === 'team'
-                  ? `已绑定专家团「${record.displayName.zh || record.displayName.en}」（${record.members.length} 名成员；主理人调度，模式固定 ReAct）`
-                  : `已绑定专家「${record.displayName.zh || record.displayName.en}」（工具${record.tools ? ` ${record.tools.length}/${16}` : ' 不收窄'}）`,
-            });
+            await bindExpert(arg);
           })();
           return true;
         }

@@ -24,6 +24,9 @@ import {
   LATEST_SCHEMA_VERSION,
   migrateLegacyConfig,
   ExpertStore,
+  readExpertsConfig,
+  isTrusted,
+  recordTrust,
   resolveToolAllow,
   restrictRegistry,
   toTeamRuntime,
@@ -31,7 +34,16 @@ import {
 } from '@delta/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
-import { expertListCommand, expertShowCommand } from './expert.js';
+import {
+  expertListCommand,
+  expertShowCommand,
+  expertImportCommand,
+  expertExportCommand,
+  expertNewCommand,
+  expertTrustCommand,
+  printTrustInfo,
+  askConfirm,
+} from './expert.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
 import {
@@ -97,6 +109,7 @@ interface CliOpts {
   db?: string;
   mode?: string;
   expert?: string;
+  yes?: boolean;
 }
 
 const program = new Command();
@@ -120,6 +133,7 @@ program
   .option('--max-turns <n>', '单任务最大轮次', '50')
   .option('--mode <mode>', '执行模式：react | plan | multi（M5，默认 react）')
   .option('--expert <name>', 'F-39 召唤专家（会话级绑定；专家库 = 内置 < ~/.delta/experts < .delta/experts）')
+  .option('--yes', 'F-39 跳过首次召唤信任确认（脚本/CI；非交互环境未传则失败退出）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: CliOpts) => {
     await start(opts);
@@ -138,6 +152,44 @@ expert
   .description('查看专家详情（成员 / 工具 / 技能 / 提示词摘要）')
   .argument('<name>', '专家包名')
   .action((name: string) => expertShowCommand(name, { projectRoot: process.cwd(), homeDir: process.env.HOME }));
+expert
+  .command('import')
+  .description('导入专家包（zip 或目录）到 user/project 层')
+  .argument('<src>', 'zip 路径或包目录')
+  .option('--layer <layer>', '目标层：user（默认）| project', 'user')
+  .option('--force', '覆盖目标层同名包')
+  .action((src: string, opts: { layer?: string; force?: boolean }) =>
+    expertImportCommand(src, { projectRoot: process.cwd(), homeDir: process.env.HOME, layer: opts.layer, force: opts.force }));
+expert
+  .command('export')
+  .description('导出专家包为 zip（内置专家不可导出）')
+  .argument('<name>', '专家包名')
+  .argument('<out>', '输出 zip 路径')
+  .action((name: string, out: string) => expertExportCommand(name, out, { projectRoot: process.cwd(), homeDir: process.env.HOME }));
+expert
+  .command('new')
+  .description('创建专家骨架（expert.json + agents md）')
+  .argument('<name>', '专家包名')
+  .option('--team', '创建团队骨架（主理人 + 产品/开发成员）')
+  .option('--layer <layer>', '目标层：user（默认）| project', 'user')
+  .option('--display-name <name>', '展示名（缺省 = 包名）')
+  .option('--profession <prof>', '职业（缺省 = 专家/交付团队）')
+  .action((name: string, opts: { team?: boolean; layer?: string; displayName?: string; profession?: string }) =>
+    expertNewCommand(name, {
+      projectRoot: process.cwd(),
+      homeDir: process.env.HOME,
+      team: opts.team,
+      layer: opts.layer,
+      displayName: opts.displayName,
+      profession: opts.profession,
+    }));
+expert
+  .command('trust')
+  .description('记录对专家包的信任（首次召唤确认；版本/工具集变化后需重新确认）')
+  .argument('<name>', '专家包名')
+  .option('--yes', '跳过交互确认（脚本/CI）')
+  .action((name: string, opts: { yes?: boolean }) =>
+    expertTrustCommand(name, { projectRoot: process.cwd(), homeDir: process.env.HOME, yes: opts.yes }));
 
 // ── delta models：Provider Key 本地管理（F-04a）──────────────────────────
 
@@ -624,6 +676,24 @@ async function start(opts: CliOpts): Promise<void> {
       const names = (await expertStore.list()).experts.map((e) => e.name);
       console.error(`✘ 未找到专家 ${opts.expert}。可选：${names.join(', ') || '（专家库为空）'}`);
       process.exit(1);
+    }
+    // F-39 P1（T16）：首次召唤信任确认（builtin 免确认；拒绝 → 不建会话）
+    const trustCfg = await readExpertsConfig(process.env.HOME ?? '');
+    if (!isTrusted(trustCfg, expert)) {
+      const info = await printTrustInfo(expert.name, { projectRoot: cwd, homeDir: process.env.HOME ?? undefined });
+      if (!info.ok) process.exit(1);
+      if (!opts.yes) {
+        if (!process.stdin.isTTY) {
+          console.error('✘ 非交互环境：请用 --yes 明确信任，或先运行 `delta expert trust <name>`');
+          process.exit(1);
+        }
+        const answer = await askConfirm('信任并召唤该专家？[y/N] ');
+        if (answer.trim().toLowerCase() !== 'y') {
+          console.error('已取消（未创建会话）');
+          process.exit(1);
+        }
+      }
+      await recordTrust(process.env.HOME ?? '', expert);
     }
     session = service.createSession(project.id, {
       title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,

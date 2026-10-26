@@ -59,6 +59,8 @@ export const FILES = {
   skillsDir: 'skills',
   /** 专家包目录 */
   expertsDir: 'experts',
+  /** 专家库配置（disabled[] / trusted[]，F-39 P1） */
+  expertsConfig: 'experts.json',
   /** 评测集目录 */
   evalsDir: 'evals',
 } as const;

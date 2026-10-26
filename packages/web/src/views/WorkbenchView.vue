@@ -18,6 +18,7 @@ import ToolCallCard from '../components/ToolCallCard.vue';
 import ExpertPanel from '../components/ExpertPanel.vue';
 import ExpertComposerBadge from '../components/ExpertComposerBadge.vue';
 import ExpertDetail from '../components/ExpertDetail.vue';
+import ExpertTrustDialog from '../components/ExpertTrustDialog.vue';
 import ExpertMemberCard from '../components/ExpertMemberCard.vue';
 import { useExpertsStore } from '../stores/experts';
 import type { ExpertListItem } from '../api/client';
@@ -52,6 +53,8 @@ const showSearch = ref(false);
 const showExpertPanel = ref(false);
 const expertChipRef = ref<HTMLElement | null>(null);
 const expertDetailName = ref<string | null>(null);
+/** P1（T16）：待信任确认的专家（弹层挂起；确认后继续召唤流程） */
+const expertTrustPending = ref<ExpertListItem | null>(null);
 
 // ⌘K / Ctrl+K 全局快捷键：打开会话检索弹窗（仅新增入口，不改动既有逻辑）
 // ⌘B / Ctrl+B：开合右侧文件面板（F-38，与顶栏 📁 按钮等价）
@@ -325,21 +328,46 @@ const expertCapsule = computed(() => {
   return { name, displayName: item?.displayName.zh || item?.displayName.en || name, type };
 });
 const teamModeForced = computed(() => chat.sessionMeta?.expertType === 'team');
+/** 召唤面板列表：停用的包不出现在面板（设置页可见可恢复） */
+const summonList = computed(() => expertsStore.list.filter((e) => !expertsStore.disabled.includes(e.name)));
 
 async function toggleExpertPanel(open: boolean) {
   showExpertPanel.value = open;
   if (open && !expertsStore.loaded) void expertsStore.load(ws.activeProjectId ?? undefined);
 }
 
-/** 选中专家：再次点当前专家 = 只关闭；否则新建会话并绑定（提示必须在 open 之后，否则被 close() 清空） */
+/**
+ * 选中专家：再次点当前专家 = 只关闭；
+ * 空会话（无消息且未运行）→ 就地改绑（P1 F-39-16①）；否则新建会话并绑定。
+ * 提示必须在 open/改绑之后（open() 首行 close() 会清 notices）。
+ */
 async function onExpertSelect(item: ExpertListItem) {
   if (item.name === chat.sessionMeta?.expert) {
     showExpertPanel.value = false;
     return;
   }
+  // P1（T16）信任门：user/project 层未信任 → 先弹确认卡（builtin 恒 trusted）
+  if (item.trusted === false) {
+    expertTrustPending.value = item;
+    showExpertPanel.value = false;
+    return;
+  }
+  const dn = item.displayName.zh || item.displayName.en;
+  // 空会话 → 就地改绑（不新建，不产生侧栏噪声）
+  if (chat.messages.length === 0 && !chat.running) {
+    try {
+      await api.rebindSessionExpert(chat.sessionId, item.name);
+      if (chat.sessionId !== chat.sessionId) return;
+      chat.sessionMeta = { ...chat.sessionMeta!, expert: item.name, expertType: item.expertType };
+      chat.notice(item.expertType === 'team' ? `已召唤「${dn}」（本会话就地绑定，模式固定为 ReAct）` : `已召唤「${dn}」专家（本会话就地绑定）`);
+      showExpertPanel.value = false;
+      return;
+    } catch {
+      // 409 等 → 回退新建会话
+    }
+  }
   const id = await newSession(undefined, item.name);
   if (!id) return; // 失败：newSession 已写 error，不推提示
-  const dn = item.displayName.zh || item.displayName.en;
   chat.notice(
     item.expertType === 'team'
       ? `已召唤「${dn}」（已新建对话，模式固定为 ReAct）`
@@ -351,8 +379,30 @@ async function onExpertSelect(item: ExpertListItem) {
   showExpertPanel.value = false;
 }
 
-/** 胶囊 ✕：P0 恒定新建无专家会话（绝不改写当前/历史会话的 expert 字段） */
+/** 信任确认通过 → 继续召唤流程 */
+async function onTrustConfirmed(name: string) {
+  const item = expertTrustPending.value;
+  expertTrustPending.value = null;
+  if (item?.name === name) {
+    expertsStore.invalidate();
+    await expertsStore.load(ws.activeProjectId ?? undefined);
+    const fresh = expertsStore.byName(name);
+    await onExpertSelect(fresh ?? { ...item, trusted: true });
+  }
+}
+
+/** 胶囊 ✕：空会话就地解绑；有消息 → 新建无专家会话（绝不改写历史会话字段） */
 async function onExpertRemove() {
+  if (chat.messages.length === 0 && !chat.running && !chat.expertMissing) {
+    try {
+      await api.rebindSessionExpert(chat.sessionId, null);
+      chat.sessionMeta = { ...chat.sessionMeta!, expert: null, expertType: null };
+      chat.notice('已取消专家（本会话就地解绑）');
+      return;
+    } catch {
+      // 409 → 回退新建
+    }
+  }
   const id = await newSession();
   if (!id) return;
   chat.notice('已取消专家（已新建对话）');
@@ -1462,7 +1512,7 @@ watch(
               v-if="showExpertPanel"
               :anchor="expertChipRef"
               :selected="chat.sessionMeta?.expert ?? null"
-              :list="expertsStore.list"
+              :list="summonList"
               :loading="expertsStore.loading"
               :error="expertsStore.error"
               :errors="expertsStore.errors"
@@ -1568,6 +1618,13 @@ watch(
       :name="expertDetailName"
       @close="expertDetailName = null"
       @summon="onDetailSummon"
+    />
+    <!-- F-39 P1：首次召唤信任确认（取消 = 不建会话，侧栏无新条目） -->
+    <ExpertTrustDialog
+      v-if="expertTrustPending"
+      :name="expertTrustPending.name"
+      @close="expertTrustPending = null"
+      @confirmed="onTrustConfirmed"
     />
   </div>
 </template>

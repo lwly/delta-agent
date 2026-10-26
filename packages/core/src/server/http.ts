@@ -552,9 +552,12 @@ export function createWebServer(opts: ServeOptions): http.Server {
 
       // ── F-39 专家库端点（必须在静态托管分支之前，SPA fallback 不吞 API）──
       if (parts[0] === 'api' && (parts[1] === 'experts' || (parts[1] === 'sessions' && parts[3] === 'expert'))) {
-        const handled = await handleExpertsRoute(method, parts, url, res, {
+        const handled = await handleExpertsRoute(req, method, parts, url, res, {
           service,
           storeFor: expertStoreFor,
+          resetStores: () => expertStores.clear(),
+          configHome: opts.configHomeDir ?? opts.skillsHomeDir ?? os.homedir(),
+          isRunning: (sessionId) => hub.isRunning(sessionId),
           json,
           err,
         });
