@@ -3,9 +3,10 @@
  * 原生 EventSource 断线自动重连；组件卸载时 close()。
  */
 import type { HubEvent } from './client';
+import { authQuery } from './auth';
 
 export function subscribeSession(sessionId: string, onEvent: (ev: HubEvent) => void): () => void {
-  const es = new EventSource(`/api/sessions/${sessionId}/events`);
+  const es = new EventSource(`/api/sessions/${sessionId}/events${authQuery()}`);
   es.onmessage = (msg) => {
     try {
       onEvent(JSON.parse(msg.data) as HubEvent);
