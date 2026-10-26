@@ -77,6 +77,21 @@ export interface ServeOptions {
    * 测试注入以避免真的弹出系统窗口。
    */
   browseReveal?: (absPath: string, isDir: boolean) => void;
+  /**
+   * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
+   * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
+   * 或 `?auth=` 查询参数，值恒等才放行，否则 401。
+   * 恒定时间比较防时序侧信道。
+   */
+  authToken?: string;
+}
+
+/** authToken 恒定时间比较（防时序侧信道；长度差异直接拒绝） */
+function tokenMatches(expected: string, got: string): boolean {
+  if (expected.length !== got.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
 }
 
 /**
@@ -214,6 +229,17 @@ export function createWebServer(opts: ServeOptions): http.Server {
     const url = new URL(req.url ?? '/', `http://localhost`);
     const parts = url.pathname.split('/').filter(Boolean);
     const method = req.method ?? 'GET';
+
+    // 鉴权（桌面宿主注入 authToken 时启用；CLI serve 不传保持无鉴权现状）。
+    // 只拦 /api/*：静态资源无敏感数据且不带凭据（BrowserWindow 资产请求无法附带 query/header），
+    // 敏感面（会话/项目/配置数据）全部在 /api 下。
+    if (opts.authToken !== undefined && parts[0] === 'api') {
+      const got = req.headers['x-delta-auth'] ?? url.searchParams.get('auth') ?? '';
+      if (typeof got !== 'string' || !tokenMatches(opts.authToken, got)) {
+        json(res, 401, { error: 'unauthorized' });
+        return;
+      }
+    }
 
     try {
       // ── SSE 订阅 ──────────────────────────────────────────────────────────

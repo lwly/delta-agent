@@ -1,7 +1,9 @@
 /**
  * API client：`delta serve` REST 端点封装（technical-design §8.2）。
  * 同源部署（serve 内嵌托管）+ dev 代理，均走相对路径。
+ * 桌面宿主鉴权：token 由 api/auth.ts 承载（fetch 头 + 下载链接 query）。
  */
+import { authHeaders, authQuery } from './auth';
 
 export interface ProjectRow {
   id: string;
@@ -192,7 +194,7 @@ export interface HubEvent {
 async function request<T>(method: string, p: string, body?: unknown): Promise<T> {
   const res = await fetch(p, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
@@ -672,7 +674,7 @@ export const api = {
     request<{ ok: boolean; name: string; dir: string }>('POST', '/api/experts/create', form),
   importExpert: (b64: string, layer: 'user' | 'project' = 'user', force = false) =>
     request<{ ok: boolean; name: string; warnings: string[] }>('POST', '/api/experts/import', { b64, layer, force }),
-  exportExpertUrl: (name: string) => `/api/experts/${encodeURIComponent(name)}/export`,
+  exportExpertUrl: (name: string) => `/api/experts/${encodeURIComponent(name)}/export${authQuery()}`,
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
   removeSession: (id: string, hard = false) =>

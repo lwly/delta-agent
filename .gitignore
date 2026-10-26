@@ -11,3 +11,4 @@ coverage/
 *.timestamp-*.mjs
 # 打包产物与中间物（scripts/build-sea.mjs 生成，体积上百 MB）
 build/
+release/

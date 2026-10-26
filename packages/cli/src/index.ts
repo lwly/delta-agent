@@ -13,10 +13,7 @@ import {
   McpManager,
   loadMcpConfig,
   ProviderManager,
-  ModelRouter,
-  SessionHub,
-  createWebServer,
-  createSkillRuntime,
+  createServeRuntime,
   formatSearchHits,
   HookManager,
   loadHookFiles,
@@ -529,60 +526,6 @@ program
   .option('--web-dist <dir>', 'Vue 构建产物目录（缺省用包内嵌 packages/web/dist）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: { port: string; webDist?: string; db?: string }) => {
-    const service = new SessionService(opts.db);
-    const registry = new ToolRegistry();
-    const mcp = new McpManager();
-    const mcpConfig = loadMcpConfig(process.cwd());
-    for (const [name, cfg] of Object.entries(mcpConfig)) {
-      try {
-        await mcp.connect(name, cfg);
-        await mcp.registerInto(name, registry);
-        console.error(`✔ MCP ${name}：已接入`);
-      } catch (e) {
-        console.error(`✘ MCP ${name} 连接失败（已跳过）：${(e as Error).message}`);
-      }
-    }
-
-    const projectRoot = process.cwd();
-    const project = service.ensureProject(projectRoot); // 注册当前目录为项目
-    // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案（fire-and-forget，失败不影响服务）
-    if (project.created) {
-      void (async () => {
-        try {
-          const onboardingProvider = await resolveProviderFromEnv(undefined);
-          const r = await autoOnboardProject({
-            projectRoot,
-            provider: onboardingProvider,
-            model: process.env.DELTA_MODEL || 'claude-sonnet-4-5-20250929',
-          });
-          if (r && !r.skipped) {
-            console.log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
-          }
-        } catch {
-          console.error('⚠ onboarding 扫描失败（可稍后手动运行 `delta onboarding run`）');
-        }
-      })();
-    }
-    const skills = await createSkillRuntime(projectRoot);
-    // F-27 Hook 系统：加载用户级 + 项目级 hooks.json（工具钩子 + 生命周期）
-    const hooks = HookManager.load(projectRoot, undefined, (o) => {
-      if (!o.ok) console.error(`⚠ hook ${o.hook.event}(${o.hook.command}) 异常：${o.reason ?? o.stderr.trim().slice(0, 200)}`);
-    });
-
-    const hub = new SessionHub({
-      service,
-      registry,
-      resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
-      // F-32 模型路由：路由规则每次运行即时读取（settings 修改后生效）；目标 provider 走同一解析链
-      modelRouter: new ModelRouter(),
-      resolveProviderById: (id) => resolveProviderFromEnv(id),
-      skills,
-      hooks,
-      // F-33 桌面通知：任务结束 / 确认卡出现时系统级通知（旁路 fire-and-forget）
-      notify: createDesktopNotifier({ projectRoot }),
-    });
-
-    const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
     // Vue 构建产物候选：--web-dist > 包内嵌 cli/dist/web（npm 安装形态）> 仓库 packages/web/dist（开发形态）
     const distDir = path.dirname(fileURLToPath(import.meta.url));
     const webDist = [
@@ -591,26 +534,23 @@ program
       path.resolve(distDir, '../../web/dist'),
     ].find((d) => d && fs.existsSync(path.join(d, 'index.html')));
     const port = Number(opts.port) || 7900;
-    const server = createWebServer({
-      service,
-      hub,
+
+    // 组装编排已下移 core（createServeRuntime，桌面宿主共用同一工厂）；
+    // CLI 形态差异：注册 cwd 为默认项目 + spawn cron 执行器（nodePath = process.execPath 由 core 内部缺省）
+    const runtime = await createServeRuntime({
       port,
+      dbPath: opts.db,
       webDistDir: webDist,
-      providers,
-      // F-22 定时任务：Web 面板「立即运行」复用 spawn 子进程执行器（与 daemon 同构）
+      projectRoot: process.cwd(),
+      registerProject: true,
       cronExecutor: createSpawnExecutor(),
+      notify: createDesktopNotifier({ projectRoot: process.cwd() }),
     });
-    server.listen(port, '127.0.0.1', () => {
-      console.log(`✔ delta Web 控制台已启动：http://127.0.0.1:${port}`);
-      console.log(webDist ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
-      console.log('Ctrl+C 退出');
-    });
+    console.log(`✔ delta Web 控制台已启动：http://127.0.0.1:${runtime.port}`);
+    console.log(webDist ? `静态资源：${webDist}` : '（未发现 Vue 构建产物，仅提供 /api；先构建 packages/web）');
+    console.log('Ctrl+C 退出');
     const shutdown = () => {
-      server.close();
-      void mcp.disconnectAll().finally(() => {
-        service.close();
-        process.exit(0);
-      });
+      void runtime.dispose().finally(() => process.exit(0));
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
