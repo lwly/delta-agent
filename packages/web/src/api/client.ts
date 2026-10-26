@@ -38,6 +38,8 @@ export interface LocalizedText {
 export type ExpertType = 'agent' | 'team';
 
 export interface ExpertListItem {
+  /** P1（T16）：user/project 层已信任（builtin 恒 true）；召唤前信任门的数据源 */
+  trusted?: boolean;
   name: string;
   displayName: LocalizedText;
   profession: LocalizedText;
@@ -72,6 +74,8 @@ export interface ExpertDetail {
   skills: string[];
   tools: string[] | null;
   tool_stats: { restricted: number; total: number; unrestricted: boolean };
+  /** P1（T16）：工具集指纹（信任确认回传用；服务端重算复核） */
+  tools_hash: string;
   keywords: string[];
   members: ExpertMemberView[];
   prompt_preview: string;
@@ -637,7 +641,7 @@ export const api = {
     request<SessionRow>('POST', `/api/projects/${projectId}/sessions`, opts),
   // F-39 专家库（列表不含 body/头像内容；头像按 name 拉取后前端缓存）
   listExperts: (projectId?: string) =>
-    request<{ experts: ExpertListItem[]; errors: string[] }>(
+    request<{ experts: ExpertListItem[]; errors: string[]; disabled?: string[] }>(
       'GET',
       `/api/experts${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
     ),
@@ -647,6 +651,28 @@ export const api = {
   // 会话绑定状态（唯一权威来源：包删除 → missing:true）
   getSessionExpert: (sessionId: string) =>
     request<SessionExpertState>('GET', `/api/sessions/${sessionId}/expert`),
+  // F-39 P1：空会话就地改绑/解绑（有消息或运行中 → 409，调用方回退新建会话）
+  rebindSessionExpert: (sessionId: string, expert: string | null) =>
+    request<{ ok: boolean; expert: string | null; expertType: string | null }>(
+      'PATCH',
+      `/api/sessions/${sessionId}/expert`,
+      { expert },
+    ),
+  // F-39 P1（T16）：信任 / 撤销信任
+  trustExpert: (name: string, toolsHash: string) =>
+    request<{ ok: boolean }>('POST', `/api/experts/${encodeURIComponent(name)}/trust`, { tools_hash: toolsHash }),
+  revokeTrust: (name: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/experts/${encodeURIComponent(name)}/trust`),
+  // F-39 P1（T15）：停用/恢复 / 删除 / 创建 / 导入 / 导出（导出走浏览器下载）
+  setExpertDisabled: (name: string, disabled: boolean) =>
+    request<{ ok: boolean }>('PATCH', `/api/experts/${encodeURIComponent(name)}/disabled`, { disabled }),
+  deleteExpert: (name: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/experts/${encodeURIComponent(name)}`),
+  createExpert: (form: { name: string; displayName: string; profession: string; description?: string; expertType: 'agent' | 'team'; layer?: 'user' | 'project' }) =>
+    request<{ ok: boolean; name: string; dir: string }>('POST', '/api/experts/create', form),
+  importExpert: (b64: string, layer: 'user' | 'project' = 'user', force = false) =>
+    request<{ ok: boolean; name: string; warnings: string[] }>('POST', '/api/experts/import', { b64, layer, force }),
+  exportExpertUrl: (name: string) => `/api/experts/${encodeURIComponent(name)}/export`,
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
   removeSession: (id: string, hard = false) =>

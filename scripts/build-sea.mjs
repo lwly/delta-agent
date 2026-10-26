@@ -87,6 +87,9 @@ const required = [
   path.join(RUNTIME, 'dist/index.js'),
   path.join(RUNTIME, 'dist/web/index.html'),
   path.join(sqlite, 'build/Release/better_sqlite3.node'),
+  // F-39：内置专家/技能包必须随运行时分发（packages/core 的 files 字段已纳入，缺失 = files 回退）
+  path.join(RUNTIME, 'node_modules/@delta/core/experts/software-dev-team/expert.json'),
+  path.join(RUNTIME, 'node_modules/@delta/core/skills/commit-review/SKILL.md'),
 ];
 for (const file of required) {
   if (!fs.existsSync(file)) {

@@ -169,6 +169,12 @@ export class SessionService {
     this.store.setSessionWorktree(id, patch);
   }
 
+  /** F-39：就地校正会话执行模式（团队专家绑定 → react） */
+  setSessionMode(id: string, mode: string): void {
+    if (!this.store.getSession(id)) throw new Error('session not found');
+    this.store.setSessionMode(id, mode);
+  }
+
   /** F-39：更新会话的专家绑定（CLI 空会话就地绑定/解绑；Web P0 不走这里） */
   setSessionExpert(id: string, patch: { expert: string | null; expertType: 'agent' | 'team' | null }): void {
     if (!this.store.getSession(id)) throw new Error('session not found');

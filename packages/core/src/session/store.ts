@@ -183,6 +183,11 @@ export class SessionStore {
       .all(projectId) as SessionRow[];
   }
 
+  /** F-39：团队专家绑定要求 mode=react（空会话就地改绑时校正）。 */
+  setSessionMode(id: string, mode: string): void {
+    this.db.prepare('UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?').run(mode, new Date().toISOString(), id);
+  }
+
   /**
    * F-39：更新会话的专家绑定（两列同语句原子更新；NULL = 解绑）。
    * P0 仅 CLI 空会话解绑使用；Web 侧 P0 恒定新建会话（F-39-4）。
