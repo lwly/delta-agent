@@ -25,6 +25,8 @@ import type { ExpertListItem } from '../api/client';
 import RunStatusBar from '../components/RunStatusBar.vue';
 import FilePanel from '../components/FilePanel.vue';
 import { useFilePanelStore } from '../stores/filePanel';
+// F-40 桌面宿主：注册项目支持原生目录选择（CLI/浏览器形态按钮自动隐藏）
+import { hasNativeFolderPicker, pickFolder } from '../api/desktop';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
@@ -295,6 +297,21 @@ async function addProject() {
     if (!expanded.value.has(p.id)) toggleExpand(p.id);
   } catch (e) {
     addError.value = (e as Error).message;
+  }
+}
+
+// ── F-40 桌面宿主：原生目录选择（选中后回填输入框，注册仍走 addProject 单一路径）──
+const canPickFolder = hasNativeFolderPicker();
+const picking = ref(false);
+
+async function pickFolderIntoInput() {
+  if (picking.value) return;
+  picking.value = true;
+  try {
+    const dir = await pickFolder();
+    if (dir) newRoot.value = dir;
+  } finally {
+    picking.value = false;
   }
 }
 
@@ -1588,7 +1605,13 @@ watch(
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
       <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。</p>
-      <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
+      <div class="pick-row">
+        <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
+        <!-- F-40 桌面宿主：原生目录选择（选中回填，注册仍走输入框确认） -->
+        <button v-if="canPickFolder" class="btn pick-btn" :disabled="picking" @click="pickFolderIntoInput">
+          {{ picking ? '…' : '选择文件夹' }}
+        </button>
+      </div>
       <p v-if="addError" class="error">✘ {{ addError }}</p>
       <div class="modal-btns">
         <button class="btn" @click="showNewProject = false">取消</button>
@@ -1633,6 +1656,11 @@ watch(
 .app { display: flex; height: 100vh; position: relative; }
 /* F-38：面板展开时主区最小宽度 480px（PRD F-38-1）；窄屏覆盖式面板不挤压主区 */
 .app.panel-open .main { min-width: 480px; }
+
+/* F-40 注册项目弹窗：路径输入 + 桌面宿主原生目录选择按钮 */
+.pick-row { display: flex; gap: 8px; align-items: stretch; }
+.pick-row .full { flex: 1; min-width: 0; }
+.pick-btn { white-space: nowrap; }
 
 /* ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ */
 .sidebar {
