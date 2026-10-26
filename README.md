@@ -103,3 +103,25 @@ pnpm --filter @delta/cli build
 - [docs/design-f40-desktop.md](docs/design-f40-desktop.md) —— F-40 桌面化（Electron 方案 B）技术设计
 - [docs/prompt-design.md](docs/prompt-design.md) —— 提示词设计
 - [docs/memory-design.md](docs/memory-design.md) —— 三层记忆设计
+
+## 配置与隐私
+
+仓库里不含任何密钥或本机配置，以下内容全部由使用者在本地生成（已在 `.gitignore` 中忽略）：
+
+| 路径 | 内容 |
+|------|------|
+| `~/.delta/models.json` | 模型 Provider 配置，API Key 以 AES-256-GCM 加密存储（文件权限 0600） |
+| `~/.delta/agent.db` | 会话、消息、使用量等 SQLite 数据 |
+| `<项目>/.delta/` | 项目级配置（`mcp.json` / `hooks.json` / `sandbox.json` / 评测基线等） |
+
+接入模型只需一条命令，密钥只经环境变量或参数传入，不落代码：
+
+```bash
+delta models add anthropic -k "$ANTHROPIC_API_KEY" --default
+delta models add my-gateway -k "$GATEWAY_KEY" --base-url https://example.com/v1
+```
+
+## 许可证
+
+[MIT](LICENSE)
+
