@@ -15,7 +15,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { createServeRuntime, type ServeRuntime } from '@delta/core';
 import { ElectronNotifier } from './electron-notifier.js';
 
@@ -31,6 +31,16 @@ if (!app.requestSingleInstanceLock()) {
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_ID);
 }
+
+// 原生目录选择（注册项目弹窗「选择文件夹」按钮的 IPC 后端）；只返回所选路径，无其他能力
+ipcMain.handle('desktop:pick-folder', async () => {
+  const opts = { properties: ['openDirectory'] as ('openDirectory')[] };
+  const focused = BrowserWindow.getFocusedWindow();
+  const r = focused
+    ? await dialog.showOpenDialog(focused, opts)
+    : await dialog.showOpenDialog(opts);
+  return r.canceled ? null : (r.filePaths[0] ?? null);
+});
 
 /** Vue 构建产物解析：打包形态 extraResources > 仓库 dev 形态 > 显式 env */
 function resolveWebDistDir(): string | undefined {
@@ -72,6 +82,7 @@ async function bootstrap(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'preload.js'),
     },
   });
 
