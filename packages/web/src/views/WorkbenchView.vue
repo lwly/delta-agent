@@ -25,6 +25,8 @@ import type { ExpertListItem } from '../api/client';
 import RunStatusBar from '../components/RunStatusBar.vue';
 import FilePanel from '../components/FilePanel.vue';
 import { useFilePanelStore } from '../stores/filePanel';
+// 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
+import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
@@ -296,6 +298,13 @@ async function addProject() {
   } catch (e) {
     addError.value = (e as Error).message;
   }
+}
+
+// 注册项目：桌面壳内可调系统目录选择器回填输入框；浏览器形态无桥接（canPick=false）不展示按钮
+const canPickDirectory = hasDesktopBridge();
+async function browseProjectRoot() {
+  const dir = await pickDirectory();
+  if (dir) newRoot.value = dir;
 }
 
 /** F-39：返回新会话 id（null = 失败；失败方只写 error 不推提示，调用方据返回值决定是否推成功提示） */
@@ -1587,8 +1596,11 @@ watch(
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
-      <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。</p>
-      <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
+      <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。<template v-if="canPickDirectory">也可点「浏览…」直接选择目录。</template></p>
+      <div class="path-row">
+        <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
+        <button v-if="canPickDirectory" class="btn" @click="browseProjectRoot">浏览…</button>
+      </div>
       <p v-if="addError" class="error">✘ {{ addError }}</p>
       <div class="modal-btns">
         <button class="btn" @click="showNewProject = false">取消</button>
@@ -2252,6 +2264,9 @@ watch(
 .modal-tip { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
 .modal-tip b { color: var(--text); }
 .full { width: 100%; margin-bottom: 12px; }
+/* 注册项目：路径输入 + 「浏览…」（桌面壳桥接可用时展示）同行排布（.full 自带 12px 下边距，行内归零） */
+.path-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.path-row .full, .path-row .btn { margin-bottom: 0; }
 .error { color: var(--red); font-size: 12.5px; margin-bottom: 8px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
 </style>
