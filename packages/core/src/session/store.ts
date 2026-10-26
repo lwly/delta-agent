@@ -17,7 +17,29 @@ export interface SessionRow {
   worktree_path: string | null;
   /** F-37（v4）：切入 worktree 时的分支（恢复校验/展示用） */
   worktree_branch: string | null;
+  /** F-39（v5）：绑定专家 name；NULL = 无专家 */
+  expert: string | null;
+  /** F-39（v5）：'agent' | 'team'；NULL = 无专家 */
+  expert_type: string | null;
 }
+
+/** 会话列清单：4 处 SELECT 共用一份，避免加列时漏改（F-39 §6.5） */
+const SESSION_COLUMNS = [
+  'id',
+  'project_id',
+  'title',
+  'mode',
+  'model',
+  'status',
+  'created_at',
+  'updated_at',
+  'worktree_path',
+  'worktree_branch',
+  'expert',
+  'expert_type',
+] as const;
+
+const sessionColumns = (prefix = ''): string => SESSION_COLUMNS.map((c) => `${prefix}${c}`).join(', ');
 
 export interface ProjectRow {
   id: string;
@@ -120,26 +142,55 @@ export class SessionStore {
     title?: string;
     mode?: string;
     model?: string;
+    expert?: string | null;
+    expertType?: 'agent' | 'team' | null;
   }): SessionRow {
+    if (row.expertType != null && row.expertType !== 'agent' && row.expertType !== 'team') {
+      throw new Error(`非法的 expert_type：${row.expertType}（只允许 agent / team）`);
+    }
     const now = new Date().toISOString();
     this.db
       .prepare(
-        'INSERT INTO sessions (id, project_id, title, mode, model, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO sessions (id, project_id, title, mode, model, status, created_at, updated_at, expert, expert_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.id, row.projectId, row.title ?? 'New session', row.mode ?? 'react', row.model ?? '', 'active', now, now);
+      .run(
+        row.id,
+        row.projectId,
+        row.title ?? 'New session',
+        row.mode ?? 'react',
+        row.model ?? '',
+        'active',
+        now,
+        now,
+        row.expert ?? null,
+        row.expertType ?? null,
+      );
     return this.getSession(row.id)!;
   }
 
   getSession(id: string): SessionRow | undefined {
     return this.db
-      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at, worktree_path, worktree_branch FROM sessions WHERE id = ? AND deleted_at IS NULL')
+      .prepare(`SELECT ${sessionColumns()} FROM sessions WHERE id = ? AND deleted_at IS NULL`)
       .get(id) as SessionRow | undefined;
   }
 
   listSessions(projectId: string): SessionRow[] {
     return this.db
-      .prepare('SELECT id, project_id, title, mode, model, status, created_at, updated_at, worktree_path, worktree_branch FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC')
+      .prepare(
+        `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`,
+      )
       .all(projectId) as SessionRow[];
+  }
+
+  /**
+   * F-39：更新会话的专家绑定（两列同语句原子更新；NULL = 解绑）。
+   * P0 仅 CLI 空会话解绑使用；Web 侧 P0 恒定新建会话（F-39-4）。
+   */
+  setSessionExpert(id: string, patch: { expert: string | null; expertType: 'agent' | 'team' | null }): void {
+    this.db
+      .prepare('UPDATE sessions SET expert = ?, expert_type = ?, updated_at = ? WHERE id = ?')
+      .run(patch.expert, patch.expertType, new Date().toISOString(), id);
   }
 
   /**
@@ -260,7 +311,7 @@ export class SessionStore {
   searchSessions(query: string, limit = 20): SessionRow[] {
     const like = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     return this.db.prepare(
-      `SELECT DISTINCT s.id, s.project_id, s.title, s.mode, s.model, s.status, s.created_at, s.updated_at, s.worktree_path, s.worktree_branch
+      `SELECT DISTINCT ${sessionColumns('s.')}
        FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
        WHERE s.deleted_at IS NULL AND (s.title LIKE ? ESCAPE '\\' OR m.content_json LIKE ? ESCAPE '\\')
        ORDER BY s.updated_at DESC LIMIT ?`,

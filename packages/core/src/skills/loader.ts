@@ -12,6 +12,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
+import { discoverLayered, type LayeredDir } from './layered.js';
 
 export type SkillLayer = 'builtin' | 'user' | 'project';
 
@@ -48,41 +49,23 @@ export function defaultBuiltinSkillsDir(): string {
 /**
  * 三层发现 + 同名覆盖合并。
  * 单个 Skill 包解析失败不阻塞其他包（跳过并记入 errors）。
+ * 遍历逻辑由 `discoverLayered` 提供（F-39 D10：与专家库共用同一份三层语义）。
  */
 export async function discoverSkills(
   opts: DiscoverOptions = {},
 ): Promise<{ skills: SkillMeta[]; errors: string[] }> {
-  const layers: Array<{ layer: SkillLayer; dir?: string }> = [
+  const layers: LayeredDir[] = [
     { layer: 'builtin', dir: opts.builtinDir ?? defaultBuiltinSkillsDir() },
     { layer: 'user', dir: opts.homeDir ? path.join(userConfigDir(opts.homeDir), FILES.skillsDir) : undefined },
     { layer: 'project', dir: opts.projectRoot ? path.join(projectConfigDir(opts.projectRoot), FILES.skillsDir) : undefined },
   ];
 
-  const errors: string[] = [];
-  const byName = new Map<string, SkillMeta>();
+  const { byName, errors } = await discoverLayered<SkillMeta>({
+    layers,
+    readEntry: (dir, name, layer) => readSkillDir(path.join(dir, name), layer, name),
+  });
 
-  for (const { layer, dir } of layers) {
-    if (!dir) continue;
-    let entries: string[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true }).then((list) =>
-        list.filter((e) => e.isDirectory()).map((e) => e.name),
-      );
-    } catch {
-      continue; // 目录不存在 → 该层无 Skills
-    }
-    for (const name of entries) {
-      const skillDir = path.join(dir, name);
-      try {
-        const skill = await readSkillDir(skillDir, layer, name);
-        byName.set(name, skill); // 高层覆盖低层（遍历顺序 builtin→user→project）
-      } catch (e) {
-        errors.push(`${layer}/${name}: ${(e as Error).message}`);
-      }
-    }
-  }
-
-  return { skills: [...byName.values()], errors };
+  return { skills: [...byName.values()].map((e) => e.value), errors };
 }
 
 /** 读取单个 Skill 目录：解析 SKILL.md + 列出 references/ */

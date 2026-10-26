@@ -42,7 +42,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       await this.refreshProjects();
       return p;
     },
-    async createSession(opts?: { title?: string; model?: string; mode?: string }) {
+    async createSession(opts?: { title?: string; model?: string; mode?: string; expert?: string }) {
       if (!this.activeProjectId) throw new Error('未选择项目');
       const s = await api.createSession(this.activeProjectId, opts);
       await this.selectProject(this.activeProjectId);

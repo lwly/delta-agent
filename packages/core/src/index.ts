@@ -82,6 +82,7 @@ export type {
   AssembleContext,
   AssembleResult,
   AssembleWarning,
+  ExpertSegmentInput,
   LayerId,
   LayerOverride,
   LayerValue,
@@ -415,6 +416,13 @@ export {
   type SkillMeta,
 } from './skills/loader.js';
 export {
+  discoverLayered,
+  DEFAULT_MAX_PER_LAYER,
+  type LayerName,
+  type LayeredDir,
+  type LayeredOutcome,
+} from './skills/layered.js';
+export {
   tokenize,
   scoreSkill,
   matchSkills,
@@ -592,3 +600,70 @@ export {
   type BrowseRouteInput,
   type BrowseRouteOutcome,
 } from './server/browse-routes.js';
+
+// F-39 专家 / 专家团：包协议、三层发现、Prompt 段、白名单、会话绑定、成员委派
+// 详见 docs/design-f39-experts.md（core 侧零 UI 依赖，纯函数可直测）
+export {
+  AGENT_ID_PATTERN,
+  EXPERT_NAME_PATTERN,
+  EXPERT_BODY_MAX_CHARS,
+  MAX_TEAM_MEMBERS,
+  displayOf,
+  type ExpertPackage,
+  type ExpertAgent,
+  type ExpertMember,
+  type ExpertRecord,
+  type ExpertLayer,
+  type ExpertType,
+  type ExpertDiscoverResult,
+  type ExpertListItem,
+  type ExpertLayers,
+  type LocalizedText,
+} from './experts/types.js';
+export {
+  parseExpertPackage,
+  parseAgentMarkdown,
+  validateExpertName,
+  escapeReservedMarkers,
+  resolveInPackage,
+  EXPERT_JSON_MAX_BYTES,
+  AGENT_MD_MAX_BYTES,
+  type ParseInput,
+} from './experts/parser.js';
+export {
+  ExpertStore,
+  defaultBuiltinExpertsDir,
+  toExpertListItem,
+  MAX_EXPERTS_PER_LAYER,
+  AVATAR_MAX_BYTES,
+  type ExpertStoreOptions,
+} from './experts/store.js';
+export {
+  prepareExpertSegment,
+  EXPERT_MEMBERS_LINE_MAX,
+  TRUNCATE_SUFFIX,
+} from './experts/prompt.js';
+export {
+  BUILTIN_TOOL_COUNT,
+  EXPERT_SKILLS_MAX_COUNT,
+  EXPERT_SKILLS_MAX_TOKENS,
+  resolveToolAllow,
+  restrictRegistry,
+  seedExpertSkills,
+  type ToolAllowResolution,
+} from './experts/policy.js';
+export { resolveBinding, type BindingInput, type SessionBinding } from './experts/session-binding.js';
+export {
+  MAX_DELEGATIONS_PER_RUN,
+  MEMBER_BODY_MAX_CHARS,
+  buildMemberSystemPrompt,
+  delegationPrefix,
+  toTeamRuntime,
+} from './experts/team.js';
+export { buildAssembleContext, type BuildAssembleContextInput } from './experts/assemble-context.js';
+export {
+  handleExpertsRoute,
+  resolveExpertForCreate,
+  listExpertNames,
+  type ExpertsRouteDeps,
+} from './server/experts-routes.js';

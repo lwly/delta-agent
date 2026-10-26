@@ -11,15 +11,23 @@ import { api, type ChatMessage, type MessageHit, type MessageImage, type Provide
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
 import TrashModal from '../components/TrashModal.vue';
+// F-39：ExpertDetail 在根级渲染（见模板尾部）
 import SearchModal from '../components/SearchModal.vue';
 import GitStatusBar from '../components/GitStatusBar.vue';
 import ToolCallCard from '../components/ToolCallCard.vue';
+import ExpertPanel from '../components/ExpertPanel.vue';
+import ExpertComposerBadge from '../components/ExpertComposerBadge.vue';
+import ExpertDetail from '../components/ExpertDetail.vue';
+import ExpertMemberCard from '../components/ExpertMemberCard.vue';
+import { useExpertsStore } from '../stores/experts';
+import type { ExpertListItem } from '../api/client';
 import RunStatusBar from '../components/RunStatusBar.vue';
 import FilePanel from '../components/FilePanel.vue';
 import { useFilePanelStore } from '../stores/filePanel';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
+const expertsStore = useExpertsStore();
 // F-38 右侧文件面板：状态全在 store，本视图只做「作用域推导 + 联动失效」接线
 const panel = useFilePanelStore();
 const route = useRoute();
@@ -40,6 +48,10 @@ const removeTarget = ref<{ kind: 'project' | 'session'; id: string; name: string
 const removeConfirmName = ref('');
 const showTrash = ref(false);
 const showSearch = ref(false);
+// ── F-39 专家 / 专家团 ──────────────────────────────────────────────
+const showExpertPanel = ref(false);
+const expertChipRef = ref<HTMLElement | null>(null);
+const expertDetailName = ref<string | null>(null);
 
 // ⌘K / Ctrl+K 全局快捷键：打开会话检索弹窗（仅新增入口，不改动既有逻辑）
 // ⌘B / Ctrl+B：开合右侧文件面板（F-38，与顶栏 📁 按钮等价）
@@ -283,21 +295,85 @@ async function addProject() {
   }
 }
 
-async function newSession(mode?: string) {
+/** F-39：返回新会话 id（null = 失败；失败方只写 error 不推提示，调用方据返回值决定是否推成功提示） */
+async function newSession(mode?: string, expert?: string): Promise<string | null> {
   if (!ws.activeProjectId) {
     error.value = '请先选择或注册一个项目';
-    return;
+    return null;
   }
   try {
     const s = await ws.createSession({
       title: `新对话 ${new Date().toLocaleString('zh-CN')}`,
       mode: mode ?? modeChoice.value,
       model: preferredModel.value || undefined,
+      ...(expert ? { expert } : {}),
     });
     await openSession(s.id);
+    return s.id;
   } catch (e) {
     error.value = (e as Error).message;
+    return null;
   }
+}
+
+// ── F-39：召唤面板 / 胶囊 / 详情 ────────────────────────────────────
+const expertCapsule = computed(() => {
+  const name = chat.sessionMeta?.expert;
+  if (!name) return null;
+  const item = expertsStore.byName(name);
+  const type = (chat.sessionMeta?.expertType ?? item?.expertType ?? 'agent') as 'agent' | 'team';
+  return { name, displayName: item?.displayName.zh || item?.displayName.en || name, type };
+});
+const teamModeForced = computed(() => chat.sessionMeta?.expertType === 'team');
+
+async function toggleExpertPanel(open: boolean) {
+  showExpertPanel.value = open;
+  if (open && !expertsStore.loaded) void expertsStore.load(ws.activeProjectId ?? undefined);
+}
+
+/** 选中专家：再次点当前专家 = 只关闭；否则新建会话并绑定（提示必须在 open 之后，否则被 close() 清空） */
+async function onExpertSelect(item: ExpertListItem) {
+  if (item.name === chat.sessionMeta?.expert) {
+    showExpertPanel.value = false;
+    return;
+  }
+  const id = await newSession(undefined, item.name);
+  if (!id) return; // 失败：newSession 已写 error，不推提示
+  const dn = item.displayName.zh || item.displayName.en;
+  chat.notice(
+    item.expertType === 'team'
+      ? `已召唤「${dn}」（已新建对话，模式固定为 ReAct）`
+      : `已召唤「${dn}」专家（已新建对话）`,
+  );
+  if (item.missingMcp.length) {
+    chat.notice(`该专家声明了未启用的 MCP 依赖：${item.missingMcp.join('、')}（本次仍按无依赖运行）`);
+  }
+  showExpertPanel.value = false;
+}
+
+/** 胶囊 ✕：P0 恒定新建无专家会话（绝不改写当前/历史会话的 expert 字段） */
+async function onExpertRemove() {
+  const id = await newSession();
+  if (!id) return;
+  chat.notice('已取消专家（已新建对话）');
+}
+
+function onExpertDetail(item: ExpertListItem) {
+  expertDetailName.value = item.name;
+}
+
+async function onDetailSummon(name: string) {
+  expertDetailName.value = null;
+  const item = expertsStore.byName(name);
+  if (item) await onExpertSelect(item);
+}
+
+/** 「由 X 执行」标签：实时取 msg.agentName；回放从 content 前缀解析（权威写入方 = task 工具） */
+function agentLabelOf(m: ChatMessage): string | null {
+  if (m.agentName) return m.agentName;
+  const r = /^\[expert:([A-Za-z0-9_-]{1,40})\]\s*([^\n]*)/.exec(m.content);
+  if (!r) return null;
+  return (r[2] ?? '').trim() || r[1]!;
 }
 
 async function openSession(id: string) {
@@ -544,6 +620,7 @@ interface ToolCardProps {
   durationMs?: number;
   seq?: number;
   sandboxMeta?: ChatMessage['sandboxMeta'];
+  agentName?: string | null;
 }
 function toolCardOf(id: string, name: string, argsJson: string): ToolCardProps {
   const res = resultMap.value.get(id);
@@ -558,6 +635,7 @@ function toolCardOf(id: string, name: string, argsJson: string): ToolCardProps {
     durationMs: res?.durationMs,
     seq: callInfoMap.value.get(id)?.seq,
     sandboxMeta: res?.sandboxMeta,
+    agentName: res ? agentLabelOf(res) : null,
   };
 }
 /** 助手消息上的调用 → 完整工具卡（结果未到 = 运行中态） */
@@ -578,6 +656,7 @@ function orphanCard(m: ChatMessage): ToolCardProps {
     durationMs: m.durationMs,
     seq: info?.seq ?? m.toolSeq,
     sandboxMeta: m.sandboxMeta,
+    agentName: agentLabelOf(m),
   };
 }
 
@@ -1213,6 +1292,11 @@ watch(
               </div>
             </div>
 
+            <!-- F-39：专家团成员卡（实时委派；不落库，本轮运行结束随会话切换清空） -->
+            <div v-if="chat.delegations.length" class="expert-delegations">
+              <ExpertMemberCard v-for="d in chat.delegations" :key="`${d.memberId}-${d.startedAt}`" :card="d" />
+            </div>
+
             <!-- 流式中的助手输出：打字机光标 ▍（CSS blink） -->
             <div v-if="chat.streamingText" class="msg msg-ai">
               <span class="avatar ai">Δ</span>
@@ -1320,6 +1404,15 @@ watch(
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 @ 后自动补全项目文件" @click="acTrigger('file')">@文件引用</button>
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 / 后自动补全可用技能" @click="acTrigger('skill')">/skill 技能</button>
                 <span class="tool-chip static" title="查看已配置的 MCP 扩展工具提示词">/mcp 扩展工具</span>
+                <!-- F-39：召唤专家（切换 = 新建对话；运行中置灰） -->
+                <button
+                  ref="expertChipRef"
+                  class="tool-chip"
+                  type="button"
+                  :disabled="chat.running"
+                  title="召唤专家（切换专家将新建对话）"
+                  @click="toggleExpertPanel(!showExpertPanel)"
+                >🧑‍💼 专家</button>
               </div>
               <span class="tool-divider" aria-hidden="true" />
               <div class="tool-group">
@@ -1327,8 +1420,8 @@ watch(
                 <select
                   class="mode-select"
                   :value="chat.sessionMeta.mode"
-                  :disabled="chat.running"
-                  title="当前执行模式（Agent 运行中不可切换，停止后可继续）"
+                  :disabled="chat.running || teamModeForced"
+                  :title="teamModeForced ? '专家团由主理人调度，固定使用 ReAct' : '当前执行模式（Agent 运行中不可切换，停止后可继续）'"
                   @change="onModeSwitch(($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="m in MODES" :key="m.value" :value="m.value">{{ m.ico }} {{ m.label }}</option>
@@ -1354,6 +1447,30 @@ watch(
                 <button class="rm" @click="removePendingImage(i)">×</button>
               </span>
             </div>
+            <!-- F-39：已绑定专家胶囊（数据源 = chat.sessionMeta.expert，会话字段唯一真相） -->
+            <div v-if="expertCapsule" class="composer-caps">
+              <ExpertComposerBadge
+                :display-name="expertCapsule.displayName"
+                :type="expertCapsule.type"
+                :missing="chat.expertMissing"
+                :disabled="chat.running"
+                @remove="onExpertRemove"
+              />
+            </div>
+            <!-- F-39：召唤面板（绝对定位在 composer 上方，与 .ac-panel 同位） -->
+            <ExpertPanel
+              v-if="showExpertPanel"
+              :anchor="expertChipRef"
+              :selected="chat.sessionMeta?.expert ?? null"
+              :list="expertsStore.list"
+              :loading="expertsStore.loading"
+              :error="expertsStore.error"
+              :errors="expertsStore.errors"
+              @select="onExpertSelect"
+              @close="showExpertPanel = false"
+              @more="showExpertPanel = false"
+              @detail="onExpertDetail"
+            />
             <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="onPickImages" />
             <textarea
               ref="composerEl"
@@ -1445,6 +1562,13 @@ watch(
 
     <TrashModal v-if="showTrash" @close="showTrash = false" />
     <SearchModal v-if="showSearch" @close="showSearch = false" @open-session="openSession" />
+    <!-- F-39：专家详情弹层（ModalShell 520px；召唤走与面板相同的 onExpertSelect 流程） -->
+    <ExpertDetail
+      v-if="expertDetailName"
+      :name="expertDetailName"
+      @close="expertDetailName = null"
+      @summon="onDetailSummon"
+    />
   </div>
 </template>
 
@@ -2056,6 +2180,10 @@ watch(
 /* 发送按钮内的快捷键块：蓝底上用纯白，避免暗色块看起来像渲染异常 */
 .send-btn .kbd { color: #fff; border-color: rgba(255, 255, 255, 0.6); font-size: 10px; }
 .pending-imgs { display: flex; gap: 8px; margin-bottom: 8px; }
+/* F-39：专家胶囊行（与 .pending-imgs 同一 flex 基类语义；容器分离，互不清空） */
+.composer-caps { display: flex; gap: 8px; margin-bottom: 8px; }
+/* F-39：专家团成员卡列表（消息流尾部，实时态） */
+.expert-delegations { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
 .thumb { position: relative; display: inline-block; }
 .thumb img { width: 52px; height: 52px; object-fit: cover; border-radius: 7px; border: 1px solid var(--border); display: block; }
 .thumb .rm {

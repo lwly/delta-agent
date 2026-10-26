@@ -79,11 +79,11 @@ describe('SplitPromptAssembler 静态缓存', () => {
     expect(hijack.warnings).toHaveLength(1);
   });
 
-  it('静态段含 4 层、动态段含 3 层', () => {
+  it('静态段含 5 层、动态段含 3 层', () => {
     const asm = new SplitPromptAssembler();
     const r = asm.assemble(makeCtx({ skillIndex: [{ name: 's', description: 'd', triggers: [] }] }));
     expect(r.sections.filter((s) => s.kind === 'static').map((s) => s.id)).toEqual(
-      ['identity', 'environment', 'project', 'tools'],
+      ['identity', 'environment', 'project', 'tools', 'expert'],
     );
     expect(r.sections.filter((s) => s.kind === 'dynamic').map((s) => s.id)).toEqual(
       ['skills', 'memory', 'session'],

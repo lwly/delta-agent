@@ -1,0 +1,92 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "delta-agent builtin"
+  },
+  "name": "software-dev-team",
+  "description": "软件开发团队：主理人按 SOP 调度产品/开发/测试三名成员交付任务",
+  "expertType": "team",
+  "agentName": "software-dev-team-lead",
+  "agents": [
+    "agents/software-dev-team-lead.md",
+    "agents/software-dev-team-pm.md",
+    "agents/software-dev-team-dev.md",
+    "agents/software-dev-team-test.md"
+  ],
+  "displayName": {
+    "en": "Software Dev Team",
+    "zh": "软件开发团队"
+  },
+  "profession": {
+    "en": "Delivery",
+    "zh": "交付团队"
+  },
+  "tools": [
+    "read_file",
+    "list_dir",
+    "glob_search",
+    "grep_search",
+    "task",
+    "todo_write",
+    "ask_user"
+  ],
+  "members": [
+    {
+      "id": "software-dev-team-lead",
+      "name": {
+        "en": "Lead",
+        "zh": "主理人"
+      },
+      "profession": {
+        "en": "Lead",
+        "zh": "调度"
+      },
+      "role": "lead"
+    },
+    {
+      "id": "software-dev-team-pm",
+      "name": {
+        "en": "PM",
+        "zh": "产品"
+      },
+      "profession": {
+        "en": "PM",
+        "zh": "产品"
+      },
+      "role": "member"
+    },
+    {
+      "id": "software-dev-team-dev",
+      "name": {
+        "en": "Dev",
+        "zh": "开发"
+      },
+      "profession": {
+        "en": "Dev",
+        "zh": "开发"
+      },
+      "role": "member"
+    },
+    {
+      "id": "software-dev-team-test",
+      "name": {
+        "en": "QA",
+        "zh": "测试"
+      },
+      "profession": {
+        "en": "QA",
+        "zh": "测试"
+      },
+      "role": "member"
+    }
+  ],
+  "teamInfo": {
+    "leadAgent": "software-dev-team-lead",
+    "memberAgents": [
+      "software-dev-team-lead",
+      "software-dev-team-pm",
+      "software-dev-team-dev",
+      "software-dev-team-test"
+    ]
+  }
+}

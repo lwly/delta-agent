@@ -14,7 +14,14 @@ import { subscribeSession } from '../api/sse';
 export const useChatStore = defineStore('chat', {
   state: () => ({
     sessionId: '' as string,
-    sessionMeta: null as null | { title: string; mode: string; model: string },
+    sessionMeta: null as null | {
+      title: string;
+      mode: string;
+      model: string;
+      /** F-39：绑定专家 name（会话字段 = 胶囊唯一真相；null = 无专家） */
+      expert?: string | null;
+      expertType?: string | null;
+    },
     messages: [] as ChatMessage[],
     streamingText: '',
     running: false,
@@ -41,6 +48,22 @@ export const useChatStore = defineStore('chat', {
     toolSeq: 0,
     /** thinking_delta 流式思考文本累积（随其后落库的 assistant 消息保留；后端不下发则恒为空） */
     thinkingText: '',
+    // ── F-39 专家 / 专家团 ──────────────────────────────────────────────
+    /** 恢复会话时绑定包已删除（一次性提示的数据源；胶囊显示 ⚠） */
+    expertMissing: false,
+    /** 专家团成员卡（实时 SSE；不落库，done 后原地更新） */
+    delegations: [] as Array<{
+      memberId: string;
+      memberName: string;
+      profession: string;
+      role: 'lead' | 'member';
+      goal: string;
+      status: 'running' | 'ok' | 'failed' | 'canceled';
+      startedAt: number;
+      ms?: number;
+      summary?: string;
+      readonlyDegraded?: boolean;
+    }>,
   }),
   actions: {
     async open(sessionId: string) {
@@ -74,6 +97,24 @@ export const useChatStore = defineStore('chat', {
       // F-37：底栏 git 状态（失败静默，不阻塞会话打开）
       await this.loadGitState(sessionId);
       if (this.sessionId !== sessionId) return;
+      // F-39：会话绑定状态（唯一权威来源；missing = 包已删除 → 降级提示一次）
+      this.expertMissing = false;
+      this.delegations = [];
+      try {
+        const st = await api.getSessionExpert(sessionId);
+        if (this.sessionId !== sessionId) return;
+        this.sessionMeta = {
+          ...this.sessionMeta!,
+          expert: st.bound?.name ?? null,
+          expertType: st.bound?.expertType ?? null,
+        };
+        this.expertMissing = st.missing;
+        if (st.missing && st.bound?.name) {
+          this.notice(`原绑定专家「${st.bound.name}」已不存在，已按无专家运行`);
+        }
+      } catch {
+        // 端点不可用（旧服务端）→ 静默
+      }
       this.pendingConfirm = null;
       this.pendingPlan = null;
       this.pendingAsk = null;
@@ -84,6 +125,8 @@ export const useChatStore = defineStore('chat', {
       this.unsub = null;
       this.sessionId = '';
       this.sessionMeta = null;
+      this.expertMissing = false;
+      this.delegations = [];
       this.messages = [];
       this.streamingText = '';
       // 切换/关闭会话必须清空上一会话的全部 UI 状态：notices 渲染在对话区内，
@@ -158,7 +201,11 @@ export const useChatStore = defineStore('chat', {
             name: string;
             ok: boolean;
             content: string;
-            meta?: { sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean } };
+            meta?: {
+              sandbox?: { mode: string; network?: string; ms?: number; degraded?: boolean };
+              /** F-39：专家团成员标识（task 工具回传；实时数据源） */
+              agent_name?: string;
+            };
           };
           const callMeta = this.pendingCalls[result.callId];
           this.messages.push({
@@ -171,6 +218,8 @@ export const useChatStore = defineStore('chat', {
             ...(callMeta ? { durationMs: Date.now() - callMeta.startedAt, toolSeq: callMeta.seq } : {}),
             // F-30 沙箱徽标（R8）：只在显式启用沙箱时存在，随实时 SSE 展示
             ...(result.meta?.sandbox ? { sandboxMeta: result.meta.sandbox } : {}),
+            // F-39：「由 X 执行」角标（实时数据源 = meta.agent_name；回放 = content 前缀）
+            ...(result.meta?.agent_name ? { agentName: result.meta.agent_name } : {}),
           });
           break;
         }
@@ -232,6 +281,31 @@ export const useChatStore = defineStore('chat', {
               ? `🔍 质量审查通过（rev ${String(ev.revision)}）`
               : `🔍 质量审查不通过：${verdict.failures.map((f) => `${f.nodeId} ${f.reason}`).join('; ')}`,
           );
+          break;
+        }
+        // ── F-39：专家团成员委派事件（成员卡；start 追加 / done 原地更新）──
+        case 'expert_delegate_start': {
+          const e = ev as unknown as { memberId: string; memberName: string; profession: string; role: 'lead' | 'member'; goal: string; startedAt: number };
+          this.delegations.push({
+            memberId: e.memberId,
+            memberName: e.memberName,
+            profession: e.profession,
+            role: e.role,
+            goal: e.goal,
+            status: 'running',
+            startedAt: e.startedAt,
+          });
+          break;
+        }
+        case 'expert_delegate_done': {
+          const e = ev as unknown as { memberId: string; status: 'ok' | 'failed' | 'canceled'; ms: number; summary: string; readonlyDegraded?: boolean };
+          const card = [...this.delegations].reverse().find((d) => d.memberId === e.memberId && d.status === 'running');
+          if (card) {
+            card.status = e.status;
+            card.ms = e.ms;
+            card.summary = e.summary;
+            card.readonlyDegraded = e.readonlyDegraded;
+          }
           break;
         }
         case 'error':

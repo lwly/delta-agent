@@ -12,13 +12,18 @@ export function WorktreeBar(props: {
   branch: string | null;
   worktreeEnabled: boolean;
   worktreePath?: string | null;
+  /** F-39：已绑定专家时显示 `◆ <displayName>`；无专家不渲染该段（不占位） */
+  expertLabel?: string | null;
 }) {
   return (
     <Box marginTop={0} paddingX={1} justifyContent="space-between">
       <Text color={theme.prompt}>📁 {props.projectName}</Text>
-      <Text color={theme.border}>
-        {icons.git} {props.branch ?? '（非 git 仓库）'}
-      </Text>
+      <Box gap={2}>
+        {props.expertLabel ? <Text color={theme.toolOk}>{props.expertLabel}</Text> : null}
+        <Text color={theme.border}>
+          {icons.git} {props.branch ?? '（非 git 仓库）'}
+        </Text>
+      </Box>
       {props.worktreeEnabled ? (
         <Text color={theme.toolOk}>
           ● Worktree{props.worktreePath ? `（${props.worktreePath}）` : ''}

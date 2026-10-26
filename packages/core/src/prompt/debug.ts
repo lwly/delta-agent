@@ -23,6 +23,8 @@ export interface PromptDebugReport {
     locked: boolean;
     tokens: number;
     preview: string;
+    /** 段内容来源（如 expert:code-architect）；无来源为 null */
+    source: string | null;
   }>;
   /** 动态段总 token */
   dynamicTokens: number;
@@ -62,6 +64,7 @@ export function buildDebugReport(input: DebugReportInput): PromptDebugReport {
       locked: s.locked,
       tokens: s.tokens,
       preview: sectionPreview(s),
+      source: s.source ?? null,
     })),
     dynamicTokens: split.dynamic.tokens,
     totalTokens: split.staticEntry.tokens + split.dynamic.tokens,
@@ -84,7 +87,9 @@ export function formatDebugReport(r: PromptDebugReport): string {
   );
   lines.push('─── 分段明细 ───');
   for (const s of r.sections) {
-    const flags = [s.kind, s.locked ? 'locked' : '', `${s.tokens} tok`].filter(Boolean).join(' · ');
+    const flags = [s.kind, s.locked ? 'locked' : '', `${s.tokens} tok`, s.source ? `source=${s.source}` : '']
+      .filter(Boolean)
+      .join(' · ');
     lines.push(`[${s.id}] ${s.title}（${flags}）`);
     if (s.preview) lines.push(`  └ ${s.preview.replace(/\n/g, ' ⏎ ')}`);
   }

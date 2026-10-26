@@ -134,8 +134,19 @@ export class SessionService {
     return { id, name, created: true };
   }
 
-  createSession(projectId: string, opts?: { title?: string; model?: string; mode?: string }): SessionRow {
-    return this.store.createSession({ id: randomUUID(), projectId, ...opts });
+  createSession(
+    projectId: string,
+    opts?: {
+      title?: string;
+      model?: string;
+      mode?: string;
+      expert?: string | null;
+      expertType?: 'agent' | 'team' | null;
+    },
+  ): SessionRow {
+    // F-39 D5：团队专家强制 react —— 唯一收口点（CLI / HTTP / 任何调用方都经过这里）
+    const mode = opts?.expertType === 'team' ? 'react' : opts?.mode;
+    return this.store.createSession({ id: randomUUID(), projectId, ...opts, mode });
   }
 
   getSession(id: string): SessionRow | undefined {
@@ -156,6 +167,12 @@ export class SessionService {
   setSessionWorktree(id: string, patch: { worktreePath?: string | null; worktreeBranch?: string | null }): void {
     if (!this.store.getSession(id)) throw new Error('session not found');
     this.store.setSessionWorktree(id, patch);
+  }
+
+  /** F-39：更新会话的专家绑定（CLI 空会话就地绑定/解绑；Web P0 不走这里） */
+  setSessionExpert(id: string, patch: { expert: string | null; expertType: 'agent' | 'team' | null }): void {
+    if (!this.store.getSession(id)) throw new Error('session not found');
+    this.store.setSessionExpert(id, patch);
   }
 
   getHistory(sessionId: string): ChatMessage[] {

@@ -38,6 +38,9 @@ import {
 import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
 // F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
 import { handleBrowseRoute, type BrowseDeps } from './browse-routes.js';
+// F-39 专家库路由（5 端点；分发在静态托管分支之前）
+import { handleExpertsRoute, resolveExpertForCreate } from './experts-routes.js';
+import { ExpertStore } from '../experts/store.js';
 import { BROWSE_IGNORED_DIRS } from '../files/browse.js';
 import {
   deriveNameFromUrl,
@@ -194,6 +197,18 @@ export function createWebServer(opts: ServeOptions): http.Server {
    * `handleBrowseRoute`（它返回 `{status, body}`，由下方分发用既有 json() 写出）。
    */
   const browseDeps: BrowseDeps = opts.browseReveal ? { reveal: opts.browseReveal } : {};
+
+  // F-39：按项目根缓存的专家库（homeDir 跟随 configHomeDir，测试可注入隔离）
+  const expertStores = new Map<string, ExpertStore>();
+  const expertStoreFor = (projectRoot: string | undefined): ExpertStore => {
+    const key = projectRoot ?? '__global__';
+    let store = expertStores.get(key);
+    if (!store) {
+      store = new ExpertStore({ ...(projectRoot ? { projectRoot } : {}), homeDir: opts.configHomeDir ?? opts.skillsHomeDir ?? os.homedir() });
+      expertStores.set(key, store);
+    }
+    return store;
+  };
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
@@ -535,13 +550,30 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
+      // ── F-39 专家库端点（必须在静态托管分支之前，SPA fallback 不吞 API）──
+      if (parts[0] === 'api' && (parts[1] === 'experts' || (parts[1] === 'sessions' && parts[3] === 'expert'))) {
+        const handled = await handleExpertsRoute(method, parts, url, res, {
+          service,
+          storeFor: expertStoreFor,
+          json,
+          err,
+        });
+        if (handled) return;
+      }
+
       // ── sessions ──────────────────────────────────────────────────────────
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'sessions') {
         const body = await readBody(req);
+        // F-39：专家绑定（创建时字段；未知 expert → 400 不建会话）
+        const expertName = body.expert ? String(body.expert) : undefined;
+        const projectRoot = service.getProject(parts[2]!)?.root_path;
+        const resolved = await resolveExpertForCreate(expertStoreFor, projectRoot, expertName);
+        if (!resolved.ok) return err(res, 400, resolved.message);
         const s = service.createSession(parts[2]!, {
           title: body.title ? String(body.title) : undefined,
           model: body.model ? String(body.model) : undefined,
           mode: body.mode ? String(body.mode) : undefined,
+          ...(expertName ? { expert: expertName, expertType: resolved.expertType } : {}),
         });
         return json(res, 200, s);
       }

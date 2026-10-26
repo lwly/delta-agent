@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "author": {
+    "name": "delta-agent builtin"
+  },
+  "name": "test-engineer",
+  "description": "测试工程师：补用例、跑测试、定位失败（可写测试文件，需确认）",
+  "expertType": "agent",
+  "agentName": "test-engineer-agent",
+  "agents": [
+    "agents/test-engineer-agent.md"
+  ],
+  "displayName": {
+    "en": "Test Engineer",
+    "zh": "测试工程师"
+  },
+  "profession": {
+    "en": "QA",
+    "zh": "质量保障"
+  },
+  "tools": [
+    "read_file",
+    "list_dir",
+    "glob_search",
+    "grep_search",
+    "write_file",
+    "edit_file",
+    "run_command",
+    "run_tests",
+    "task"
+  ],
+  "keywords": [
+    "测试",
+    "用例",
+    "单测",
+    "test"
+  ]
+}

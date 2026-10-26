@@ -20,6 +20,39 @@ export interface SubagentRuntime {
   depth?: number;
 }
 
+/** 专家团成员运行时（由会话装配层注入；非团队会话缺省 → task 的 agent 参数报 unknown_agent） */
+export interface ExpertMemberRuntime {
+  id: string;
+  name: { en: string; zh: string };
+  profession: { en: string; zh: string };
+  role: 'lead' | 'member';
+  /** 成员 md 正文（已剥离 frontmatter；截断在 experts/team.ts 内做） */
+  body: string;
+  /** 成员工具白名单；空数组 = 沿用父视图 */
+  tools: string[];
+  maxTurns?: number;
+  skills: string[];
+}
+
+export interface ExpertTeamRuntime {
+  teamName: string;
+  teamDisplayName: string;
+  /** 成员（不含 lead） */
+  members: ExpertMemberRuntime[];
+  /** 单轮委派计数器（task 工具内自增；run 级共享同一对象） */
+  delegations: { count: number };
+  /**
+   * 成员委派的**基座注册表**（未收窄的完整工具表）。
+   * 主理人自己的白名单不含写工具（AC-4），若成员仍以主理人的收窄视图为基座，
+   * 「测试工程师改文件」将永远不可达 —— 因此装配层在此注入完整注册表，
+   * 成员实际可用 = 成员白名单 ∩ 该基座，仍受 PermissionState 第三道否决。
+   */
+  baseRegistry?: {
+    definitions(): ToolDefinition[];
+    executeAll(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]>;
+  };
+}
+
 export interface ToolContext {
   /** project root — hard sandbox boundary for all path parameters */
   projectRoot: string;
@@ -70,6 +103,10 @@ export interface ToolContext {
    * 内置工具是模块级单例，故注入点只能在 ToolContext（与 permissions/changes/hooks 同构）。
    */
   sandbox?: import('../sandbox/executor.js').SandboxExecutor;
+  /** F-39：专家团运行时（仅 team 专家会话注入） */
+  expertTeam?: ExpertTeamRuntime;
+  /** F-39：事件发射器（task 工具发 expert_delegate_* 用；缺省 = 不发事件） */
+  emit?: (ev: import('@delta/shared').AgentEvent) => void;
 }
 
 /** Skill 加载运行时（engine/session 侧组装 SkillBuffer + 已发现 Skills 后注入） */
