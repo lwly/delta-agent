@@ -405,6 +405,11 @@ export {
   type BranchSwitchResult,
 } from './server/hub.js';
 export { createWebServer, type ServeOptions } from './server/http.js';
+export {
+  createServeRuntime,
+  type ServeRuntime,
+  type ServeRuntimeOptions,
+} from './server/runtime.js';
 
 export {
   discoverSkills,
@@ -538,6 +543,12 @@ export {
   type RunDueOptions,
   type RunDueResult,
 } from './cron/runner.js';
+export {
+  buildCronSpawnArgs,
+  createSpawnExecutor,
+  DEFAULT_CRON_TIMEOUT_MS,
+  type SpawnExecutorOptions,
+} from './cron/spawn-executor.js';
 export {
   startCronScheduler,
   type StartCronSchedulerOptions,
