@@ -25,8 +25,8 @@ import type { ExpertListItem } from '../api/client';
 import RunStatusBar from '../components/RunStatusBar.vue';
 import FilePanel from '../components/FilePanel.vue';
 import { useFilePanelStore } from '../stores/filePanel';
-// F-40 桌面宿主：注册项目支持原生目录选择（CLI/浏览器形态按钮自动隐藏）
-import { hasNativeFolderPicker, pickFolder } from '../api/desktop';
+// 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
+import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
@@ -300,19 +300,11 @@ async function addProject() {
   }
 }
 
-// ── F-40 桌面宿主：原生目录选择（选中后回填输入框，注册仍走 addProject 单一路径）──
-const canPickFolder = hasNativeFolderPicker();
-const picking = ref(false);
-
-async function pickFolderIntoInput() {
-  if (picking.value) return;
-  picking.value = true;
-  try {
-    const dir = await pickFolder();
-    if (dir) newRoot.value = dir;
-  } finally {
-    picking.value = false;
-  }
+// 注册项目：桌面壳内可调系统目录选择器回填输入框；浏览器形态无桥接（canPick=false）不展示按钮
+const canPickDirectory = hasDesktopBridge();
+async function browseProjectRoot() {
+  const dir = await pickDirectory();
+  if (dir) newRoot.value = dir;
 }
 
 /** F-39：返回新会话 id（null = 失败；失败方只写 error 不推提示，调用方据返回值决定是否推成功提示） */
@@ -1604,13 +1596,10 @@ watch(
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
-      <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。</p>
-      <div class="pick-row">
+      <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。<template v-if="canPickDirectory">也可点「浏览…」直接选择目录。</template></p>
+      <div class="path-row">
         <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
-        <!-- F-40 桌面宿主：原生目录选择（选中回填，注册仍走输入框确认） -->
-        <button v-if="canPickFolder" class="btn pick-btn" :disabled="picking" @click="pickFolderIntoInput">
-          {{ picking ? '…' : '选择文件夹' }}
-        </button>
+        <button v-if="canPickDirectory" class="btn" @click="browseProjectRoot">浏览…</button>
       </div>
       <p v-if="addError" class="error">✘ {{ addError }}</p>
       <div class="modal-btns">
@@ -1656,11 +1645,6 @@ watch(
 .app { display: flex; height: 100vh; position: relative; }
 /* F-38：面板展开时主区最小宽度 480px（PRD F-38-1）；窄屏覆盖式面板不挤压主区 */
 .app.panel-open .main { min-width: 480px; }
-
-/* F-40 注册项目弹窗：路径输入 + 桌面宿主原生目录选择按钮 */
-.pick-row { display: flex; gap: 8px; align-items: stretch; }
-.pick-row .full { flex: 1; min-width: 0; }
-.pick-btn { white-space: nowrap; }
 
 /* ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ */
 .sidebar {
@@ -2280,6 +2264,9 @@ watch(
 .modal-tip { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
 .modal-tip b { color: var(--text); }
 .full { width: 100%; margin-bottom: 12px; }
+/* 注册项目：路径输入 + 「浏览…」（桌面壳桥接可用时展示）同行排布（.full 自带 12px 下边距，行内归零） */
+.path-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.path-row .full, .path-row .btn { margin-bottom: 0; }
 .error { color: var(--red); font-size: 12.5px; margin-bottom: 8px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
 </style>

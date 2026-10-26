@@ -1,13 +1,12 @@
 /**
- * 桌面宿主桥（preload）—— 最小暴露面。
+ * delta-agent 桌面壳 —— preload（contextIsolation + sandbox）。
  *
- * 仅暴露目录选择一个能力；contextIsolation + sandbox 开启下
- * contextBridge/ipcRenderer 是沙箱 preload 的合法 API。
- * 渲染层通过 window.deltaDesktop 判定桌面宿主（CLI/浏览器形态该字段不存在）。
+ * 仅暴露最小白名单桥接：渲染进程可请求系统目录选择器（注册项目用）。
+ * 不暴露 fs / shell / 任意 IPC，通道名固定 'dialog:pick-directory'。
  */
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('deltaDesktop', {
-  /** 打开原生目录选择对话框；取消返回 null */
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('desktop:pick-folder'),
+  /** 打开系统目录选择器；取消返回 null，选中返回绝对路径 */
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:pick-directory'),
 });

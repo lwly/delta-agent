@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="delta-agent">
+  <!-- 应用图标源（与 packages/web/public/favicon.svg 同款品牌设计，外扩 11% 留白适配 mac dock / win 任务栏） -->
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4c8dff" />
+      <stop offset="1" stop-color="#2e6fe0" />
+    </linearGradient>
+  </defs>
+  <rect x="112" y="112" width="800" height="800" rx="200" fill="url(#brand)" />
+  <path d="M16 7.5 L25.5 24.5 L6.5 24.5 Z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" transform="translate(112,112) scale(25)" />
+</svg>

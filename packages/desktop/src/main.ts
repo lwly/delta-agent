@@ -15,7 +15,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { createServeRuntime, type ServeRuntime } from '@delta/core';
 import { ElectronNotifier } from './electron-notifier.js';
 
@@ -32,15 +32,8 @@ if (process.platform === 'win32') {
   app.setAppUserModelId(APP_ID);
 }
 
-// 原生目录选择（注册项目弹窗「选择文件夹」按钮的 IPC 后端）；只返回所选路径，无其他能力
-ipcMain.handle('desktop:pick-folder', async () => {
-  const opts = { properties: ['openDirectory'] as ('openDirectory')[] };
-  const focused = BrowserWindow.getFocusedWindow();
-  const r = focused
-    ? await dialog.showOpenDialog(focused, opts)
-    : await dialog.showOpenDialog(opts);
-  return r.canceled ? null : (r.filePaths[0] ?? null);
-});
+// 控制台为纯深色 UI：强制 dark 原生主题，避免 Windows 默认白色标题栏/窗框与深色页面割裂
+nativeTheme.themeSource = 'dark';
 
 /** Vue 构建产物解析：打包形态 extraResources > 仓库 dev 形态 > 显式 env */
 function resolveWebDistDir(): string | undefined {
@@ -52,6 +45,15 @@ function resolveWebDistDir(): string | undefined {
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist'),
   ].filter((d): d is string => Boolean(d));
   return candidates.find((d) => fs.existsSync(path.join(d, 'index.html')));
+}
+
+/**
+ * 窗口图标（win/linux 开发态任务栏；打包形态由 electron-builder 写入可执行文件资源，
+ * 打包后 icons/ 不进 asar（files 仅 dist/**），解析失败静默回退默认图标）。
+ */
+function resolveWindowIcon(): string | undefined {
+  const iconPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../icons/icon.png');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
 }
 
 async function bootstrap(): Promise<void> {
@@ -78,11 +80,14 @@ async function bootstrap(): Promise<void> {
     height: 820,
     title: 'delta-agent',
     autoHideMenuBar: true,
+    // 与 web 主题 --bg 对齐：消除首帧白闪与深色标题栏下的色差
+    backgroundColor: '#0f1115',
+    icon: resolveWindowIcon(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'preload.js'),
+      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.js'),
     },
   });
 
@@ -92,6 +97,17 @@ async function bootstrap(): Promise<void> {
   } else {
     void win.loadURL(`http://127.0.0.1:${runtime.port}/?auth=${authToken}`);
   }
+
+  // 注册项目：渲染进程经桥接请求系统目录选择器（sandbox 开启，渲染侧无 Node 能力）。
+  // 仅回传所选绝对路径字符串，不做任何 fs 操作；鉴权沿用 /api 侧（注册仍走 POST /api/projects）。
+  ipcMain.handle('dialog:pick-directory', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: '选择项目根目录',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();
