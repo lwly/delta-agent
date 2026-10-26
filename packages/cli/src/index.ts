@@ -19,7 +19,6 @@ import {
   loadHookFiles,
   MIGRATIONS,
   LATEST_SCHEMA_VERSION,
-  migrateLegacyConfig,
   ExpertStore,
   readExpertsConfig,
   isTrusted,
@@ -1066,9 +1065,6 @@ const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
 }
-
-// ── 老配置目录迁移：~/.y-zero → ~/.delta（幂等；失败只提示，不阻塞启动）──
-migrateLegacyConfig({ warn: (msg) => console.error(`[delta] ${msg}`) });
 
 program.parseAsync(process.argv).catch((e) => {
   console.error(`✘ ${(e as Error).message}`);
