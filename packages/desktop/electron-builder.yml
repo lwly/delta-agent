@@ -1,0 +1,26 @@
+# delta-agent 桌面壳打包配置（electron-builder）
+# 签名/公证挂起（发布前补齐）：mac 需 Developer ID + notarize，win 证书可选
+appId: com.delta.agent
+productName: delta-agent
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+# 生产依赖（@delta/core、@delta/shared、better-sqlite3 等）由 electron-builder 自动收集
+asarUnpack:
+  # 原生模块不能从 asar 内加载
+  - "**/*.node"
+extraResources:
+  # Vue 控制台构建产物（先 pnpm --filter @delta/web build）
+  - from: ../web/dist
+    to: web
+mac:
+  target: dmg
+  category: public.app-category.developer-tools
+  # 签名挂起：证书到位后补 identity 与 notarize 段
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
