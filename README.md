@@ -78,24 +78,6 @@ delta [options]                     # 启动交互式 TUI 会话
 
 另有 `usage`（费用统计）、`evals`（评测集）、onboarding（项目引导）等子命令，详见 `docs/PRD.md` 与各功能设计文档。
 
-## 从 y-zero-agent 更名
-
-项目原名 **y-zero-agent**，现更名 **delta-agent**。对应变化：
-
-| 项 | 旧 | 新 |
-|----|----|----|
-| 包 scope | `@y-zero/*` | `@delta/*` |
-| CLI 命令 | `yzero` | `delta` |
-| 配置目录 | `~/.y-zero/` | `~/.delta/` |
-| 环境变量 | `YZERO_*` | `DELTA_*` |
-| 容器 label | `yzero.created` 等 | `delta.created` 等 |
-
-升级后首次执行任意 `delta` 命令时，会自动把 `~/.y-zero/` 整体复制到 `~/.delta/`
-（**旧目录保留**，并写入 `MIGRATED_TO_DELTA` 标记文件；确认无误后可自行删除）。
-迁移只做一次：新目录已存在时不再覆盖，不会合并两边内容。
-
-项目内的 `.y-zero/` 目录不会被自动迁移，需要手动改名为 `.delta/`。
-
 ## 开发
 
 ```bash
