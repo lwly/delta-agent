@@ -1,6 +1,6 @@
 # F-39 专家 / 专家团 —— 技术设计与任务分解
 
-> 日期：2026-10 ｜ 关联：`docs/prd-f39-experts.md`（14 章 / 25 条需求池 / 11 条待确认）｜ 风格沿用：`docs/design-f38-project-file-panel.md`（决策表 → 分层 → 数据结构 → 端到端 → 任务）
+> 日期：2026-10 ｜ 关联：`docs/prd-f39-experts.md`（14 章 / 26 条需求池 / 11 条待确认）｜ 风格沿用：`docs/design-f38-project-file-panel.md`（决策表 → 分层 → 数据结构 → 端到端 → 任务）
 > 交付面：`packages/core`（发现/解析/注入/白名单/委派）+ `packages/cli`（`--expert` / `/expert` / `delta expert`）+ `packages/web`（Composer 面板、详情弹层、成员卡、设置页 Tab）
 > **本文只做设计与任务分解，不含业务代码。**
 
@@ -39,7 +39,7 @@
 | **D5** | **Q7 收口点：团队专家 → `mode='react'` 的唯一实现在 `SessionService.createSession()`（`session/service.ts:136`），一行三元表达式** | 该方法是 CLI（`index.ts:582`）、HTTP（`http.ts:541`）**唯一**的会话创建入口。收在 service 层，两端 UI/路由都不需要知道这条规则，天然单点、不可能漂移（PRD §7.2 明确要求「不要散落到两端 UI」）。测试只需一个断言：传 `expertType:'team'` + `mode:'multi-agent'` → 落库 `react` | 在 `http.ts` 与 `cli/index.ts` 各写一次：两处必然漂移。在 `resolveBinding()` 里做：Web 前端也能绕过（前端 `newSession()` 直接传 mode） |
 | **D6** | 专家段 wrapper 的**层标题固定为 `专家角色与职责`**（不含专家名），专家名只出现在正文首行 | `formatPrompt` 渲染成 `## <title>\n\n<value>`；若 title 含专家名，则 title 与 PRD 要求的正文首行 `# 专家：<displayName>` 重复成两个标题。固定 title 同时让 `--debug-prompt` 的段清单在跨会话对比时对齐 | title 用 `专家：<displayName>` 且正文去掉 `#` 行：违反 PRD F-39-5④ 的固定 wrapper 逐字要求。不取 |
 | **D7** | **`ASSEMBLER_VERSION` 从 `'m3.1'` bump 到 `'m3.2'`** | 新增一个 static 层会改变**所有会话**的 fingerprint 计算基数（`staticFingerprint` 逐段 update，空段也会写入 `\nexpert:\n`）。不 bump 会让「同 version 不同层结构」的两个指纹空间混用；bump 后语义清晰、历史 `promptSectionsLog.staticHash` 可区分 | 不 bump：指纹撞车风险低但语义脏，且排查时无法区分版本。不取（成本 1 行） |
-| **D8** | 委派事件**不落库**，改用 **`tool` 消息 content 前缀**承载回放所需信息：`〔专家团·测试工程师（质量保障）〕\n<摘要>` | 事实约束：`hub.ts:624` 落库时**只写 `content` 与 `toolCallId`，丢弃 `result.meta`**。而 F-18 回放读的是 `messages`（`store.getMessagesDetailed`），事件流不落库。因此要让回放「能定位到具体成员」，唯一零 schema 变更的办法是把成员标识写进 content。结构化 payload 只服务实时 SSE（Web 成员卡 / CLI 单行） | 扩展 `ChatMessage` 增加 `toolMeta` 字段：`content_json` 是整条消息 JSON，加字段即变相改持久格式，回放/检索/压缩全链路需回归；且 P0 只需「哪个成员产出什么」一行信息。不取 |
+| **D8** | 委派事件**不落库**，改用 **`tool` 消息 content 前缀**承载回放所需信息：`[expert:test-engineer] 测试工程师（质量保障）\n<摘要>` | 事实约束：`hub.ts:624` 落库时**只写 `content` 与 `toolCallId`，丢弃 `result.meta`**。而 F-18 回放读的是 `messages`（`store.getMessagesDetailed`），事件流不落库。因此要让回放「能定位到具体成员」，唯一零 schema 变更的办法是把成员标识写进 content。结构化 payload 只服务实时 SSE（Web 成员卡 / CLI 单行）。**标记必须是 ASCII 定界符**：`〔…（…）〕` 这类中文标点一旦出现在成员名 / 职业里（如「质量保障（测试）」）就会让「取到第一个 `（`」的解析提前截断；改为 `[expert:<memberId>]` 固定标记后，`memberId` 受解析期字符集约束（§6.1 第 10 步），方括号后的显示名与职业只是**人类可读回退**（包被删除后回放仍能显示原始名称），解析器**不依赖**它 | 扩展 `ChatMessage` 增加 `toolMeta` 字段：`content_json` 是整条消息 JSON，加字段即变相改持久格式，回放/检索/压缩全链路需回归；且 P0 只需「哪个成员产出什么」一行信息。不取 |
 | **D9** | 成员子代理**不接收独立的「上游摘要」参数**，上游信息由主理人写进 `prompt` 参数本身 | PRD F-39-8② 列了「成员 md 正文 + 父目标 + 上游产出摘要」三段。但上游产出就在主理人的上下文里，让它拆成两个参数传（`prompt` + `upstream`）等于把同一段信息传两遍，schema 与 token 双膨胀。成员提示词模板保留 `## 本轮目标（含上游摘要）` 一个锚点 | 新增 `upstream` 必填参数：schema 膨胀且主理人易漏填。不取 |
 | **D10** | **`discoverLayered<T>()` 抽到 `skills/layered.ts`，`discoverSkills` 与 `ExpertStore` 共用**；但 `discoverSkills` 的切换以「既有 skills 单测零改动全绿」为门禁，漂移即回退 | PRD §6.1 F-39-2 与 task-lead 均要求抽公共遍历而非复制。`discoverSkills`（`loader.ts:51-85`）的循环体确实几乎通用。风险在 F-16 回归，故设门禁：`test/skills-*.test.ts` 全部不改一字仍全绿才保留重构 | 直接复制一份到 `experts/store.ts`：三层遍历 + 覆盖 + errors 三处语义必然漂移（`loader.ts` 注释明确此风险）。不取 |
 | **D11** | **QA6=Q6 已裁**；此处记录**委派上限的两个不同归属**：成员数 ≤6 属**包协议校验**（解析期拒绝，计入 `errors`）；单轮委派 ≤8 属**运行时计数**（`ToolContext.expertTeam.delegations.count`） | 成员超限若静默截断，主理人会按「不完整的团队」工作且不自知（SOP 里写了会调 PM + 架构师 + 测试，实际只有 2 个），属于**错误的降级**；单轮委派上限是防 token 放大，截断/拒绝都合理，取拒绝并给出「请先汇总」引导 | 两者都运行时计数：成员超限的团队包会一直「看起来能用」但每轮都被拒。不取 |
@@ -782,7 +782,7 @@ sequenceDiagram
         T->>T: usageTotal 累加 -> ctx.subagent.budget.record（回写父预算）
         T->>H: ctx.emit(expert_delegate_done{status, usage, ms, summary, readonlyDegraded})
         H-->>W: SSE -> 成员卡转「完成 · 12.4s」
-        T-->>L: ToolResult{content:"〔专家团·测试工程师（质量保障）〕\n<摘要>", meta:{agent, agent_name, usage}}
+        T-->>L: ToolResult{content:"[expert:test-engineer] 测试工程师（质量保障）\n<摘要>", meta:{agent, agent_name, usage}}
         L->>H: 下一轮文本（含最终汇总）
         H->>DB: 落库 tool 消息（content 带成员前缀 -> F-18 回放可见）
     end
@@ -824,6 +824,7 @@ export function escapeReservedMarkers(text: string): string;           // <stati
 7. **禁止嵌套团队**：包内 `agents/*.md` 的 frontmatter 不允许出现 `expertType` 字段（出现即拒），且 `expert.json` 的 `members[]` 不递归解析子包；
 8. 团队主理人 md 文件名必须带团队前缀 `<name>-`（PRD §6.4.3；不满足 → 错误）；
 9. 单个 md 解析失败（frontmatter 缺 `name` 或不等于文件名）→ **只失败该 agent**；若该 agent 是 `agentName`（主 agent）→ 整包失败；若是普通成员 → 该成员从 `members[]` 剔除 + `errors` 警示（PRD F-39-1「单个 md 解析失败只降级该专家/成员」）。
+10. **agent / 成员 id 字符集**：md 文件名（去扩展名）必须匹配 `^[A-Za-z0-9_-]{1,40}$`。该 id 会进入两处**必须可无歧义解析**的位置：委派消息的 `[expert:<id>]` 标记（D8）与 `members[].id`（`task` 的 `agent` 参数）。含 `]`、空白、`（`/`）` 等全角标点 → 视同第 9 步的「该 agent 解析失败」（主 agent 则整包失败，成员则剔除 + `errors`）。**这是 P0 新增的硬约束**：P1 若确有中文文件名的需求，只能引入 `id` 与文件名分离（`members[].id` 显式声明），不得放宽本步。
 
 **边界与异常**：`expert.json` >64KB 或 md >200KB → 整包失败（PRD §10 规模上限）；JSON 语法错误 → 失败并给出「第 N 行」；未知字段全部忽略（宽容）。
 
@@ -1029,11 +1030,57 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);
 
 export const MIGRATIONS: Migration[] = [
   /* v1..v4 不动 */
-  { version: 5, name: 'f39-expert-binding', sql: MIGRATION_V5_F39_EXPERT_BINDING },
+  {
+    version: 5,
+    name: 'f39-expert-binding',
+    sql: MIGRATION_V5_F39_EXPERT_BINDING,
+    // 列已存在 = 「user_version 被外部工具改小」后重放。跳过 ALTER，但仍推进版本号
+    skipIf: (db) => hasColumn(db, 'sessions', 'expert') && hasColumn(db, 'sessions', 'expert_type'),
+    // 跳过时不能连带漏建索引（幂等语句，可安全重复执行）
+    repairSql: 'CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);',
+  },
 ];
 ```
 
-**幂等性说明（必须写进注释）**：`ALTER TABLE ADD COLUMN` 本身**不幂等**（重复执行抛 `duplicate column name`）。v3/v4 已是同样写法，其安全性来自 `migrate()` 的版本门禁（只跑 `version > user_version`）。v5 沿用同一约定；对「被外部工具改过 `user_version` 的库」的兜底见 §16-3。
+**`Migration` 接口扩展（`session/migrations.ts`，只加可选字段，既有 4 条迁移零改动）**：
+
+```ts
+export interface Migration {
+  version: number;
+  name: string;
+  sql: string;
+  /**
+   * 可选：执行前的结构检查。返回 true = 目标结构已存在（典型场景：`user_version` 被外部工具
+   * 改小，迁移被重放），此时**跳过 `sql`** 但仍把 `user_version` 推到本版本 ——
+   * 让「旧版本号的历史库」与「已迁移但版本号错乱的库」都能安全收敛。
+   */
+  skipIf?: (db: Database.Database) => boolean;
+  /** 可选：`skipIf` 命中时仍需执行的幂等 DDL（如 `CREATE INDEX IF NOT EXISTS`），避免「跳过 → 漏建索引」 */
+  repairSql?: string;
+}
+
+/** PRAGMA table_info 检查列存在性。table 名只在调用点以**字面量**传入（不拼接外部输入） */
+export function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+  return rows.some((r) => r.name === column);
+}
+```
+
+**`migrate()` 循环体的 5 行改动（`migrations.ts:196-202`）**：
+
+```ts
+const step = db.transaction(() => {
+  if (m.skipIf?.(db)) {
+    if (m.repairSql) db.exec(m.repairSql);   // 只补幂等对象（索引）
+  } else {
+    db.exec(m.sql);
+  }
+  db.pragma(`user_version = ${m.version}`);   // 跳过的分支也要推进，否则每轮都会重试
+});
+step();
+```
+
+**幂等性说明（必须写进注释）**：`ALTER TABLE ADD COLUMN` 本身**不幂等**（重复执行抛 `duplicate column name`），而 `migrations.ts` 的文件头注释写的是「迁移 SQL 必须幂等」——两者事实上冲突。v3/v4 靠 `migrate()` 的版本门禁兜住（正常路径下只跑 `version > user_version`），但只要 `user_version` 被外部工具改小（手工 `sqlite3`、备份还原、旧版本程序覆盖新库），v5 就会在 `ALTER` 处整事务失败、程序起不来。**本版不再沿用该约定**：v5 用 `skipIf` + `repairSql` 显式补齐幂等（5 行），v1–v4 保持原样（已发布库的 `user_version` 已越过它们，重跑风险为零，改历史迁移反而有害）。
 
 **`session/store.ts` 三处改动**：
 
@@ -1105,7 +1152,7 @@ createSession(projectId: string, opts?: {
 | L100 | `subagent: { ...ctx.subagent, depth: depth+1 }` | **不动**（depth 仍 +1，`MAX_SUBAGENT_DEPTH=1` 生效） |
 | L100 之后 | — | 显式 `expertTeam: undefined,`（D12）+ `emit: undefined,`（成员不可再发委派事件） |
 | L115-149（事件消费） | — | `member` 存在时先 `ctx.emit?.({type:'expert_delegate_start', ...})`；循环内不变 |
-| L165-178（返回值） | `meta: {description, turns, tool_calls, failed_tool_calls, usage, error}` | 追加 `...(member ? { agent: member.id, agent_name: member.name.zh, agent_profession: member.profession.zh, agent_role: member.role, readonly_degraded: ctx.permissions?.policy.mode === 'plan' } : {})`；`content` 对成员加前缀 `〔专家团·${member.name.zh}（${member.profession.zh}）〕\n`（D8 回放）；循环结束前 `ctx.emit?.({type:'expert_delegate_done', ...})` |
+| L165-178（返回值） | `meta: {description, turns, tool_calls, failed_tool_calls, usage, error}` | 追加 `...(member ? { agent: member.id, agent_name: member.name.zh, agent_profession: member.profession.zh, agent_role: member.role, readonly_degraded: ctx.permissions?.policy.mode === 'plan' } : {})`；`content` 对成员加前缀 `[expert:${member.id}] ${member.name.zh}（${member.profession.zh}）\n`（D8 回放；**定界符只依赖 `[expert:<id>]`，`id` 已由解析期保证不含 `]`/空白/全角标点**，前缀后的显示名允许任意字符）；循环结束前 `ctx.emit?.({type:'expert_delegate_done', ...})` |
 
 **核心代码骨架**（新增片段，插入到 L67 之后）：
 
@@ -1185,7 +1232,7 @@ export function buildMemberSystemPrompt(
 | F-18 回放 | 回放读 `messages`；成员标识由 tool 消息的 content 前缀承载（D8）；回放页在该 tool 消息上渲染「由 X 执行」角标 | 无需改回放数据模型 |
 | 日志 | `promptSectionsLog` 自动包含 `expert` 段（因为它是普通 section）；`delta expert list --verbose` 打印 `errors[]` | 零额外埋点 |
 
-**「由 X 执行」数据来源**：实时 = SSE `tool_result` 的 `result.meta.agent_name`（`task.ts` L170 回传）→ chat store 写入消息的 UI 本地字段 `agentName`；回放 = tool 消息 content 前缀正则 `/^〔专家团·(.+?)（/`。**两者都不是权威数据源之外的猜测**：`task.ts` 是唯一写入方。
+**「由 X 执行」数据来源**：实时 = SSE `tool_result` 的 `result.meta.agent`（memberId，权威）+ `agent_name`（显示名）→ chat store 写入消息的 UI 本地字段 `agentName`；回放 = tool 消息 **首行**按 `/^\[expert:([A-Za-z0-9_-]{1,40})\]\s*(.*)$/` 解析，第 1 组 = memberId（可再查 `experts` store 取最新显示名），第 2 组 = 落库时的可读标签（包已删除时的回退展示）。**解析只认方括号标记**：标记缺失或格式不符 → **不猜测、不显示角标**（宁缺不错）；`task.ts` 是唯一写入方。
 
 ### 6.8 Web 组件设计
 
@@ -1362,6 +1409,7 @@ async function onExpertSelect(item: ExpertListItem) {
 | `packages/core/src/experts/team.ts` | 新 | `buildMemberSystemPrompt` + `toTeamRuntime(record)` + 成员上限常量 | ~120 | 低 |
 | `packages/core/src/experts/assemble-context.ts` | 新 | **`buildAssembleContext()` 单一共享构建函数**（CLI+Web 唯一来源） | ~110 | 中（双端收敛点） |
 | `packages/core/src/experts/io.ts` | 新（P1） | zip 导入/导出 + zip-slip + `MAX_EXTRACT_BYTES` 复用 | ~260 | 高（攻击面） |
+| `packages/core/src/experts/trust.ts` | 新（P1） | `isTrusted` / `recordTrust` / `toolsHash` + `~/.delta/experts.json` 的 `trusted[]` 读写（§12.1） | ~90 | 低 |
 | `packages/core/src/skills/layered.ts` | 新 | `discoverLayered<T>` 公共遍历（D10） | ~110 | 中（F-16 回归门禁） |
 | `packages/core/src/server/experts-routes.ts` | 新 | `handleExpertsRoute`：5 端点（仿 `browse-routes.ts`） | ~230 | 中 |
 | `packages/core/experts/code-architect/` | 新 | `expert.json` + `agents/code-architect.md` + `README.md` | ~120 | 低（内容） |
@@ -1378,7 +1426,7 @@ async function onExpertSelect(item: ExpertListItem) {
 | `packages/core/src/prompt/layers.ts` | 新增 `ExpertLayer`；`createDefaultLayers()` 插入位置 | ~45 | 低 |
 | `packages/core/src/prompt/assembler.ts` | `ASSEMBLER_VERSION` → `m3.2`；section 带 `source` | ~6 | 低（指纹全量失效一次） |
 | `packages/core/src/prompt/debug.ts` | `sections[].source`；`formatDebugReport` 追加 `source=` | ~10 | 低 |
-| `packages/core/src/session/migrations.ts` | 追加 v5（ALTER ×2 + 索引） | ~10 | 中（不可回退的列） |
+| `packages/core/src/session/migrations.ts` | 追加 v5（ALTER ×2）+ `Migration.skipIf`/`repairSql` + `hasColumn()` + `migrate()` 5 行分支 | ~25 | 中（不可回退的列；改动迁移执行器，须回归 v1–v4） |
 | `packages/core/src/session/store.ts` | `SessionRow` + `SESSION_COLUMNS` + `createSession`（含 expert_type 校验）+ `setSessionExpert` + 3 处 SELECT | ~40 | **中**（4 处 SELECT 漏一处 → 字段 `undefined`） |
 | `packages/core/src/session/service.ts` | `createSession` 签名扩展 + 团队强制 react（D5） | ~10 | 低 |
 | `packages/core/src/tools/types.ts` | `ExpertMemberRuntime` / `ExpertTeamRuntime` / `ToolContext.expertTeam` / `ToolContext.emit` | ~35 | 低 |
@@ -1414,6 +1462,7 @@ async function onExpertSelect(item: ExpertListItem) {
 | `packages/web/src/components/ExpertDetail.vue` | 新 | Modal 容器 | ~70 | 低 |
 | `packages/web/src/components/ExpertDetailBody.vue` | 新 | 内容（含成员块、工具计数、提示词折叠） | ~240 | 低 |
 | `packages/web/src/components/ExpertMemberCard.vue` | 新 | 成员卡 | ~150 | 低 |
+| `packages/web/src/components/ExpertTrustDialog.vue` | 新（P1） | 首次召唤信任确认（ModalShell 360px；来源层 + 工具高亮 + 取消不进会话，§12.1） | ~110 | 低 |
 | `packages/web/src/components/ToolCallCard.vue` | 改 | 「由 X 执行」角标 | ~15 | 低 |
 | `packages/web/src/views/WorkbenchView.vue` | 改 | chip + 胶囊 + `newSession` 第 2 参 + 模式 select 禁用 + 成员卡内联渲染 + 缺失提示 | ~90 | 中（2072 行大组件，只做插入不改结构） |
 | `packages/web/src/components/settings/ExpertsPanel.vue` | 新（P1） | 设置页专家 Tab | ~280 | 中 |
@@ -1433,14 +1482,14 @@ async function onExpertSelect(item: ExpertListItem) {
 
 | ID | 任务名 | 涉及文件 | 依赖 | 验收标准 | 预估改动量 |
 |---|---|---|---|---|---|
-| **T01** | **专家包类型与解析器（纯函数层）** | `core/src/experts/types.ts`(新)、`core/src/experts/parser.ts`(新)、`core/src/index.ts`、`core/test/experts-parser.test.ts`(新) | — | ① `validateExpertName` 拒绝 `A`/`1x`/`a`(长度1)/`a_b`/41 字符；② 9 步校验链每步至少 1 个失败用例：缺 `agents[]`、`agentName` 无对应 md、`../etc/passwd`、绝对路径、包外符号链接、team 无 lead、team 双 lead、`memberAgents` 与 `members` 不一一对应、嵌套 team；③ 单成员 md 坏 → 只剔该成员 + errors，整包仍可用；主 agent md 坏 → 整包失败；④ `escapeReservedMarkers` 幂等且把 `<static>`/`# L1` 变全角；⑤ 未知字段忽略不报错；⑥ `pnpm -C packages/core typecheck` 通过 | ~450 行 + ~35 用例 |
+| **T01** | **专家包类型与解析器（纯函数层）** | `core/src/experts/types.ts`(新)、`core/src/experts/parser.ts`(新)、`core/src/index.ts`、`core/test/experts-parser.test.ts`(新) | — | ① `validateExpertName` 拒绝 `A`/`1x`/`a`(长度1)/`a_b`/41 字符；② 9 步校验链每步至少 1 个失败用例：缺 `agents[]`、`agentName` 无对应 md、`../etc/passwd`、绝对路径、包外符号链接、team 无 lead、team 双 lead、`memberAgents` 与 `members` 不一一对应、嵌套 team；③ 单成员 md 坏 → 只剔该成员 + errors，整包仍可用；主 agent md 坏 → 整包失败；④ `escapeReservedMarkers` 幂等且把 `<static>`/`# L1` 变全角；⑤ 未知字段忽略不报错；⑥ `pnpm -C packages/core typecheck` 通过；⑦ 成员文件名含 `]`/空格/`（` → 该成员被剔除 + errors（主 agent 则整包失败），合法 id `software-dev-team-lead` 通过 | ~470 行 + ~38 用例 |
 | **T02** | **三层发现器 + 公共遍历抽取** | `core/src/skills/layered.ts`(新)、`core/src/skills/loader.ts`、`core/src/experts/store.ts`(新)、`core/src/index.ts`、`core/test/experts-store.test.ts`(新)、`core/test/skills-*.test.ts`（**不改**） | T01 | ① 三层同名覆盖：用户层同名包覆盖内置、项目层覆盖用户层，`layer` 标注为胜出层，`layers()` 能看到被覆盖项；② mtime 指纹：二次 `list()` 零 stat 重扫（用 spy 断言 `readEntry` 调用次数为 0）；改 `expert.json`/md 的 mtime 后失效；③ 单层 201 包 → 200 + errors；④ `errors[]` 文案形如 `user/xxx: 缺少 agents 字段`；⑤ **skills 既有测试一行不改全绿**（否则回退 `loader.ts` 改动）；⑥ 头像 >500KB 或 .gif → `avatarPath=null` + warning，包仍可用 | ~350 行 + ~20 用例 |
 | **T03** | **专家段渲染 + Prompt 层扩展** | `core/src/prompt/types.ts`、`core/src/prompt/layers.ts`、`core/src/prompt/assembler.ts`、`core/src/prompt/debug.ts`、`core/src/experts/prompt.ts`(新)、`core/test/experts-prompt.test.ts`(新) | T01 | ① `LayerId` 含 `'expert'`，全包 `typecheck` 通过；② 无 expert 时 `formatPrompt` 输出与改动前**逐字节相同**（快照对比）；③ 有 expert 时段出现在 `<static>` 块内且位于 `## 可用工具` 之后、`<dynamic>` 之前；④ wrapper 与 PRD F-39-5④ 逐字一致；⑤ 12000 字正文 → 6000 + 「（专家说明已截断）」；6000 字整 → 不加后缀；⑥ `<static>`/`<dynamic>`/`# L1 Identity` 被转义，段结构仍是 8 段；⑦ 团队专家段只含成员 4 字段（断言不含成员 md 正文任一 20 字子串）；⑧ 同 ctx 两次 assemble 的 `fingerprint` 相等；⑨ `debugReport` 的 expert 段带 `source=expert:<name>` | ~180 行 + ~18 用例 |
 | **T04** | **白名单交集 + 预置技能装载（纯函数）** | `core/src/experts/policy.ts`(新)、`core/test/experts-policy.test.ts`(新) | T01 | ① `tools` 缺省 → `allow=null`（不收窄）；② 子集 → `allow` 为交集，`unknown` 收未知名，`restrictedCount/totalCount` 正确；③ `BUILTIN_TOOL_COUNT === Object.keys(TOOL_CAPABILITY).length === 16`；④ `restrictRegistry(base, null)` 返回 `base` 本身（零开销）；⑤ `restrictRegistry` 对越权调用返回 `error:'tool_not_allowed'` 且**不进 confirm**（复用 `RestrictedRegistry` 行为）；⑥ `seedExpertSkills` 5 个技能 → 只装 3 个 + warning；超 4k → 截断 + warning；不存在的技能 → 跳过 + warning，不抛错 | ~210 行 + ~14 用例 |
-| **T05** | **v5 迁移 + 会话绑定（无 UI）** | `core/src/session/migrations.ts`、`core/src/session/store.ts`、`core/src/session/service.ts`、`core/src/experts/session-binding.ts`(新)、`core/test/experts-binding.test.ts`(新) | T01 | ① 空库 → `user_version=5`，`sessions` 含两新列；② v4 旧库 → 迁移后旧行 `expert IS NULL`，`getSession` 返回 `expert:null`（零回归）；③ `createSession({expertType:'team', mode:'multi-agent'})` → 落库 `mode='react'`；④ `expertType:'agent'` → `mode` 原样；⑤ `expertType:'xxx'` → throw；⑥ `listSessions`/`searchSessions`/`getSession` 三处都返回新字段（断言不是 `undefined`）；⑦ `resolveBinding` 缺失包 → `{name:null, missing:'x'}` 不抛错；⑧ `pnpm -r build && typecheck` 通过 | ~230 行 + ~15 用例 |
+| **T05** | **v5 迁移 + 会话绑定（无 UI）** | `core/src/session/migrations.ts`、`core/src/session/store.ts`、`core/src/session/service.ts`、`core/src/experts/session-binding.ts`(新)、`core/test/experts-binding.test.ts`(新) | T01 | ① 空库 → `user_version=5`，`sessions` 含两新列；② v4 旧库 → 迁移后旧行 `expert IS NULL`，`getSession` 返回 `expert:null`（零回归）；③ `createSession({expertType:'team', mode:'multi-agent'})` → 落库 `mode='react'`；④ `expertType:'agent'` → `mode` 原样；⑤ `expertType:'xxx'` → throw；⑥ `listSessions`/`searchSessions`/`getSession` 三处都返回新字段（断言不是 `undefined`）；⑦ `resolveBinding` 缺失包 → `{name:null, missing:'x'}` 不抛错；⑧ `pnpm -r build && typecheck` 通过；⑨ **幂等重放**：手工把已有 v5 结构的库 `PRAGMA user_version=4` 后重新打开 → 迁移**不抛 `duplicate column name`**、`applied=[5]`、`user_version=5`、`idx_sessions_expert` 仍存在（`skipIf` + `repairSql` 生效） | ~250 行 + ~16 用例 |
 | **T06** | **Prompt 注入接线（单一构建函数 + 双端收敛）** | `core/src/experts/assemble-context.ts`(新)、`core/src/server/hub.ts`（`buildPrompt`）、`cli/src/prompt.ts`、`core/src/index.ts`、`core/test/experts-assemble.test.ts`(新) | T02, T03 | ① `buildAssembleContext()` 是 CLI 与 Web 的**唯一** ctx 构造入口（grep 断言两包不再各自拼 `AssembleContext` 字面量）；② 绑定只读专家的会话，`--debug-prompt` 输出含 `[expert]` 段与 `source=expert:code-architect`，且 `## 可用工具` 里**没有** `write_file`；③ 无专家会话 `--debug-prompt` 输出与改动前一致（除 version 与多一行空 expert 段被跳过）；④ Web：`hub.send` 连续两轮 `staticFingerprint` 相同（缓存稳定）；⑤ 包被删除 → 不注入不收窄，不抛错；⑥ 首轮自动 seed 预置技能（`delta --expert product-manager --debug-prompt` 可见 L5 含技能正文；AC-12） | ~220 行 + ~12 用例 |
 | **T07** | **白名单执行接线（注册表收窄）** | `core/src/server/hub.ts`（`send`）、`cli/src/index.ts`（`start` 收窄）、`core/test/experts-e2e.test.ts`(新，含 AC-1/AC-2) | T04, T06 | ① 只读专家 + 默认权限：`write_file` 被拒，`ToolResult.error==='tool_not_allowed'`，模型下一轮收到该错误（AC-1）；② 同一专家 + `yolo`：**仍被拒**（AC-2）；③ L4 `可用工具` 段 = 收窄后清单（无被禁工具）；④ MCP 工具在收窄之后注册也不会漏（构造 mock registry 断言）；⑤ 非专家会话 `definitions()` 与改动前完全相同 | ~120 行 + ~8 用例 |
-| **T08** | **`task` 工具成员委派 + 事件** | `shared/src/types.ts`、`core/src/tools/types.ts`、`core/src/tools/builtin/task.ts`、`core/src/experts/team.ts`(新)、`core/test/task-expert-agent.test.ts`(新) | T01 | ① **不传 `agent`：`systemPrompt`/`permissions`/`confirm`/`askUser`/`meta` 与改动前逐字段相同**（快照断言，最高优先级）；② 传未知 agent → `unknown_agent`，错误文案含可选成员；③ 非团队会话传 agent → `unknown_agent` 且提示「未绑定专家团」；④ 命中成员：`expert_delegate_start` / `_done` 各发一次，payload 字段齐全，`usage` 已回写父预算；⑤ 第 9 次委派 → `delegation_limit`；⑥ 成员 `tools` 含 `write_file` 且父 `default` → 走父 `confirm`（可断言 mock 被调用）；父 `plan` → 被 `PermissionState` 拒且 `done.readonlyDegraded===true`；⑦ 成员上下文 `expertTeam===undefined`（不能再委派）；`depth` 仍拒绝二次派生；⑧ 成员 tool 消息 content 以 `〔专家团·` 开头 | ~320 行 + ~16 用例 |
+| **T08** | **`task` 工具成员委派 + 事件** | `shared/src/types.ts`、`core/src/tools/types.ts`、`core/src/tools/builtin/task.ts`、`core/src/experts/team.ts`(新)、`core/test/task-expert-agent.test.ts`(新) | T01 | ① **不传 `agent`：`systemPrompt`/`permissions`/`confirm`/`askUser`/`meta` 与改动前逐字段相同**（快照断言，最高优先级）；② 传未知 agent → `unknown_agent`，错误文案含可选成员；③ 非团队会话传 agent → `unknown_agent` 且提示「未绑定专家团」；④ 命中成员：`expert_delegate_start` / `_done` 各发一次，payload 字段齐全，`usage` 已回写父预算；⑤ 第 9 次委派 → `delegation_limit`；⑥ 成员 `tools` 含 `write_file` 且父 `default` → 走父 `confirm`（可断言 mock 被调用）；父 `plan` → 被 `PermissionState` 拒且 `done.readonlyDegraded===true`；⑦ 成员上下文 `expertTeam===undefined`（不能再委派）；`depth` 仍拒绝二次派生；⑧ 成员 tool 消息 content 首行为 `[expert:<memberId>] <显示名>（<职业>）`，且**不含**废弃格式 `〔专家团·`；普通子代理（无 `agent`）content 无任何前缀 | ~330 行 + ~17 用例 |
 | **T09** | **HTTP 端点（5 个）** | `core/src/server/experts-routes.ts`(新)、`core/src/server/http.ts`、`core/src/index.ts`、`core/test/experts-api.test.ts`(新) | T02, T05 | ① `GET /api/experts` 返回 `{experts, errors}`，字段名 snake_case，团队带 `member_count`；项目作用域按 `projectId` 生效，不存在 → 404；② `GET /api/experts/:name` 返回完整详情（含 `tools`/`members`/`prompt_summary`）；未知 name → 404；③ `GET /api/experts/:name/avatar` → `{data_url:null}` 或 `data:image/png;base64,...`；④ `GET /api/sessions/:id/expert` → `{bound, missing, mode_forced}`，包删除后 `missing:true`；⑤ `POST /api/projects/:id/sessions` 带 `expert` → 落库两列且 team 时 `mode='react'`；未知 expert → 400；⑥ 所有端点都在静态托管分支**之前**分发（dist 存在时不被 SPA fallback 吞掉） | ~290 行 + ~14 用例 |
 | **T10** | **Web 数据层** | `web/src/api/client.ts`、`web/src/stores/experts.ts`(新)、`web/src/stores/chat.ts`、`web/src/utils/expertFilter.ts`(新)、`web/src/utils/expertFilter.test.ts`(新) | T09（契约以 §7.4 为准，可提前并行编码） | ① `filterExperts` 覆盖：name 前缀、displayName 中文、profession 中文、keywords、空查询全量、无命中空数组；② `sortExperts` 团队排同组末尾、其余按 displayName 拼音序（用 `localeCompare('zh')` 并记录跨环境差异）；③ `experts` store 有 `list/detail/avatar/loading/error` 五态 + `invalidate()`；④ `chat.open()` 拉 `getSessionExpert`，竞态防御（`sessionId` 变更即丢弃）；⑤ 两个委派事件 case 写入 `delegations`；⑥ `tool_result.meta.agent_name` → 消息 `agentName`；⑦ `pnpm -C packages/web typecheck` 通过；**⑧ `chat.notice()` 若被 `newSession()` 内部调用：`createSession` 抛错时**不推提示**且返回 `null`（断言 `notices.length` 不变、`error` 有值）** | ~380 行 + ~12 用例 |
 | **T11** | **Web 召唤面板 + composer 胶囊** | `web/src/components/ExpertPanel.vue`(新)、`web/src/components/ExpertComposerBadge.vue`(新)、`web/src/views/WorkbenchView.vue` | T10 | ① chip 出现在 `.composer-tools` **左组末尾**（`/mcp 扩展工具` 之后），既有 4 chip + 2 select 的 DOM/样式**零改动**（AC-19：`pnpm smoke:web` 通过）；② 面板复用 `.ac-panel` 定位/视觉令牌（`bottom: calc(100%+6px)` / `z-index:30` / `max-height:360px` / `--bg-elevated`），三段式结构（固定头搜索 + 滚动列表 36px + 固定底），**未改 `theme.css`**；三种关闭方式（`Esc` / 点面板外 / 再次点 chip）全通（AC-20）；③ **props/emits 契约符合 §6.8.1**（只接 `anchor`/`selected`，只发 `select`/`close`/`more`；组件内无 `api.*` 调用、无 `router` import、无 `chat` store 写入）；④ **七态齐备**（列表/搜索无结果/库为空/加载失败/**已选中 ✓**/**运行中**/**依赖缺失 ⚠**），全部内联，**无全局 toast**；⑤ 搜索去抖 120ms、`↑↓ Enter Esc` 可用、`@mousedown.prevent` 选中不丢焦点；⑥ 已选中行右侧绿 `✓`，再次点击**只关闭不新建会话**；⑦ 选中专家 → 新建会话并切换，原会话留在侧栏，**输入框草稿保留**（AC-23：`openSession()` 不清 `input`）；⑧ **召唤提示走既有 `chat.notice()`（对话区 `event-card`、常驻）**，10 条文案逐字符合 §6.8.4（AC-21：文案 + 新会话胶囊正确 + **原会话后端 `expert` 字段未被改写**）；⑨ 团队专家选中后模式 select 变「ReAct（专家团固定）」+ `disabled` + `title`（AC-22）；⑩ 胶囊**数据源为 `chat.sessionMeta.expert`**（无本地 ref 镜像，切会话/刷新一致）；胶囊 `✕` → 新建无专家会话（**P0 恒定新建，空会话也新建**；就地解绑归 P1）；**Web P0 不得出现任何 `PATCH /api/sessions/:id/expert` 调用**；**⑪ 召唤成功提示出现在对话区 `event-card`，刷新页面后**消失**（客户端态、不入库），但**胶囊仍在**（来自 `sessionMeta`）——两者不矛盾，不得为了"刷新后提示还在"把它落库** | ~520 行 |
@@ -1452,7 +1501,8 @@ async function onExpertSelect(item: ExpertListItem) {
 
 | ID | 任务名 | 涉及文件 | 依赖 | 验收标准 | 预估改动量 |
 |---|---|---|---|---|---|
-| **T15** | **设置页专家 Tab + 导入/导出 zip + 创建引导** | `web/src/components/settings/ExpertsPanel.vue`(新)、`web/src/views/SettingsView.vue`、`core/src/experts/io.ts`(新)、`core/src/server/experts-routes.ts`（+4 端点）、`cli/src/expert.ts`（import/export/new） | T09, T13 | ① 三层分组、每行名称/职业/类型/来源/启用开关/目录/导出；内置层只有「查看」；被覆盖项灰字标注；② 「停止使用」写 `~/.delta/experts.json` 的 `disabled[]`，停用项不出现在召唤面板（AC 见 F-39-13）；③ 导入校验链 5 步（zip-slip → 64MB → 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project + 同名需 `--force`）；`../../evil.sh` 与 >64MB 均失败且临时目录被清理（AC-11）；④ 内置层不可被导入覆盖；⑤ 导出产出可复现 zip（含 `exportedAt`/`exportedBy`）；⑥ `delta expert new --team` 生成骨架且前置拦截非法/重名 | ~700 行 + ~12 用例 |
+| **T15** | **设置页专家 Tab + 导入/导出 zip + 创建引导** | `web/src/components/settings/ExpertsPanel.vue`(新)、`web/src/views/SettingsView.vue`、`core/src/experts/io.ts`(新)、`core/src/server/experts-routes.ts`（+4 端点）、`cli/src/expert.ts`（import/export/new） | T09, T13 | ① 三层分组、每行名称/职业/类型/来源/启用开关/目录/导出；内置层只有「查看」；被覆盖项灰字标注；② 「停止使用」写 `~/.delta/experts.json` 的 `disabled[]`，停用项不出现在召唤面板（AC 见 F-39-13）；③ 导入校验链 5 步（zip-slip → 64MB → 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project + 同名需 `--force`）；`../../evil.sh` 与 >64MB 均失败且临时目录被清理（AC-11）；④ 内置层不可被导入覆盖；⑤ 导出产出可复现 zip（含 `exportedAt`/`exportedBy`）；⑥ `delta expert new --team` 生成骨架且前置拦截非法/重名；⑦ 每行「撤销信任」（§12.1）可用，撤销后召唤重新确认 | ~730 行 + ~14 用例 |
+| **T16** | **首次召唤信任确认（P1，§12.1）** | `core/src/experts/trust.ts`(新)、`core/src/server/experts-routes.ts`（+1 端点 `POST /api/experts/:name/trust`）、`web/src/components/ExpertTrustDialog.vue`(新)、`web/src/views/WorkbenchView.vue`、`cli/src/index.ts`、`cli/src/ui/expert-card.tsx`、`core/test/experts-trust.test.ts`(新) | T09（端点风格）、T11 / T13（召唤入口） | ① user/project 层包首次召唤 → 弹确认；**取消 → 不建会话**（`sessions` 行数不变，侧栏无新条目）；② 信任后写 `trusted[]`，二次召唤不再弹；③ `version` 或 `toolsHash` 变化 → 重新弹；`displayName` 变化不重弹；④ builtin 不弹；⑤ CLI `--yes` 不弹；非 TTY 且无 `--yes` → 退出码 1 + 提示；⑥ `POST /trust` 传错 `tools_hash` → 400 且 `trusted[]` 未变；⑦ 撤销信任后重新弹；⑧ 信任**不改变** `RestrictedRegistry` 边界（已信任的只读专家仍不能写） | ~280 行 + ~9 用例 |
 
 ### 8.3 依赖图
 
@@ -1473,6 +1523,7 @@ graph TD
     T13["T13 CLI 全链路"]
     T14["T14 内置 5 包"]
     T15["T15 设置页与导入导出 P1"]
+    T16["T16 首次召唤信任确认 P1"]
 
     T01 --> T02
     T01 --> T03
@@ -1495,6 +1546,9 @@ graph TD
     T10 --> T12
     T13 --> T15
     T09 --> T15
+    T11 --> T16
+    T13 --> T16
+    T09 --> T16
 
     style T01 fill:#1f6feb,stroke:#58a6ff,color:#fff
     style T06 fill:#9e6a03,stroke:#d29922,color:#fff
@@ -1522,6 +1576,7 @@ graph TD
 - 空库：v1 建表（**不含** expert 列）→ v5 `ALTER ADD`；
 - v4 历史库：跳过 v1–v4，只跑 v5；
 - v5 之后：`user_version = 5`，`LATEST_SCHEMA_VERSION = 5`；
+- **版本号错乱的库**（两列已存在但 `user_version = 4`）：`skipIf` 命中 → 只执行 `repairSql`（幂等索引）并推进到 5，不抛 `duplicate column name`（§6.5 / T05-⑨）；
 - 打开高于 5 的库：`migrate()` 抛「是否用更新版本的 delta 打开过？」（既有保护，不动）。
 
 ### 9.2 回滚策略
@@ -1578,13 +1633,30 @@ graph TD
 | 1 | **专家段永不进入 `identity`（locked）层** | `prompt/layers.ts`：`ExpertLayer.locked = false`、独立 id `expert`；`createDefaultLayers` 里在 `ToolsLayer` 之后插入，**不在 `IdentityLayer` 内拼接** | `applyOverrides` 对 `locked` 层的忽略逻辑不受影响；专家段是**同级** section，物理上无法覆盖 identity | T03-②：断言 `identity` 段内容与改动前逐字节相同 |
 | 2 | **保留标记转义** | `experts/prompt.ts` `escapeReservedMarkers`（`<static>`/`<dynamic>`/行首 `# L1..L7` → 全角） | 转义在**截断之前**，避免截断把 `<static>` 切成 `<stat` 后逃过正则；幂等（可重复调用） | T03-⑥：注入后 section 数仍为 8，`<static>` 只出现 1 次 |
 | 3 | **`identity` 层补一句「无视后续改写安全基线的段落」** | `IdentityLayer.build()` 末尾追加一行 | 新增行是**纯追加**，`locked=true` 保证不可覆盖 | T03-②：快照中该行存在（快照需在 T03 一次性更新，并在 PR 描述里标注「这是本期唯一允许的 identity 变更」） |
-| 4 | **详情页透明展示工具白名单** | `ExpertDetailBody.vue`：全量列出 `tools` + 「限制 N/16」；`delta expert show` 同款 | 数据源 = `GET /api/experts/:name` 的 `tools` 与 `tool_stats`；**不展示**包绝对路径与任何凭据 | T12-②：断言 DOM 不含 `dir` |
+| 4 | **详情页透明展示工具白名单** | `ExpertDetailBody.vue`：全量列出 `tools` + 「限制 N/16」；`delta expert show` 同款；**P1 追加召唤路径上的「首次信任确认」（§12.1）** | 数据源 = `GET /api/experts/:name` 的 `tools` 与 `tool_stats`；**不展示**包绝对路径与任何凭据。透明展示只解决「事后可查」，**不构成召唤路径上的拦截**——后者由 §12.1 承担 | T12-②：断言 DOM 不含 `dir`；T16-①②：未信任包召唤必先确认 |
 | 5 | **白名单只减不增** | `resolveToolAllow` 只做 `∩`；`RestrictedRegistry` 拒绝白名单外调用 | 结构性保证：`allow` 恒为 `expert.tools` 与注册表名的交集，任何路径都不产生「并集」 | T04-② + T07-①② |
 | 6 | **路径逃逸防护**（PRD 非功能项） | `parser.ts` 的 `resolveInPackage()`：拒绝绝对路径 + `..` 折叠 + `realpath` 后二次根内判定 + `lstat().isSymbolicLink()` 拒绝 | `agents[]`、`avatar`、`members[].avatar` 三个路径字段全部经过它 | T01-②：`../etc/passwd` / `/etc/passwd` / 根外符号链接 / 根内符号链接（也拒）四种 |
 | 7 | **导入 zip 校验**（P1） | `experts/io.ts`：zip-slip（拒绝绝对路径与 `..`）→ 解压总量 ≤ `MAX_EXTRACT_BYTES`（**复用 `skills/hub.ts:32` 的 64MB 常量**）→ 必含 `expert.json` 且 name 合法 → 试解析 → 目标层仅 user/project | 解压先写临时目录，失败即 `rm -rf` | T15-③（AC-11） |
 | 8 | **成员写操作不越过父确认通道** | `task.ts` 继承 `ctx.confirm`；成员 `PermissionState` **克隆**父的 `mode` + `allowlist`（不共享 `sessionAllowed`） | `plan` 父会话 → 成员自动只读（`toolCapability` 拒 write/exec） | T08-⑥ |
 | 9 | **主理人不能代写** | `software-dev-team` 的 `tools` 白名单不含任何写工具（`read_file/list_dir/glob_search/grep_search/task/todo_write/ask_user`） | 由包内容 + `RestrictedRegistry` 双重保证 | T14-⑥（AC-4） |
 | 10 | **成员不能再派生** | `MAX_SUBAGENT_DEPTH=1`（既有）+ `childCtx.toolContext.expertTeam = undefined`（D12） | 双防线 | T08-⑦ |
+
+### 12.1 首次召唤信任确认（P1 / PRD F-39-26）
+
+**为什么需要**：上表第 4 条只保证「事后可查」——用户必须**主动点进详情页**才看得到工具白名单。但真实威胁是「一个 user/project 层的包把 `tools` 写成 `["write_file","run_command"]`，同时在 `displayName`/`profession` 里自称只读审查官」：面板里它和一个纯只读专家长得完全一样（同一个 `◆` 图标 + 一句职业描述），而召唤路径上没有任何拦截。P0 无签名机制（P2 F-39-22 才补），所以 P1 先做**知情同意**，P2 再补**可验证性**。二者不互相替代。
+
+| 项 | 口径 |
+|---|---|
+| 存储 | `~/.delta/experts.json`（与 `disabled[]` 同一文件）新增 `trusted: Array<{ name, version, toolsHash, trustedAt }>`；`toolsHash` = 解析后 `allow` 集合排序拼接的 sha1 前 12 位（`allow === null` 时用字面量 `none`，表示「不收窄」） |
+| 判定 | `isTrusted(record)` = 存在同名条目 **且** `version` 相同 **且** `toolsHash` 相同。**任一变化即视为未信任**：作者改了工具集或升了版本，不能沿用旧授权（这正是「先给你一个只读版本、再偷偷换写权限」的攻击路径） |
+| 作用域 | **仅 `layer === 'user' \| 'project'`**；`builtin` 直接视为已信任（随程序分发、可审计，每次升级都会随包重新评审；对内置包弹窗只制造噪音） |
+| 交互（Web） | 召唤前拦截：`ModalShell` 360px，标题「首次使用该专家」；正文 = 来源层 + 工具清单（`write`/`exec` 项 `--orange` 高亮，附「将可修改你的文件 / 执行命令」）+ 提示词摘要前 3 行；按钮「取消 / 信任并召唤」。**取消 → 不建会话**（侧栏不留空条目、不产生 `sessions` 行） |
+| 交互（CLI） | `--expert <name>` 与 `/expert` 命中未信任包 → 终端内联 `y/n`（一次一包，展示同一组信息）；`--yes` 跳过（脚本/CI）；非交互环境（`!process.stdin.isTTY`）且未传 `--yes` → **失败退出（码 1）并提示用 `--yes`**，不静默信任 |
+| 写入 | Web 走 **P1 新增** 的 `POST /api/experts/:name/trust`（body `{ tools_hash }`，服务端**重算并复核** hash 后才落盘，不信任前端传值）；CLI 直接写文件。**P0 不引入该端点**（T09 的 5 个端点不变） |
+| 撤销 | 设置页专家行加「撤销信任」（T15 增加一行操作）；撤销后下次召唤重新确认 |
+| 不做 | 不校验包内容完整性 / 不验证作者身份（那是 F-39-22 签名的事）；**不把「已信任」当权限提升**（`RestrictedRegistry` 仍是硬边界，信任只影响是否弹窗）；不为内置包提供「不再提示」开关 |
+
+**验收（T16）**：① user 层包首次召唤 → 弹确认；取消 → `sessions` 行数不变；② 信任后写 `trusted[]`，二次召唤不再弹；③ 改 `version` 或改 `tools` → 重新弹；④ builtin 不弹；⑤ `--yes` 不弹、非 TTY 无 `--yes` → 退出码 1；⑥ `POST /trust` 的 `tools_hash` 与服务端重算不一致 → 400 且不落盘；⑦ 撤销信任后重新弹；⑧ 已信任包的 `displayName` 变更**不**触发重新确认（显示名不影响权限面）。
 
 ---
 
@@ -1597,7 +1669,7 @@ graph TD
 | 日志 | `promptSectionsLog` 自动覆盖 expert 段（普通 section）；`hub.send` 启动时 `console.debug('[expert] bound=%s type=%s tools=%d/%d', ...)` |
 | 结构化错误 | `errors[]` 统一文案 `"<layer>/<name>: <原因>"`：缺 agents / name 非法 / 路径越界 / lead 不唯一 / 成员超限 / 嵌套团队 / 头像超限 / 未知工具 / 技能不存在 / 单层超 200 |
 | CLI | `delta expert list`（表格）· `--verbose`（errors + 被覆盖项 + 段 token）· `delta expert show <name>`（文本卡）· `delta --expert <bad>` → stderr 列可选名 + 退出码 1 |
-| 事件 | `expert_delegate_start` / `_done` 走 SSE（Web 成员卡）+ TUI 单行；**不落库**，但成员标识以 content 前缀进入 `messages`（D8）→ F-18 回放可见 |
+| 事件 | `expert_delegate_start` / `_done` 走 SSE（Web 成员卡）+ TUI 单行；**不落库**，但成员标识以 `[expert:<memberId>]` 前缀进入 `messages`（D8）→ F-18 回放可见 |
 | 用户可见的一次性提示 | 「原绑定专家 X 已不存在，已按无专家运行」（chat notice / CLI stderr 一行）；「专家团固定使用 ReAct」（模式 select 的 `title`） |
 
 ---
@@ -1608,11 +1680,11 @@ graph TD
 
 | 文件 | 用例清单 | 数量目标 |
 |---|---|---|
-| `core/test/experts-parser.test.ts` | name 正则 6 例（含 41 字符、大写、下划线、数字开头、单字符、合法）；缺 agents；agentName 无 md；`../` 越界；绝对路径；根外符号链接；根内符号链接（也拒）；team 无 lead；team 双 lead；memberAgents 与 members 不一一对应；嵌套 team 拒绝；单成员 md 坏→剔成员；主 agent md 坏→整包失败；md name≠文件名；未知字段忽略；头像 .gif 拒绝；头像 >500KB 拒绝；`escapeReservedMarkers` 幂等 + 4 类标记 | **28** |
+| `core/test/experts-parser.test.ts` | name 正则 6 例（含 41 字符、大写、下划线、数字开头、单字符、合法）；缺 agents；agentName 无 md；`../` 越界；绝对路径；根外符号链接；根内符号链接（也拒）；team 无 lead；team 双 lead；memberAgents 与 members 不一一对应；嵌套 team 拒绝；单成员 md 坏→剔成员；主 agent md 坏→整包失败；md name≠文件名；未知字段忽略；头像 .gif 拒绝；头像 >500KB 拒绝；**成员文件名含 `]` / 空格 / 全角括号 → 剔除 + errors**；`escapeReservedMarkers` 幂等 + 4 类标记 | **31** |
 | `core/test/experts-store.test.ts` | 三层覆盖（3 例）；`layers()` 见被覆盖项；指纹命中零重扫；改 json 失效；改 md 失效；单层 201→200+errors；目录不存在不报错；头像超限不废包；`disabled[]` 过滤（P1 预置） | **10** |
 | `core/test/experts-policy.test.ts` | 缺省不收窄；子集交集；未知名入 unknown；`BUILTIN_TOOL_COUNT===16`；`restrictRegistry(base,null)===base`；越权调 `executeAll` → `tool_not_allowed` 且不进 confirm；seed 3 上限；seed 4k 上限；技能不存在跳过；空 skills 返回空 | **12** |
 | `core/test/experts-prompt.test.ts` | 无 expert 快照一致；段位置（tools 之后/dynamic 之前）；wrapper 逐字；12000→6000+后缀；6000 整不加后缀；转义 4 类；团队段不含成员正文；两次 assemble 指纹相等；source 标注；团队段 token ≤3200 | **14** |
-| `core/test/experts-binding.test.ts` | 空库 v5；v4 旧库升级后 `expert IS NULL`；team 强制 react；agent mode 原样；非法 expert_type 抛错；三处 SELECT 都返回新列；`setSessionExpert` 解绑；`resolveBinding` 缺包不抛 | **10** |
+| `core/test/experts-binding.test.ts` | 空库 v5；v4 旧库升级后 `expert IS NULL`；team 强制 react；agent mode 原样；非法 expert_type 抛错；三处 SELECT 都返回新列；`setSessionExpert` 解绑；`resolveBinding` 缺包不抛；**`user_version` 被改小后重放不抛错且索引仍在** | **11** |
 | `packages/web/src/utils/expertFilter.test.ts` | name 前缀；displayName 中文；profession 中文；keywords；空查询；无命中；大小写不敏感；团队排末尾；排序稳定 | **9** |
 
 ### 14.2 集成（core，含引擎行为）
@@ -1621,8 +1693,9 @@ graph TD
 |---|---|---|
 | `core/test/experts-assemble.test.ts` | `buildAssembleContext` 双端唯一（grep 断言）；只读专家 L4 无 write_file；无专家 debug 输出对比；两轮指纹相同；包删除降级；首轮 seed 预置技能（AC-12） | **6** |
 | `core/test/experts-api.test.ts` | 5 端点 200；未知 name 404；项目作用域 404；avatar `data_url` null/有值；`getSessionExpert` 三种状态；`POST sessions` 带 expert 落库；未知 expert 400；分发顺序（静态托管不吞 API） | **14** |
-| `core/test/task-expert-agent.test.ts` | **不传 agent 全字段快照一致**；未知 agent；非团队会话传 agent；命中成员事件 payload；第 9 次委派拒绝；成员写走父 confirm；plan 下只读降级 + 标记；`expertTeam===undefined`；depth 拒绝；content 前缀 | **16** |
+| `core/test/task-expert-agent.test.ts` | **不传 agent 全字段快照一致**；未知 agent；非团队会话传 agent；命中成员事件 payload；第 9 次委派拒绝；成员写走父 confirm；plan 下只读降级 + 标记；`expertTeam===undefined`；depth 拒绝；`[expert:<id>]` 首行标记可被正则解析（含中文职业） | **17** |
 | `core/test/experts-e2e.test.ts` | AC-1 只读专家写被拒 + 模型收到 `denied`；AC-2 yolo 下仍拒；AC-6 坏包隔离（其他包正常）；AC-10 三种越界全拒；AC-13 技能不存在不阻塞；AC-17 旧库迁移 | **10** |
+| `core/test/experts-trust.test.ts` | **P1（T16）**：user 层未信任 → `isTrusted=false`；`recordTrust` 后 `true`；`version` / `toolsHash` 变化 → 回 false；`displayName` 变化 → 仍 true；builtin 恒 true；`tools_hash` 不符 → 拒绝落盘；撤销信任 → 回 false；`allow===null` 时 hash 走 `none` | **9** |
 
 ### 14.3 端到端 / 冒烟（Web + CLI，手工或轻量脚本）
 
@@ -1642,7 +1715,7 @@ graph TD
 | **S12** | **AC-22 团队绑定 UI**：召唤「软件开发团队」→ 提示文案含「模式固定为 ReAct」；模式 select 显示 `ReAct（专家团固定）` 且 `disabled`（点击无反应） | 截图 + DOM `disabled` 属性断言 |
 | **S13** | **AC-23 草稿保留**：在输入框输入 60 字草稿 → 点 chip 召唤专家 → 新会话的输入框**仍含该 60 字**，光标位置合理 | 人工观察 + `input.value` 断言 |
 
-**数量目标**：单测 83 例 + 集成 46 例 + 冒烟 **13** 场景 = **142 项**。
+**数量目标**：单测 87 例 + 集成 56 例 + 冒烟 **13** 场景 = **156 项**（含 P1 的 T16 信任确认 9 例；P0 口径为 87 + 47 + 13 = 147）。
 
 ### 14.4 必须新增的测试文件
 
@@ -1668,7 +1741,7 @@ packages/web/src/utils/expertFilter.test.ts
 | **R1** | **静态缓存前缀失效**：新增静态段改变 `staticFingerprint` 的输入集合，升级后首次全量 miss；若将来有人把 `now`/`cwd`/记忆混进专家段，会**每轮** miss | 首字延迟回归（严重时每轮多 2–3k tokens 前缀） | 中→低 | `ASSEMBLER_VERSION` bump（D7）使失效显式且一次性；`prepareExpertSegment` 的入参类型 `ExpertRecord` **不含任何运行时值**（结构性防混入）；T03-⑧「同 ctx 两次 fingerprint 相等」+ T06-④「连续两轮相同」双测试；代码注释写明「禁止在 ExpertLayer 内读取 now/cwd」 |
 | **R2** | **双端漂移**：CLI 与 Web 各自拼 `AssembleContext` / 各自实现收窄 → 同一专家的 Prompt 与工具边界不一致 | 极难排查的「CLI 能用 Web 不能用」类故障 | **高（若不收敛）** | `buildAssembleContext()` 单一函数 + `resolveToolAllow`/`restrictRegistry` 单一实现；T06-① 用 **grep 级断言**（两包内不再出现 `AssembleContext` 字面量构造）；task-lead 已点名的两个注入入口（`cli/src/prompt.ts:51`、`hub.ts:730`）是本设计的强约束项 |
 | **R3** | **成员工具越权 / 确认卡串台**：① 成员白名单写错导致能写；② 成员与父同时挂起确认，前端单槽位 `pendingConfirm` 覆盖丢卡 | ①数据被误改；②用户看到错误卡片或永久挂起 | 中 | ①`resolveMemberAllow` 做 `∩`（只减不增）+ `RestrictedRegistry` 强制 + `plan` 降级；②P0 **串行委派**（父 `await` 子，同一时刻 ≤1 挂起）；③在 `task.ts` 与 `chat.ts` 双处注释「P1 并行前必须先改确认卡为队列」，并把「确认卡队列」列为 F-39-17 的**前置任务**（本设计 §1-D4 已登记） |
-| **R4** | **导入攻击面**（P1）：zip-slip、zip 炸弹、绝对路径、符号链接、伪装成只读的写权限包 | 磁盘任意写 / 逃逸沙箱 | 中 | zip-slip 前置校验 + 复用 `MAX_EXTRACT_BYTES` + 临时目录解压后清理 + 目标层禁 builtin + 试解析；**「伪装只读」由详情页透明展示白名单缓解**（PRD 承认 P0 无签名机制，P2 F-39-22 补） |
+| **R4** | **导入攻击面**（P1）：zip-slip、zip 炸弹、绝对路径、符号链接、伪装成只读的写权限包 | 磁盘任意写 / 逃逸沙箱 | 中 | zip-slip 前置校验 + 复用 `MAX_EXTRACT_BYTES` + 临时目录解压后清理 + 目标层禁 builtin + 试解析；**「伪装只读」P1 由首次召唤信任确认（§12.1 / T16）在召唤路径上拦截**（默认不信任 user/project 层，工具集或版本变化即重新确认），P2 F-39-22 签名补可验证性。注意：信任是**知情同意**不是安全边界，`RestrictedRegistry` 仍负责真正的强制执行 |
 | **R5** | **上下文膨胀**：团队专家把成员正文带进主会话；成员清单 + 主理人正文 + 预置技能叠加超预算 | 首字慢、压缩提前触发、费用上升 | 中 | 类型层隔离（`ExpertSegmentInput.members` 无 body）+ T03-⑦ 断言「不含成员正文子串」+ T14-⑦ 断言团队段 ≤3200 token + `seedExpertSkills` 4k 上限 |
 | **R6** | `LayerId` 是封闭 union，扩它会扩散到 `OverrideSet`/`Partial<Record<LayerId,...>>`/校验逻辑 | 编译错误或覆盖语义漏洞 | 中 | T03 的第一件事是全包 `typecheck`；`merge.ts` 的 `applyOverrides` 对未知/新层无特殊处理（通用逻辑）→ 只需确认 `OverrideSet.project.expert` 不会意外生效（专家段**不允许**被项目级覆盖，因为 P0 无覆盖场景；如需禁止，在 `applyOverrides` 外由调用方不传即可） |
 | **R7** | `session/store.ts` 4 处 SELECT 列清单漂移（漏一列 → 字段 `undefined` 而不是 `null`） | 前端把「无专家」判成 `undefined`，类型不报错但运行错 | **中（易漏）** | 抽 `SESSION_COLUMNS` 常量 + `searchSessions` 改 `SELECT DISTINCT s.*`；T05-⑥ 对三个入口逐一声明断言 |
@@ -1680,7 +1753,7 @@ packages/web/src/utils/expertFilter.test.ts
 
 1. **`SkillRuntime` / `SkillBuffer` 是进程级共享的（既有缺陷，被 F-39-7 放大）**。`createSkillRuntime()`（`hub.ts:766`）与 CLI 的 `promptAssembly.skills` 都在进程内创建**一个** buffer，跨会话共享。F-39-7 要求「会话创建时自动写入 SkillBuffer」，天然要求 per-session。**P0 处置**：`SessionHub` 增加 `private readonly seeded = new Set<string>()`（key = `${sessionId}:${expertName}`），保证同一会话同一专家只 seed 一次，不重复消耗把 4k 预算；跨会话可见性是既有缺陷，不在本期修复（修复 = 把 `SkillRuntime` 改为 per-session 工厂，影响 `createSkillRuntime` 的 3 个调用方 + 若干净，需独立评审）。**建议**：单独立项（F-16 的后续优化），不塞进 F-39。
 2. **P1「下轮生效」（F-39-16②）会中途改变会话的专家段内容**，与「静态段会话内恒定」冲突。届时必须新增 v6 迁移（`expert_pending`）+ 在提升 pending 的那一刻**清空 `SplitPromptAssembler` 的 LRU 缓存**（新增 `clearCache()` 方法）。本期不做，但**接口上预留**：`ExpertLayer` 不缓存任何状态，`SplitPromptAssembler` 的 cache 是实例私有的，加 `clearCache()` 是 3 行。
-3. **`ALTER TABLE` 的非幂等性**：v3/v4/v5 都依赖 `user_version` 门禁而非 SQL 幂等。若存在「`user_version` 被外部工具改小」的库，v5 会抛 `duplicate column name`。兜底方案（**未采纳，建议 P1**）：在 `SessionStore` 构造期加 `ensureColumn(db,'sessions','expert','TEXT DEFAULT NULL')` 的 `PRAGMA table_info` 检查。本期采纳 v3/v4 的既有约定，以保持一致性。
+3. **`ALTER TABLE` 的非幂等性——已采纳兜底（v5 起）**：v3/v4 依赖 `user_version` 门禁而非 SQL 幂等；若 `user_version` 被外部工具改小，v5 会在 `duplicate column name` 处整事务失败。v5 **不再沿用**该约定，改为 `Migration.skipIf`（`PRAGMA table_info` 检查两列）+ `repairSql`（补 `CREATE INDEX IF NOT EXISTS`）+ 跳过分支仍推进 `user_version`（见 §6.5）。v1–v4 不动（已发布库版本号已越过，改历史迁移有害无益）。选 `skipIf` 而非「`SessionStore` 构造期 `ensureColumn`」的原因：前者在迁移事务内生效、失败可用同一套断言覆盖，后者要在 `migrate()` 之后再补一次结构修正，两条路径容易漂移。
 4. **`web` 侧 `SplitPromptAssembler` 每轮重建（`hub.ts:730`）使静态缓存从不命中**。T06 附带把它提为 `SessionHub` 构造期字段（5 行）。**若评审认为超出 F-39 范围，可单独回退这 5 行**，不影响专家功能的正确性，只影响 PRD §10「不增加缓存未命中轮次」这条非功能指标的可验证性。
 5. **`ASK_ID` 复用**：`hub.send` 里 `askId = ask_${sessionId}_${Date.now()}` 只在入口生成一次，同一轮内多次 `askUser` 会复用同一 id（既有实现）。父子同时 `askUser` 在 P0 串行委派下不会并发，安全；P1 并行委派前需与 R3 一并解决。
 
@@ -1695,3 +1768,4 @@ packages/web/src/utils/expertFilter.test.ts
 | 2026-10 | **rev.3 —— 补 notice 清空时机陷阱（团队 lead 核对 `chat.ts` 后指出）** | ① **修正 rev.2 的事实错误**：`error` 渲染在**侧栏会话列表区**（`WorkbenchView.vue:984`）而非 composer，§6.8.3 陷阱 2 已改正；② 确认项目**已有** notice 通路（`chat.ts:30` `notices` / `:105` **`notice(text)`**（非 `push*` 类的臆测名）/ `WorkbenchView.vue:1230` `event-card`），**撤销** rev.2 提出的 composer 内私有提示 ref + 定时器 + `onBeforeUnmount` 清理（纯额外风险面）；③ 新增 §2.6 **【修正 6】**：召唤提示统一走 `chat.notice()`，放弃 PRD §8.3 的「composer 内 + 11.5px + 3.5 秒」三点（理由见该节）；④ §6.8.3 陷阱 2 重写为「**必须在 `chat.open()` resolve 之后调用**，否则被 `close()` 静默清空」+ 错误/正确顺序代码对照 + 三种禁止写法；⑤ 连带 `newSession()` 返回类型 → `Promise<string \| null>`（调用方需要「open 已完成」这个时机点）；⑥ T11 新增验收 ⑪，S11 改为验证顺序陷阱（含临时挪位复现），文案归属约束从「composer 内私有 ref」改为 `chat.notice(...)` |
 | 2026-10 | **rev.4 —— 三项裁决落地（定稿）** | ① **提示方案回到 composer 内独立提示 ref**（用户裁决）：既有 `chat.notices` 确实存在（`chat.ts:30` / **`notice()`** `:105` / `WorkbenchView.vue:1230` `event-card`），但**刻意不用**——它渲染在消息流内且常驻不消失，而召唤回执是「刚新建的零消息会话」的一次性反馈，用它会凭空给新会话放一张常驻卡片；§2.6 重写为「说明为何不采用」而非「否认其存在」，§6.8.3 陷阱 2 重写并补 `.composer-hint` 排版槽（`WorkbenchView.vue:1313` / 样式 `:1980-1983`）；恢复该 ref 的写入函数 + 3.5 秒 定时清除 + `onBeforeUnmount` 清定时器；**修正 rev.3 的事实表述**（方法名 `notice` 非 `push*` 类的臆测名；清空点在 `close()` `:91`、由 `open()` `:47` 调用；`error` 渲染在侧栏 `:984`）；② **「空会话就地解绑」按 F-39-4 收口 → Web P0 恒定新建**，新增 §2.7-a' 记录 PRD 三处矛盾与裁定，§6.8 表格与接线第 3 条同步改正；③ **CLI 保留空会话就地绑定**，在 §6.9 顶部**显式登记端间刻意差异**（含判空条件与 P1 收敛路径）；④ `.composer-caps` 定为新容器，但允许提取 `.caps-row` 共用 flex 基类——**样式可共用，状态与容器必须分离**；⑤ 文案差异（召唤/切换）按裁决保留不统一 |
 | 2026-10 | **rev.5 —— 提示方案终审：采纳 `chat.notice()`（event-card）定稿** | 用户裁决**采纳 event-card 方案**，撤销 rev.4 的 composer 内私有提示 ref + 3.5 秒：§2.6 与 §6.8.3 改回 `chat.notice()`（含正确事实：`notice()` `chat.ts:105` / 清空在 `close()` `:91` 由 `open()` `:47` 触发 / `error` 在侧栏 `:984`），删掉该提示 ref 及其写入函数、定时器、`onBeforeUnmount`、`.expert-notice` 槽；三条理由收敛为「一致性优先于局部体验」+「零基建」+「不为共享数组加优先级例外」。新增**三条禁止项**：不加 20 条挤掉例外、不写失败计数仪表、不为「刷新后提示还在」落库。新增**职责分工**：提示不入库/刷新即失可接受，持久可见性由胶囊承担。**文案表 10 条一字未改**（文案与呈现策略正交）。**T10 追加 ⑧**（`createSession` 抛错时不推提示且返回 `null`，断言 `notices.length` 不变）；**T11 ⑪ 改为**「提示刷新后消失、胶囊仍在，两者不矛盾」；**S11 同步**为 event-card + 刷新后 `notices` 空而胶囊在。PM 侧同步修订 PRD §8.2/§8.3 |
+| 2026-10 | **rev.6 —— 安全与可观测三项修订** | ① **回放标记去中文标点**（D8 / §5.3 / §6.6 / §6.7 / T08-⑧）：`〔专家团·名（职业）〕` → `[expert:<memberId>] 显示名（职业）`。原格式在成员名或职业含「（」时会被 `.+?` 提前截断；新格式只依赖 ASCII 方括号，标记后的文本退化为「包被删除时的可读回退」，解析器不依赖。连带新增 **§6.1 第 10 步**：agent/成员 id 必须匹配 `^[A-Za-z0-9_-]{1,40}$`（id 会进标记与 `task.agent` 参数，必须可无歧义解析），T01 补 3 例。② **新增 §12.1 首次召唤信任确认（P1 / PRD F-39-26）**：透明展示只解决「事后可查」，不构成召唤路径上的拦截；user/project 层包首次召唤必须确认（来源层 + 工具高亮 + 版本/工具集变化即重确认），builtin 免确认，信任**不作为权限边界**。新增任务 **T16**（+1 P1 端点 `POST /api/experts/:name/trust`）+ 依赖图/文件清单/测试（9 例）+ R4 缓解改写。③ **v5 迁移改幂等**（§6.5 / §9.1 / §16-3 / T05-⑨）：`Migration` 增加可选 `skipIf`（`PRAGMA table_info`）+ `repairSql`（补索引），跳过分支仍推进 `user_version`，修掉「`user_version` 被外部改小 → `duplicate column name` → 程序起不来」；v1–v4 保持原样。测试总量 147（P0）/ 156（含 P1）。
