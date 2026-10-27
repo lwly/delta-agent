@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   SessionService,
   resolveProviderFromEnv,
+  defaultModelFor,
   estimateMessagesTokens,
   ToolRegistry,
   McpManager,
@@ -595,7 +596,8 @@ async function start(opts: CliOpts): Promise<void> {
   if (!session) {
     session = service.createSession(project.id, {
       title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,
-      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
+      // 未显式指定模型时留空，运行期按解析出的 Provider 取默认（见 defaultModelFor）
+      model: opts.model ?? process.env.DELTA_MODEL,
       mode: normalizeMode(opts.mode),
     });
   } else if (opts.model) {
@@ -636,7 +638,7 @@ async function start(opts: CliOpts): Promise<void> {
     }
     session = service.createSession(project.id, {
       title: `${project.name} · ${new Date().toLocaleString('zh-CN')}`,
-      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
+      model: opts.model ?? process.env.DELTA_MODEL,
       mode: expert.expertType === 'team' ? 'react' : normalizeMode(opts.mode),
       expert: expert.name,
       expertType: expert.expertType,
@@ -682,14 +684,14 @@ async function start(opts: CliOpts): Promise<void> {
     void autoOnboardProject({
       projectRoot: cwd,
       provider,
-      model: session.model || 'claude-sonnet-4-5-20250929',
+      model: session.model || defaultModelFor(provider.id),
     }).catch(() => undefined); // 失败静默：状态留在 pending，下次启动重试
   };
 
   // ── M3 提示词体系：7 层组装 + 三级覆盖 + Skill 三层加载/两阶段加载 ──
   // F-37（D6）：projectRoot 传 getter——动态段 CWD 每轮取 workRootRef 实时值，
   // 切换分支/worktree 后由 App 调 rebuild() 重读静态段
-  const model = session.model || 'claude-sonnet-4-5-20250929';
+  const model = session.model || defaultModelFor(provider.id);
   const expertRef: { current: ExpertRecord | null } = { current: expert ?? null };
   const promptAssembly = await assemblePrompt({
     projectRoot: () => workRootRef.current,

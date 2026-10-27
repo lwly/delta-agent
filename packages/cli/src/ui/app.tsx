@@ -13,6 +13,7 @@ import type {
 import {
   BudgetManager,
   ExpertStore,
+  defaultModelFor,
   readExpertsConfig,
   isTrusted,
   GitIntegration,
@@ -318,7 +319,7 @@ export function App(props: AppOptions) {
         sessionId: props.session.id,
         projectId: props.session.project_id,
         mode: engineMode,
-        model: props.session.model || 'claude-sonnet-4-5-20250929',
+        model: props.session.model || defaultModelFor(props.provider.id),
         systemPrompt: props.systemPrompt,
         systemPromptParts: {
           staticText: props.systemPromptParts?.staticText ?? props.systemPrompt,
@@ -368,7 +369,7 @@ export function App(props: AppOptions) {
           },
           subagent: {
             provider: props.provider,
-            model: props.session.model || 'claude-sonnet-4-5-20250929',
+            model: props.session.model || defaultModelFor(props.provider.id),
             budget: budgetRef.current,
             budgetConfig: budgetRef.current.config,
             windowTokens: 200_000,
@@ -1065,7 +1066,7 @@ export function App(props: AppOptions) {
       <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexDirection="column">
         {items.length === 0 ? (
           <Text dimColor>
-            delta-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || 'claude-sonnet-4-5-20250929'}
+            delta-agent v0.1 · {props.engineMode === 'plan-execute' ? 'Plan 模式' : props.engineMode === 'multi-agent' ? 'Multi-Agent 模式' : 'ReAct 模式'} · 模型 {props.session.model || defaultModelFor(props.provider.id)}
             {permissionLabel(permsRef.current.policy.mode)}
             {'\n'}输入需求开始；/help 查看命令。
           </Text>
