@@ -80,9 +80,13 @@ function onResume() {
       <template v-else-if="state === 'paused'">⏸ 已暂停 · 发送消息以继续</template>
       <template v-else>■ 已停止 · 可重新发送任务或从停止点继续（直接输入即可）</template>
     </span>
-    <!-- token 口径小字：任一数据源缺失则整段隐藏 -->
-    <span v-if="todayTokens != null || chat.lastUsage" class="runbar-tok" title="口径：今日用量来自 usage summary；上次任务用量来自最近一次 done 事件（无实时增量）">
-      <template v-if="todayTokens != null">今日 {{ fmtTok(todayTokens) }} tok</template>
+    <!-- token 口径小字：任一数据源缺失则整段隐藏；胶囊样式与左侧运行状态区隔，避免误读为本轮开销 -->
+    <span
+      v-if="todayTokens != null || chat.lastUsage"
+      class="runbar-tok"
+      title="口径：今日累计 = 当日全部会话合计（usage summary，非本轮开销）；上次任务 = 最近一次 done 事件（无实时增量）"
+    >
+      <template v-if="todayTokens != null">今日累计 {{ fmtTok(todayTokens) }} tok</template>
       <template v-if="todayTokens != null && chat.lastUsage"> · </template>
       <template v-if="chat.lastUsage">上次任务 +{{ fmtTok(chat.lastUsage.inputTokens) }}/+{{ fmtTok(chat.lastUsage.outputTokens) }}</template>
     </span>
@@ -107,7 +111,12 @@ function onResume() {
 .runbar.paused .runbar-stripe { background: var(--orange); }
 .runbar.stopped .runbar-stripe { background: var(--red); }
 .runbar-text { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.runbar-tok { font-size: 11px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; flex: none; }
+/* token 小字：胶囊化与运行状态文案区隔（反馈：紧贴「运行中」易被误读为本轮开销） */
+.runbar-tok {
+  font-size: 11px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; flex: none;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--bg-hover); border: 1px solid var(--border);
+}
 .runbar-spring { flex: 1; min-width: 0; }
 
 /* 呼吸圆点 */
