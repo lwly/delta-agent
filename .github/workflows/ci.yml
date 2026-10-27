@@ -16,6 +16,27 @@ env:
   HAS_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY != '' }}
 
 jobs:
+  # 安全闸门：个人运行时数据禁止入库 + 全历史密钥扫描。
+  # .gitignore 挡不住"先提交后加规则"（gitleaks 与路径断言见 scripts/hooks/pre-push）。
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks 需要全历史
+
+      - name: Block personal runtime paths (.workbuddy / .delta)
+        run: |
+          if git ls-tree -r --name-only HEAD | grep -E '^\.workbuddy/|^\.delta/'; then
+            echo "::error::个人运行时数据（.workbuddy/ 与 .delta/）禁止入库"
+            exit 1
+          fi
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     strategy:
       fail-fast: false
