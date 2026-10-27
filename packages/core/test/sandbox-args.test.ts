@@ -17,7 +17,8 @@ import {
 } from '../src/sandbox/index.js';
 import { makeResolvedConfig } from './helpers/fake-docker.js';
 
-const PROJECT = '/Users/lwl/work/project/delta-agent';
+/** 与机器无关的示例项目根（挂载源断言按此路径模板拼接，不依赖本机目录） */
+const PROJECT = path.join(path.sep, 'srv', 'projects', 'demo-app');
 
 function spec(overrides: Partial<DockerRunSpec> = {}): DockerRunSpec {
   const resolved = makeResolvedConfig({ mode: 'docker' }, { explicit: true });
@@ -183,8 +184,8 @@ describe('containerWorkdir / relativeCwdOf / normalizeMountSource', () => {
   });
 
   it('normalizeMountSource: win32 反斜杠归一 + 盘符大写', () => {
-    expect(normalizeMountSource('c:\\Users\\lwl\\proj', 'win32')).toBe('C:/Users/lwl/proj');
-    expect(normalizeMountSource('/Users/lwl/proj', 'darwin')).toBe('/Users/lwl/proj');
+    expect(normalizeMountSource('c:\\Users\\dev\\proj', 'win32')).toBe('C:/Users/dev/proj');
+    expect(normalizeMountSource('/Users/dev/proj', 'darwin')).toBe('/Users/dev/proj');
   });
 
   it('normalizeMountSource: 含逗号/引号/换行 → throw（文案可读）', () => {

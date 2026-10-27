@@ -7,7 +7,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
-import { api, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
+import { api, apiFetch, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
 import TrashModal from '../components/TrashModal.vue';
@@ -255,7 +255,7 @@ async function pauseSession(id: string) {
 
 async function refreshProviders() {
   try {
-    const res = await fetch('/api/providers');
+    const res = await apiFetch('/api/providers');
     const json = await res.json();
     // serve 未挂 ProviderManager 时该端点 404/返回错误对象，退化为空列表
     providers.value = Array.isArray(json) ? (json as ProviderView[]) : [];
@@ -1596,10 +1596,24 @@ watch(
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
-      <p class="modal-tip">输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。<template v-if="canPickDirectory">也可点「浏览…」直接选择目录。</template></p>
+      <!-- 桌面壳：桥接可用时只走系统目录选择器（输入框只读展示结果），不再要求手打绝对路径 -->
+      <p v-if="canPickDirectory" class="modal-tip">
+        点击<b>选择文件夹…</b>挑选项目根目录，Agent 会在该目录内读写代码。
+      </p>
+      <p v-else class="modal-tip">
+        输入项目根目录的<b>绝对路径</b>，Agent 会在该目录内读写代码。<br />
+        <span class="modal-tip-sub">提示：桌面版可直接选择文件夹；浏览器形态受安全模型限制只能手输。</span>
+      </p>
       <div class="path-row">
-        <input v-model="newRoot" class="full" placeholder="/path/to/your/project" @keyup.enter="addProject" />
-        <button v-if="canPickDirectory" class="btn" @click="browseProjectRoot">浏览…</button>
+        <input
+          v-model="newRoot"
+          class="full"
+          :readonly="canPickDirectory"
+          :placeholder="canPickDirectory ? '尚未选择目录' : '/path/to/your/project'"
+          :title="canPickDirectory ? '桌面版请用「选择文件夹…」' : ''"
+          @keyup.enter="addProject"
+        />
+        <button v-if="canPickDirectory" class="btn primary" @click="browseProjectRoot">选择文件夹…</button>
       </div>
       <p v-if="addError" class="error">✘ {{ addError }}</p>
       <div class="modal-btns">
@@ -2263,10 +2277,14 @@ watch(
 /* 弹窗内共用 */
 .modal-tip { font-size: 13px; color: var(--text-dim); line-height: 1.7; margin-bottom: 12px; }
 .modal-tip b { color: var(--text); }
+.modal-tip-sub { font-size: 12px; color: var(--text-faint); }
 .full { width: 100%; margin-bottom: 12px; }
-/* 注册项目：路径输入 + 「浏览…」（桌面壳桥接可用时展示）同行排布（.full 自带 12px 下边距，行内归零） */
+/* 注册项目：路径输入 + 「选择文件夹…」（桌面壳桥接可用时展示）同行排布（.full 自带 12px 下边距，行内归零） */
 .path-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .path-row .full, .path-row .btn { margin-bottom: 0; }
+/* 桌面形态下路径框只读：视觉上区分「可编辑 / 只能选择」 */
+.path-row input[readonly] { color: var(--text-dim); background: var(--bg-elevated); cursor: default; }
+.path-row .btn { flex: 0 0 auto; white-space: nowrap; }
 .error { color: var(--red); font-size: 12.5px; margin-bottom: 8px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
 </style>

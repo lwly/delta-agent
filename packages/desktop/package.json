@@ -9,7 +9,10 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "electron .",
-    "dist": "electron-builder --config electron-builder.yml"
+    "icons": "electron scripts/gen-icons.cjs",
+    "rebuild:native": "node scripts/rebuild-native.mjs",
+    "rebuild:native:restore": "node scripts/rebuild-native.mjs --restore",
+    "dist": "pnpm rebuild:native && electron-builder --config electron-builder.yml"
   },
   "dependencies": {
     "@delta/core": "workspace:*",

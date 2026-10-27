@@ -1,5 +1,5 @@
 #!/bin/sh
-# pre-push 质量闸门：gitee 不支持 GitHub Actions，CI 无法在远端兜底，
+# pre-push 质量闸门：托管平台未必运行 CI（或 fork 无权限），
 # 因此把 typecheck + 单测前移到推送前执行。
 #
 # 跳过方式（确有急事时）：

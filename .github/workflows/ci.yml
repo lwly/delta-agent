@@ -1,9 +1,8 @@
 # M5 跨平台加固：双平台跑同一套 typecheck + 单测 + 冒烟（technical-design §9）
 #
-# 分支说明：仓库主分支为 master（gitee 远端），此处同时监听 main / master，
-# 便于未来镜像到 GitHub 时零改动复用。
-# 注意：GitHub Actions 不会在 gitee 上运行，本地质量闸门由 pre-push 钩子兜底
-# （见 scripts/hooks/pre-push 与 package.json 的 prepare:hooks）。
+# 分支说明：默认分支为 main，此处同时监听 master 以兼容 fork / 镜像场景。
+# 注意：若托管平台不支持 GitHub Actions，本地质量闸门由 pre-push 钩子兜底
+# （见 scripts/hooks/pre-push 与 package.json 的 prepare 脚本）。
 name: ci
 
 on:
@@ -59,11 +58,28 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # 注意顺序：typecheck 会先构建 shared/core 的 .d.ts（build:deps），
+      # 因为 workspace 包的类型入口指向 dist；全新 clone 必须先有声明文件才能过 tsc。
       - name: Typecheck
         run: pnpm typecheck
 
+      # 失败时把用例名打成 annotation：check-run 的 annotations 接口可匿名读取，
+      # 而 job 日志接口需要 admin 权限，靠 annotation 才能让外部协作者定位红灯。
       - name: Unit tests
-        run: pnpm test
+        shell: bash
+        run: |
+          # 用 /tmp：macOS 与 Windows 的 git bash 都能映射，避免 $RUNNER_TEMP 反斜杠路径问题
+          pnpm test 2>&1 | tee /tmp/unit-test.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "==== 失败用例 ===="
+            grep -aE "FAIL " /tmp/unit-test.log | sed 's/\r$//' | head -10 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            echo "==== 日志尾部 ===="
+            tail -50 /tmp/unit-test.log
+            exit "$status"
+          fi
 
       - name: Build
         run: pnpm build
