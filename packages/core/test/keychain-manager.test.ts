@@ -235,13 +235,89 @@ describe('ProviderManager testAdhoc / listModels', () => {
   it('testAdhoc Key 留空回退存储 Key（编辑模式语义）', async () => {
     const mgr = new ProviderManager(tmpFile);
     mgr.add({ id: 'my-gw', apiKey: 'sk-stored-123' });
-    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      // 模型留空 + 自定义网关 → 先拉模型列表，再用列表模型探测
+      if (String(url).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'm1' }] }), { status: 200 });
+      }
       expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-stored-123');
       return sseResponse(['data: [DONE]\n\n']);
     });
     vi.stubGlobal('fetch', fetchMock);
     const r = await mgr.testAdhoc({ id: 'my-gw', baseUrl: 'https://gw.example.com/v1' });
     expect(r.ok).toBe(true);
+  });
+
+  it('testAdhoc 模型留空 + 自定义网关：逐个试列表模型直到成功', async () => {
+    const requestedModels: string[] = [];
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'dead-model' }, { id: 'live-model' }] }), { status: 200 });
+      }
+      requestedModels.push((JSON.parse(String(init!.body)) as { model: string }).model);
+      if (requestedModels.length === 1) return new Response('model deprecated', { status: 410 });
+      return sseResponse([chunk({ choices: [{ delta: { content: 'pong' } }] }), 'data: [DONE]\n\n']);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.testAdhoc({ id: 'my-gw', apiKey: 'sk-x', baseUrl: 'https://gw.example.com/v1' });
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('live-model');
+    expect(requestedModels).toEqual(['dead-model', 'live-model']);
+  });
+
+  it('testAdhoc 模型留空 + 网关拉模型失败：返回列表错误且不发 chat', async () => {
+    const fetchMock = vi.fn(async () => new Response('bad key', { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.testAdhoc({ id: 'my-gw', apiKey: 'k', baseUrl: 'https://gw/v1' });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('获取模型列表失败');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('testAdhoc 模型留空 + 全部模型探测失败：返回汇总错误', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('/models')) {
+          return new Response(JSON.stringify({ data: [{ id: 'm1' }] }), { status: 200 });
+        }
+        return new Response('nope', { status: 404 });
+      }),
+    );
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.testAdhoc({ id: 'my-gw', apiKey: 'k', baseUrl: 'https://gw/v1' });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('均失败');
+  });
+
+  it('testAdhoc 模型留空但无自定义 baseUrl（预设 vendor）不触发列表兜底', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe('https://api.deepseek.com/v1/chat/completions');
+      return sseResponse(['data: [DONE]\n\n']);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.testAdhoc({ id: 'deepseek', apiKey: 'sk-x' });
+    expect(r.ok).toBe(true);
+  });
+
+  it('test 已存储 provider 模型留空 + baseUrl → 走列表兜底', async () => {
+    const mgr = new ProviderManager(tmpFile);
+    mgr.add({ id: 'my-gw', apiKey: 'sk-stored', baseUrl: 'https://gw.example.com/v1' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith('/models')) {
+          return new Response(JSON.stringify({ data: [{ id: 'm1' }] }), { status: 200 });
+        }
+        return sseResponse([chunk({ choices: [{ delta: { content: 'pong' } }] }), 'data: [DONE]\n\n']);
+      }),
+    );
+    const r = await mgr.test('my-gw');
+    expect(r.ok).toBe(true);
+    expect(r.detail).toContain('m1');
   });
 
   it('testAdhoc 无 Key 且无存储配置 → 抛错', async () => {

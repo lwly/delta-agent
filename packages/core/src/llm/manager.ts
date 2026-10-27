@@ -234,7 +234,12 @@ export class ProviderManager {
     const stored = this.storedById(id);
     if (!stored) throw new Error(`未找到 provider: ${id}`);
     const provider = await this.createProvider(id);
-    return probeChat(provider, stored.model ?? '', timeoutMs);
+    const model = stored.model ?? '';
+    if (!model && stored.baseUrl && stored.vendor === 'openai-compatible') {
+      const apiKey = decryptKeyDetailed(stored.apiKey).plain;
+      if (apiKey) return this.probeGatewayModels({ id, apiKey, baseUrl: stored.baseUrl, timeoutMs });
+    }
+    return probeChat(provider, model, timeoutMs);
   }
 
   /**
@@ -249,8 +254,47 @@ export class ProviderManager {
     timeoutMs?: number;
   }): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
     const apiKey = await this.resolveFormKey(opts.id, opts.apiKey);
-    const provider = await buildProvider({ id: opts.id, apiKey, baseUrl: opts.baseUrl, model: opts.model });
-    return probeChat(provider, opts.model ?? '', opts.timeoutMs ?? 15_000);
+    const timeoutMs = opts.timeoutMs ?? 15_000;
+    const model = opts.model?.trim() ?? '';
+    const isAnthropic = KNOWN_VENDORS[opts.id] === 'anthropic';
+    // 模型留空的自定义网关：走模型列表兜底（见 probeGatewayModels 注释）
+    if (!model && !isAnthropic && opts.baseUrl) {
+      return this.probeGatewayModels({ id: opts.id, apiKey, baseUrl: opts.baseUrl, timeoutMs });
+    }
+    const provider = await buildProvider({ id: opts.id, apiKey, baseUrl: opts.baseUrl, model: model || undefined });
+    return probeChat(provider, model, timeoutMs);
+  }
+
+  /**
+   * 模型留空时的自定义网关探测兜底：OpenAICompatibleProvider 会把空模型兜底成
+   * gpt-4o（中转网关普遍不提供该模型，404 model_not_found 误报）。改为先拉
+   * {baseUrl}/models，依次用列表模型探测直到一个可用（上限 5 个，防大列表拖死
+   * 探测）；列表拉取失败时原样返回其错误，语义比 404 清楚。
+   */
+  private async probeGatewayModels(opts: {
+    id: string;
+    apiKey: string;
+    baseUrl: string;
+    timeoutMs: number;
+  }): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
+    const list = await this.listModels({
+      id: opts.id,
+      apiKey: opts.apiKey,
+      baseUrl: opts.baseUrl,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (!list.ok) {
+      return { ok: false, latencyMs: 0, detail: `获取模型列表失败：${list.detail}（可手动填写默认模型后重试）` };
+    }
+    const tried = list.models.slice(0, 5);
+    let last: { ok: boolean; latencyMs: number; detail: string } = { ok: false, latencyMs: 0, detail: '网关无可用模型' };
+    for (const m of tried) {
+      const provider = await buildProvider({ id: opts.id, apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: m });
+      const r = await probeChat(provider, m, opts.timeoutMs);
+      if (r.ok) return { ...r, detail: `连通正常（自动选用模型 ${m}，建议填入默认模型）` };
+      last = r;
+    }
+    return { ...last, detail: `已探测 ${tried.length} 个模型均失败（最后一个：${last.detail}）` };
   }
 
   /**
