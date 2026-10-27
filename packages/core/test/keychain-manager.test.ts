@@ -178,6 +178,78 @@ describe('ProviderManager', () => {
   });
 });
 
+// ── 表单态探测（Web 设置页「测试连接 / 获取模型」）───────────────────────────
+
+describe('ProviderManager testAdhoc / listModels', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('listModels 拉取 OpenAI 兼容网关模型列表（去空、按 id 排序）', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('https://gw.example.com/v1/models');
+      expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-gw');
+      return new Response(JSON.stringify({ data: [{ id: 'm2' }, { id: 'm1' }, { id: '' }] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.listModels({ id: 'my-gw', apiKey: 'sk-gw', baseUrl: 'https://gw.example.com/v1/' });
+    expect(r).toMatchObject({ ok: true, models: ['m1', 'm2'] });
+  });
+
+  it('listModels anthropic 走 /v1/models 与 x-api-key 头', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('https://api.anthropic.com/v1/models');
+      const h = init!.headers as Record<string, string>;
+      expect(h['x-api-key']).toBe('sk-ant');
+      expect(h['anthropic-version']).toBe('2023-06-01');
+      return new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.listModels({ id: 'anthropic', apiKey: 'sk-ant' });
+    expect(r).toMatchObject({ ok: true, models: ['claude-x'] });
+  });
+
+  it('listModels HTTP 错误与空列表均返回 ok:false', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad key', { status: 401 })));
+    const mgr = new ProviderManager(tmpFile);
+    const bad = await mgr.listModels({ id: 'my-gw', apiKey: 'k', baseUrl: 'https://gw/v1' });
+    expect(bad.ok).toBe(false);
+    expect(bad.models).toEqual([]);
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    const empty = await mgr.listModels({ id: 'my-gw', apiKey: 'k', baseUrl: 'https://gw/v1' });
+    expect(empty.ok).toBe(false);
+  });
+
+  it('testAdhoc 显式 Key 走最小 chat 探测', async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe('https://gw.example.com/v1/chat/completions');
+      return sseResponse([chunk({ choices: [{ delta: { content: 'pong' } }] }), 'data: [DONE]\n\n']);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const mgr = new ProviderManager(tmpFile);
+    const r = await mgr.testAdhoc({ id: 'my-gw', apiKey: 'sk-x', baseUrl: 'https://gw.example.com/v1', model: 'm1' });
+    expect(r).toMatchObject({ ok: true, detail: '连通正常' });
+  });
+
+  it('testAdhoc Key 留空回退存储 Key（编辑模式语义）', async () => {
+    const mgr = new ProviderManager(tmpFile);
+    mgr.add({ id: 'my-gw', apiKey: 'sk-stored-123' });
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-stored-123');
+      return sseResponse(['data: [DONE]\n\n']);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await mgr.testAdhoc({ id: 'my-gw', baseUrl: 'https://gw.example.com/v1' });
+    expect(r.ok).toBe(true);
+  });
+
+  it('testAdhoc 无 Key 且无存储配置 → 抛错', async () => {
+    const mgr = new ProviderManager(tmpFile);
+    await expect(mgr.testAdhoc({ id: 'no-such', baseUrl: 'https://gw/v1' })).rejects.toThrow('API Key 不能为空');
+  });
+});
+
 // ── resolveProviderFromEnv fallback ────────────────────────────────────────
 
 describe('resolveProviderFromEnv storage fallback', () => {

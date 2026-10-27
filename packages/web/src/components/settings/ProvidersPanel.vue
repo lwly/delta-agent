@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 设置页·模型配置面板（F-04a 内容区）：Provider 列表（测试/启停/排序/删除）+ 新增/编辑表单
 // 从 ProvidersModal 抽取主体内容，弹窗壳保留在 ProvidersModal.vue 中复用
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { api, type ProviderView } from '../../api/client';
 
 const providers = ref<ProviderView[]>([]);
@@ -12,7 +12,18 @@ const testResult = ref<Record<string, string>>({});
 const form = ref({ id: '', apiKey: '', baseUrl: '', model: '', setDefault: false });
 const editing = ref(false);
 
+// 表单态探测（不落盘）：测试连接 / 获取模型
+const formTesting = ref(false);
+const formTest = ref('');
+const fetchingModels = ref(false);
+const modelOptions = ref<string[]>([]);
+
 const PRESETS = ['anthropic', 'openai', 'deepseek', 'qwen'];
+
+// 预设 provider 有服务端默认 Base URL，仅自定义网关（id 为空）时必须填 Base URL
+const canProbe = computed(() => Boolean(form.value.id || form.value.baseUrl.trim()));
+// 新增模式必须已有 Key；编辑模式可留空走存储 Key
+const needsKey = computed(() => !editing.value && !form.value.apiKey);
 
 async function refresh() {
   const res = await fetch('/api/providers');
@@ -37,11 +48,66 @@ async function save() {
     });
     const json = await res.json();
     if (!res.ok) throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
-    form.value = { id: '', apiKey: '', baseUrl: '', model: '', setDefault: false };
-    editing.value = false;
+    resetForm();
     await refresh();
   } catch (e) {
     error.value = (e as Error).message;
+  }
+}
+
+function resetForm() {
+  form.value = { id: '', apiKey: '', baseUrl: '', model: '', setDefault: false };
+  editing.value = false;
+  formTest.value = '';
+  modelOptions.value = [];
+}
+
+function probeBody() {
+  return {
+    id: form.value.id,
+    apiKey: form.value.apiKey || undefined,
+    baseUrl: form.value.baseUrl || undefined,
+    model: form.value.model || undefined,
+  };
+}
+
+async function testForm() {
+  formTesting.value = true;
+  formTest.value = '… 测试中';
+  try {
+    const res = await fetch('/api/providers/test', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(probeBody()),
+    });
+    const r = (await res.json()) as { ok: boolean; latencyMs: number; detail: string };
+    formTest.value = `${r.ok ? '✔' : '✘'} ${r.detail}（${r.latencyMs}ms）`;
+  } catch (e) {
+    formTest.value = `✘ ${(e as Error).message}`;
+  } finally {
+    formTesting.value = false;
+  }
+}
+
+async function fetchModels() {
+  fetchingModels.value = true;
+  formTest.value = '';
+  try {
+    const res = await fetch('/api/providers/models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(probeBody()),
+    });
+    const r = (await res.json()) as { ok: boolean; models: string[]; detail: string };
+    if (!r.ok) {
+      formTest.value = `✘ ${r.detail}`;
+      return;
+    }
+    modelOptions.value = r.models;
+  } catch (e) {
+    formTest.value = `✘ ${(e as Error).message}`;
+  } finally {
+    fetchingModels.value = false;
   }
 }
 
@@ -49,6 +115,8 @@ function edit(p: ProviderView) {
   // Key 不回显：更新需重新输入
   editing.value = true;
   form.value = { id: p.id, apiKey: '', baseUrl: p.baseUrl ?? '', model: p.model ?? '', setDefault: p.default };
+  formTest.value = '';
+  modelOptions.value = [];
 }
 
 async function remove(id: string) {
@@ -119,7 +187,19 @@ async function test(id: string) {
       </label>
       <label>API Key{{ editing ? '（留空保留原 Key）' : ' *' }}<input v-model="form.apiKey" type="password" :placeholder="editing ? '留空则保留已存储的 Key' : '保存后加密存储，不回显'" /></label>
       <label>Base URL（openai 兼容网关）<input v-model="form.baseUrl" placeholder="https://…" /></label>
-      <label>默认模型<input v-model="form.model" placeholder="如 deepseek-chat" /></label>
+      <label>默认模型
+        <select v-if="modelOptions.length" v-model="form.model">
+          <option value="">（不设置）</option>
+          <option v-if="form.model && !modelOptions.includes(form.model)" :value="form.model">{{ form.model }}</option>
+          <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
+        </select>
+        <input v-else v-model="form.model" placeholder="如 deepseek-chat，可先「获取模型」" />
+      </label>
+    </div>
+    <div class="form-ops">
+      <button class="op" :disabled="!canProbe || needsKey || formTesting" @click="testForm">{{ formTesting ? '… 测试中' : '测试连接' }}</button>
+      <button class="op" :disabled="!canProbe || needsKey || fetchingModels" @click="fetchModels">{{ fetchingModels ? '… 获取中' : '获取模型' }}</button>
+      <span v-if="formTest" class="form-test" :class="{ ok: formTest.startsWith('✔'), fail: formTest.startsWith('✘') }">{{ formTest }}</span>
     </div>
     <label class="check"><input v-model="form.setDefault" type="checkbox" /> 设为默认</label>
     <p v-if="error" class="error">✘ {{ error }}</p>
@@ -167,6 +247,11 @@ async function test(id: string) {
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .form label { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); font-size: 12px; }
 .check { flex-direction: row !important; align-items: center; gap: 6px; margin-top: 8px; }
+.form-ops { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.form-ops .op { padding: 5px 14px; font-size: 12px; }
+.form-test { font-size: 11.5px; font-family: var(--mono); }
+.form-test.ok { color: var(--green); }
+.form-test.fail { color: var(--red); }
 .error { color: var(--red); font-size: 12.5px; margin-top: 8px; }
 .save { margin-top: 10px; width: 100%; }
 .note { font-size: 11px; color: var(--text-faint); line-height: 1.6; margin-top: 10px; }

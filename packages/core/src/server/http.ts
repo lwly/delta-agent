@@ -791,6 +791,35 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const r = await mgr.test(pid);
           return json(res, 200, r);
         }
+        // POST /api/providers/test —— 表单态连通性探测（不落盘；编辑模式 Key 留空回退存储 Key）
+        if (method === 'POST' && pid === 'test') {
+          const body = await readBody(req);
+          try {
+            const r = await mgr.testAdhoc({
+              id: String(body.id ?? ''),
+              apiKey: body.apiKey === undefined ? undefined : String(body.apiKey),
+              baseUrl: body.baseUrl ? String(body.baseUrl) : undefined,
+              model: body.model ? String(body.model) : undefined,
+            });
+            return json(res, 200, r);
+          } catch (e) {
+            return json(res, 200, { ok: false, latencyMs: 0, detail: (e as Error).message });
+          }
+        }
+        // POST /api/providers/models —— 拉取网关模型列表（不落盘，供「默认模型」下拉）
+        if (method === 'POST' && pid === 'models') {
+          const body = await readBody(req);
+          try {
+            const r = await mgr.listModels({
+              id: String(body.id ?? ''),
+              apiKey: body.apiKey === undefined ? undefined : String(body.apiKey),
+              baseUrl: body.baseUrl ? String(body.baseUrl) : undefined,
+            });
+            return json(res, 200, r);
+          } catch (e) {
+            return json(res, 200, { ok: false, models: [], detail: (e as Error).message });
+          }
+        }
       }
 
       // ── memory（记忆里程碑：F-06a 记忆面板 + 工具共用同一存储）───────────────

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -258,6 +258,36 @@ describe('providers 端点（设置中心）', () => {
   it('空 apiKey 被拒绝', async () => {
     const r = await api('PUT', '/api/providers/foo', { apiKey: '' });
     expect(r.status).toBe(400);
+  });
+});
+
+describe('providers 表单态端点（POST /api/providers/test 与 /models）', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('探测连通与拉取模型均不落盘', async () => {
+    const realFetch = globalThis.fetch;
+    const upstream = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/models')) {
+        expect((init!.headers as Record<string, string>).authorization).toBe('Bearer sk-form');
+        return new Response(JSON.stringify({ data: [{ id: 'm2' }, { id: 'm1' }] }), { status: 200 });
+      }
+      return new Response('data: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    });
+    // 只拦截发往 mock 网关的请求，测试服务器自身请求走真实 fetch
+    vi.stubGlobal('fetch', (url: string | URL | Request, init?: RequestInit) =>
+      String(url).includes('gw.example.com')
+        ? upstream(url, init)
+        : realFetch(url as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]),
+    );
+
+    const models = await api('POST', '/api/providers/models', { id: 'gw-x', apiKey: 'sk-form', baseUrl: 'https://gw.example.com/v1' });
+    expect(models.json).toMatchObject({ ok: true, models: ['m1', 'm2'] });
+
+    const probe = await api('POST', '/api/providers/test', { id: 'gw-x', apiKey: 'sk-form', baseUrl: 'https://gw.example.com/v1' });
+    expect(probe.json).toMatchObject({ ok: true });
+
+    // 表单态不落盘
+    expect(((await api('GET', '/api/providers')).json as unknown[])).toHaveLength(0);
   });
 });
 
