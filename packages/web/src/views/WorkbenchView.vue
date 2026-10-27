@@ -7,6 +7,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
+import { toolLabel } from '../utils/toolNames';
 import { api, apiFetch, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
@@ -1401,10 +1402,11 @@ watch(
         <!-- 审批卡片区 -->
         <div class="composer-wrap cards-zone">
           <div class="cards-inner">
-            <!-- 工具确认（队列渲染：同轮多个确认请求全部可见，逐张回填） -->
-            <div v-for="req in chat.pendingConfirms" :key="req.id" class="approve-card confirm">
-              <div class="ac-head"><span class="tool-status confirm">!</span> 需要确认：{{ req.tool }}</div>
-              <div class="ac-reason">{{ req.reason }}</div>
+            <!-- 工具确认（一次只弹一张：决定后队列自动弹出下一张，后到不覆盖先到） -->
+            <div v-for="req in chat.pendingConfirms.slice(0, 1)" :key="req.id" class="approve-card confirm">
+              <div class="ac-head"><span class="tool-status confirm">!</span> 需要确认：{{ toolLabel(req.tool) }}</div>
+              <div class="ac-reason">{{ toolLabel(req.tool) }}（{{ req.tool }}）属高危操作，需要确认</div>
+              <div v-if="chat.pendingConfirms.length > 1" class="ac-reason">（还有 {{ chat.pendingConfirms.length - 1 }} 个确认请求在排队，逐个处理）</div>
               <pre>{{ argsPretty(JSON.stringify(req.args)) }}</pre>
               <div class="ac-actions">
                 <button class="btn primary" @click="chat.decideConfirm(req.id, { kind: 'allow' })">允许</button>
