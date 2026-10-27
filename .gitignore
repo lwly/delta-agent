@@ -12,3 +12,7 @@ coverage/
 # 打包产物与中间物（scripts/build-sea.mjs 生成，体积上百 MB）
 build/
 release/
+
+# 个人运行时数据，禁止入库（.gitignore 对已跟踪文件无效，需保持 git rm --cached 状态）
+.workbuddy/
+.delta/
