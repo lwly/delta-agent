@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { detectShell, cmdAdapter, runWithShell, decodeShellOutput } from '../src/engine/shell.js';
+import {
+  detectShell,
+  cmdAdapter,
+  pwshAdapter,
+  resolveWin32Shell,
+  runWithShell,
+  decodeShellOutput,
+} from '../src/engine/shell.js';
 import type { ShellAdapter } from '../src/engine/shell.js';
 
 describe('ShellAdapter (M5 跨平台加固)', () => {
@@ -38,6 +45,28 @@ describe('ShellAdapter (M5 跨平台加固)', () => {
     const cmd = process.platform === 'win32' ? 'timeout /t 5' : 'sleep 5';
     const r = await runWithShell(cmd, process.cwd(), 300, new AbortController().signal);
     expect(r.timedOut).toBe(true);
+  });
+
+  it('pwsh adapter: 原生支持 && 管道链，UTF-8 预置同 PS 5.1', () => {
+    const pwsh = pwshAdapter();
+    expect(pwsh.bin).toBe('pwsh.exe');
+    expect(pwsh.platform).toBe('win32');
+    expect(pwsh.label).toBe('pwsh');
+    expect(pwsh.args('Get-ChildItem')).toEqual([
+      '-NoProfile',
+      '-Command',
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-ChildItem',
+    ]);
+  });
+
+  it('resolveWin32Shell：无 pwsh 的平台回退 powershell.exe 5.1，且进程级缓存', async () => {
+    // CI（macOS/linux）没有 where.exe / pwsh → 回退 PS 5.1；Windows 上若装了
+    // pwsh 则返回 pwshAdapter——两种结果都合法，只断言缓存与 win32 语义。
+    const a = await resolveWin32Shell();
+    const b = await resolveWin32Shell();
+    expect(b).toBe(a); // 缓存：两次调用同一实例
+    expect(a.platform).toBe('win32');
+    expect(['pwsh', 'powershell']).toContain(a.label);
   });
 });
 

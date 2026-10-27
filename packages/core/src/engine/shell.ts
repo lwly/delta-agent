@@ -1,6 +1,6 @@
 /**
  * ShellAdapter（technical-design §9 跨平台方案）
- * win32: PowerShell 优先（探测失败降级 cmd /d /s /c）
+ * win32: pwsh 7 优先（原生支持 && 管道链）→ Windows PowerShell 5.1 → cmd /d /s /c
  * darwin: $SHELL → /bin/zsh；linux: $SHELL → /bin/sh
  */
 import { spawn } from 'node:child_process';
@@ -20,7 +20,7 @@ export function detectShell(
   env: NodeJS.ProcessEnv = process.env,
 ): ShellAdapter {
   if (platform === 'win32') {
-    // PowerShell 启动失败（spawn error）时由 runWithShell 自动降级 cmd 重试；
+    // Windows PowerShell 5.1 兜底：不支持 && 管道链，pwsh 7 探测成功时不走这里；
     // 预置 [Console]::OutputEncoding=UTF8：PS 按 UTF-8 解码原生命令（git 等）输出、
     // 并以 UTF-8 编码自身 stdout，中文系统（cp936）下避免双层乱码。
     return {
@@ -61,6 +61,36 @@ export function cmdAdapter(): ShellAdapter {
   };
 }
 
+/** pwsh（PowerShell 7+）适配器：原生支持 && / || 管道链；UTF-8 预置同 PS 5.1。 */
+export function pwshAdapter(): ShellAdapter {
+  return {
+    platform: 'win32',
+    bin: 'pwsh.exe',
+    args: (c) => [
+      '-NoProfile',
+      '-Command',
+      `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ${c}`,
+    ],
+    label: 'pwsh',
+  };
+}
+
+let win32ShellPromise: Promise<ShellAdapter> | undefined;
+
+/**
+ * win32 shell 探测（进程级缓存）：pwsh 7 存在则优先（支持 &&，Windows PowerShell
+ * 5.1 会把 `&&` 当语法错误）；否则回退 powershell.exe 5.1，spawn 失败再由
+ * runWithShell 降级 cmd。探测一次缓存整个进程生命周期，不给每条命令加开销。
+ */
+export function resolveWin32Shell(): Promise<ShellAdapter> {
+  win32ShellPromise ??= new Promise<boolean>((resolve) => {
+    const probe = spawn('where.exe', ['pwsh'], { windowsHide: true, stdio: 'ignore' });
+    probe.on('error', () => resolve(false));
+    probe.on('close', (code) => resolve(code === 0));
+  }).then((hasPwsh) => (hasPwsh ? pwshAdapter() : detectShell('win32')));
+  return win32ShellPromise;
+}
+
 export interface ShellSpawnResult {
   code: number | null;
   stdout: string;
@@ -72,23 +102,29 @@ export interface ShellSpawnResult {
 
 /**
  * Run a command line through the platform shell adapter.
- * win32 上 PowerShell 启动失败（spawn error）自动降级 cmd 重试一次。
+ * 显式传入 adapter 时按传入值执行（测试/DI 用）；默认路径下 win32 先做 pwsh
+ * 探测（进程级缓存），pwsh 7 → powershell.exe 5.1 → cmd（spawn error 兜底降级）。
+ * win32 上任一 shell 启动失败（ENOENT/EACCES）自动降级 cmd 重试一次。
  */
 export function runWithShell(
   command: string,
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal,
-  adapter: ShellAdapter = detectShell(),
+  adapter?: ShellAdapter,
 ): Promise<ShellSpawnResult> {
-  return spawnOnce(command, cwd, timeoutMs, signal, adapter).then((r) => {
-    const fallbackNeeded =
-      adapter.platform === 'win32' &&
-      r.code === -1 &&
-      /ENOENT|EACCES/i.test(r.stderr);
-    if (!fallbackNeeded) return r;
-    return spawnOnce(command, cwd, timeoutMs, signal, cmdAdapter());
-  });
+  const run = (a: ShellAdapter) =>
+    spawnOnce(command, cwd, timeoutMs, signal, a).then((r) => {
+      const fallbackNeeded =
+        a.platform === 'win32' &&
+        r.code === -1 &&
+        /ENOENT|EACCES/i.test(r.stderr);
+      if (!fallbackNeeded) return r;
+      return spawnOnce(command, cwd, timeoutMs, signal, cmdAdapter());
+    });
+  if (adapter) return run(adapter);
+  if (process.platform === 'win32') return resolveWin32Shell().then(run);
+  return run(detectShell());
 }
 
 /**
