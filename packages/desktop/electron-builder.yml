@@ -10,10 +10,19 @@ directories:
 files:
   - dist/**
   - package.json
+  # workspace 包整体复制时排掉本地测试残留（.gitignore 忽略项）：
+  # .tmp-test/ 内含指向旧项目路径的悬空 evil-link，会让 NodeModuleCopyHelper stat 失败
+  - "!**/.tmp-test/**"
+  - "!**/*.timestamp-*.mjs"
+  # 依赖里的测试/示例/文档不参与运行，排除以缩小包体（也让打包过程少读文件）
+  - "!**/node_modules/**/{test,tests,__tests__,examples,example,docs,benchmark,benchmarks}/**"
+  - "!**/node_modules/**/*.test.*"
+  - "!**/node_modules/**/*.spec.*"
 # 生产依赖（@delta/core、@delta/shared、better-sqlite3 等）由 electron-builder 自动收集
-asarUnpack:
-  # 原生模块不能从 asar 内加载
-  - "**/*.node"
+# 注意：不显式配 asarUnpack。pnpm 的 workspace 包是指向外部的软链，源文件真实路径在
+# packages/core 下（路径里没有 node_modules），一旦配置 asarUnpack，app-builder 会对
+# 每个文件调用 createFilter 算相对路径并抛「must be under packages/desktop」。
+# 原生模块（better-sqlite3 的 .node）由默认 smartUnpack 自动解包，无需手动声明。
 extraResources:
   # Vue 控制台构建产物（先 pnpm --filter @delta/web build）
   - from: ../web/dist

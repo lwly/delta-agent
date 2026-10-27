@@ -3,15 +3,16 @@
   "private": true,
   "version": "0.1.0",
   "description": "delta-agent - AI Coding Agent (CLI core)",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "pnpm -r run build",
+    "build:deps": "pnpm --filter @delta/shared --filter @delta/core run build",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm run build:deps && pnpm -r run typecheck",
     "smoke": "node scripts/smoke.mjs",
     "smoke:web": "pnpm --filter @delta/web build && node scripts/smoke-web.mjs",
     "clean": "pnpm -r run clean",

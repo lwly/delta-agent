@@ -87,7 +87,9 @@ async function bootstrap(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.js'),
+      // preload 必须走 CommonJS（preload.cjs）：sandbox 窗口不接受 ESM preload，
+      // 由 preload.cts 经 tsc 编译产出；写成 preload.js 会被静默忽略、桥接失效。
+      preload: path.join(path.dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
     },
   });
 
