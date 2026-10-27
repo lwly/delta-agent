@@ -2,7 +2,7 @@
 // 工具调用卡片：调用（assistant.toolCalls）与结果（role:'tool' 消息）按 callId 合并渲染。
 // 状态徽章 / 耗时 / 步骤序号 / 主参数摘要 / 结果摘要-全文切换 / 复制（含 1.5s「已复制 ✓」局部反馈）。
 // 诚实性口径：耗时为本地计时（store pendingCalls startedAt 差值）；序号为本地递增计数；不做伪造。
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { toolLabel } from '../utils/toolNames';
 
 type ToolStatus = 'running' | 'ok' | 'fail';
@@ -30,8 +30,16 @@ const props = withDefaults(defineProps<Props>(), {
   agentName: null,
 });
 
-/** 展开态：默认展开显示结果摘要（全文 DOM 仍由 showAll v-if 控制，不渲染） */
-const open = ref(true);
+/** 展开态：默认收起（头部 + 主参数摘要行已够扫读，点头部或 ▶ 展开）；
+ *  失败卡片例外——默认展开，失败原因需立刻可见 */
+const open = ref(props.status === 'fail');
+// 实时流中运行中 → 失败的迁移：自动展开，避免失败被静默折叠
+watch(
+  () => props.status,
+  (s) => {
+    if (s === 'fail') open.value = true;
+  },
+);
 /** 结果全文展开开关（长输出默认只渲染摘要，性能红线） */
 const showAll = ref(false);
 /** 各复制按钮的局部成功反馈（1.5s 后还原，不用全局 notice） */
