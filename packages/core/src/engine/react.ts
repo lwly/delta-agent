@@ -95,6 +95,43 @@ export async function* runReAct(
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   let prevSummary = '';
 
+  /**
+   * 收尾总结轮（反馈：预算耗尽戛然而止，用户拿不到任何结果）：
+   * 强制一次无工具的纯文本调用（maxTokens 封顶，不再产生工具消耗），
+   * 把已完成的工作总结成结论。调用失败/中止时静默——耗尽语义不变，只是少了总结。
+   */
+  const wrapUp = async function* (noteText: string, turnNo: number): AsyncGenerator<AgentEvent> {
+    if (ctx.signal.aborted) return;
+    const note: ChatMessage = { role: 'user', content: noteText };
+    push(messages, note);
+    const usage: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+    try {
+      for await (const ev of ctx.provider.chat({
+        messages: [{ role: 'system', content: systemContent(ctx, turnNo) }, ...messages],
+        tools: [],
+        model: ctx.model,
+        maxTokens: 2048,
+        signal: ctx.signal,
+      })) {
+        if (ev.type === 'text_delta') yield { type: 'text_delta', text: ev.text };
+        else if (ev.type === 'usage') {
+          if (ev.input) usage.inputTokens = ev.input;
+          if (ev.output) usage.outputTokens += ev.output;
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message);
+        }
+      }
+    } catch {
+      return;
+    }
+    usageTotal.inputTokens += usage.inputTokens;
+    usageTotal.outputTokens += usage.outputTokens;
+    usageTotal.costUsd = (usageTotal.costUsd ?? 0) + (usage.costUsd ?? 0);
+    if (usage.inputTokens > 0 || usage.outputTokens > 0) {
+      yield { type: 'usage', usage, model: ctx.model };
+    }
+  };
+
   try {
     for (let turn = 1; turn <= maxTurns && !ctx.signal.aborted; turn++) {
       yield { type: 'turn_start', turn };
@@ -105,6 +142,11 @@ export async function* runReAct(
       if (guard.exceeded) {
         const summary = ctx.budget.summarize();
         yield { type: 'budget_exhausted', summary };
+        // 预算耗尽也给一次纯文本总结：用户拿到结论，而不是一堆工具卡后戛然而止
+        yield* wrapUp(
+          '（预算已耗尽，工具已停用。请基于以上已完成的工作立即输出最终总结：结论 / 已完成内容 / 遗留事项，不要再请求任何工具。）',
+          turn,
+        );
         return;
       }
 
@@ -214,10 +256,13 @@ export async function* runReAct(
       // ctx.turn++ handled by for-loop
     }
 
-    // maxTurns exhausted
-    const note: ChatMessage = { role: 'user', content: '（已达最大轮次上限，请直接总结当前进展并给出结论）' };
-    push(messages, note);
+    // maxTurns exhausted：此前只往历史塞了一句总结提示就结束（从未发给模型），用户同样拿不到结果；
+    // 现在补一次纯文本收尾轮
     yield { type: 'error', message: `reached max turns (${maxTurns})`, fatal: false };
+    yield* wrapUp(
+      '（已达最大轮次上限，工具已停用。请基于以上已完成的工作立即输出最终总结：结论 / 已完成内容 / 遗留事项，不要再请求任何工具。）',
+      maxTurns,
+    );
   } catch (e) {
     const err = e as Error;
     if (ctx.signal.aborted) {

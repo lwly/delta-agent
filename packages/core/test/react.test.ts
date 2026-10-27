@@ -110,10 +110,10 @@ describe('runReAct', () => {
     expect(text).toBe('文件内容是 hello world');
   });
 
-  it('emits budget_exhausted and stops when token budget runs out', async () => {
+  it('emits budget_exhausted, then a forced text wrap-up summary', async () => {
     const provider = new MockProvider([
       { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }], usage: { input: 999_999, output: 5 } },
-      { text: 'never reached' },
+      { text: '收尾总结：已完成勘察', usage: { input: 50, output: 10 } },
     ]);
     const events = await collect(
       runReAct(
@@ -128,16 +128,25 @@ describe('runReAct', () => {
     const exhausted = events.find((e): e is Extract<AgentEvent, { type: 'budget_exhausted' }> => e.type === 'budget_exhausted');
     expect(exhausted).toBeDefined();
     expect(exhausted!.summary).toContain('预算耗尽');
-    // guard fires before the second LLM round-trip: one tool round ran, no second text
+    // guard fires before the second LLM round-trip: one tool round ran
     expect(events.filter((e) => e.type === 'tool_call_start')).toHaveLength(1);
-    expect(events.map((e) => e.type).filter((t) => t === 'text_delta')).toHaveLength(0);
+    // 收尾轮：预算耗尽后强制一次纯文本总结（用户拿得到结论），且用量计入 done
+    const text = events.filter((e): e is Extract<AgentEvent, { type: 'text_delta' }> => e.type === 'text_delta')
+      .map((e) => e.text).join('');
+    expect(text).toBe('收尾总结：已完成勘察');
+    const done = events.find((e): e is Extract<AgentEvent, { type: 'done' }> => e.type === 'done')!;
+    expect(done.usage.inputTokens).toBe(999_999 + 50);
+    expect(done.usage.outputTokens).toBe(5 + 10);
   });
 
-  it('stops after maxTurns with an error event', async () => {
+  it('emits a wrap-up summary after maxTurns is exhausted', async () => {
     const toolCall = { id: 'c', name: 'list_dir', argsJson: '{}' };
-    const provider = new MockProvider(
-      Array.from({ length: 5 }, () => ({ toolCalls: [toolCall] })),
-    );
+    const provider = new MockProvider([
+      { toolCalls: [toolCall] },
+      { toolCalls: [toolCall] },
+      { text: '轮次收尾总结', usage: { input: 40, output: 8 } },
+      { text: 'never reached' },
+    ]);
     const events = await collect(
       runReAct(
         makeCtx(provider, { maxTurns: 2, toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } }),
@@ -148,6 +157,10 @@ describe('runReAct', () => {
     expect(events.filter((e) => e.type === 'turn_start')).toHaveLength(2);
     const err = events.find((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error')!;
     expect(err.message).toContain('max turns');
+    const text = events.filter((e): e is Extract<AgentEvent, { type: 'text_delta' }> => e.type === 'text_delta')
+      .map((e) => e.text).join('');
+    expect(text).toBe('轮次收尾总结');
+    expect(events[events.length - 1]!.type).toBe('done');
   });
 
   it('feeds tool failures back and keeps looping (self-heal)', async () => {
