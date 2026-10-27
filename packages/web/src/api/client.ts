@@ -336,6 +336,13 @@ export interface UsageSessions {
   items: UsageSessionRow[];
 }
 
+// ── 会话预算设置（settings.json 的 budget 键；累计口径：input+output 按轮累加）──
+
+export interface BudgetSetting {
+  maxTokens?: number;
+  maxCostUsd?: number;
+}
+
 // ── F-04a Provider 管理视图（工作台模型配置弹窗与模型下拉共用）──────────────
 
 export interface ProviderView {
@@ -778,6 +785,12 @@ export const api = {
     const qs = q.toString();
     return request<UsageSessions>('GET', `/api/usage/sessions${qs ? `?${qs}` : ''}`);
   },
+
+  // 会话预算（settings.json 的 budget 键；修改后下一轮运行生效）
+  getBudgetSetting: () =>
+    request<BudgetSetting & { defaults: { maxTokens: number; maxCostUsd: number } }>('GET', '/api/settings/budget'),
+  updateBudgetSetting: (patch: { maxTokens?: number | null; maxCostUsd?: number | null }) =>
+    request<{ ok: boolean } & BudgetSetting>('PUT', '/api/settings/budget', patch),
 
   // cron（F-22 定时任务面板；F-22b WorkBuddy 化改版）
   cronList: () => request<CronListResponse>('GET', '/api/cron'),

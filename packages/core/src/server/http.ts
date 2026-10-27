@@ -16,6 +16,8 @@ import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
+import { DEFAULT_SESSION_BUDGET } from '../context/budget.js';
+import { readBudgetSetting, writeBudgetSetting } from './settings-store.js';
 import { discoverSkills } from '../skills/loader.js';
 import {
   deleteSkill,
@@ -915,6 +917,37 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (parts[2] === 'sessions') {
           const items = service.usage.bySession({ range, projectId: project });
           return json(res, 200, { range, project: project ?? null, items });
+        }
+      }
+
+      // ── settings/budget（会话预算：读改 settings.json 的 budget 键，下一轮运行生效；根目录跟随 configHomeDir 供测试隔离）──
+      if (parts[0] === 'api' && parts[1] === 'settings' && parts[2] === 'budget' && parts.length === 3) {
+        const settingsHome = opts.configHomeDir ?? opts.skillsHomeDir ?? os.homedir();
+        if (method === 'GET') {
+          return json(res, 200, { ...readBudgetSetting(settingsHome), defaults: DEFAULT_SESSION_BUDGET });
+        }
+        if (method === 'PUT') {
+          const body = (await readBody(req)) as Record<string, unknown>;
+          // 双读兼容 snake_case / camelCase，并区分「未提供」与「显式 null（清除回默认）」
+          const pick = (snake: string, camel: string): { present: boolean; value: unknown } => {
+            if (snake in body) return { present: true, value: body[snake] };
+            if (camel in body) return { present: true, value: body[camel] };
+            return { present: false, value: undefined };
+          };
+          const t = pick('max_tokens', 'maxTokens');
+          const c = pick('max_cost_usd', 'maxCostUsd');
+          try {
+            const saved = writeBudgetSetting(
+              {
+                maxTokens: t.present ? (t.value === null ? null : Number(t.value)) : undefined,
+                maxCostUsd: c.present ? (c.value === null ? null : Number(c.value)) : undefined,
+              },
+              settingsHome,
+            );
+            return json(res, 200, { ok: true, ...saved });
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
         }
       }
 

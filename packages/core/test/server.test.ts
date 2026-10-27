@@ -336,3 +336,54 @@ describe('回收站批量彻底删除（POST /api/trash/purge-batch）', () => {
     ).toBe(400); // 非法 kind 值同样拒绝
   });
 });
+
+// ── settings/budget（会话预算设置端点）───────────────────────────────────────
+
+describe('settings/budget 端点', () => {
+  it('GET 返回默认；PUT 校验并持久化（configHomeDir 隔离）；非法值 400', async () => {
+    const home2 = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-budget-'));
+    const hub2 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv2 = createWebServer({
+      service,
+      hub: hub2,
+      port: 0,
+      providers: new ProviderManager(path.join(tmp, 'm2.json')),
+      configHomeDir: home2,
+    });
+    await new Promise<void>((r) => srv2.listen(0, '127.0.0.1', r));
+    const addr = srv2.address();
+    const base2 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    const call = async (method: string, p: string, body?: unknown) => {
+      const res = await fetch(`${base2}${p}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, json: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+    };
+    try {
+      // 未设置 → 空 + defaults
+      const g1 = await call('GET', '/api/settings/budget');
+      expect(g1.status).toBe(200);
+      expect(g1.json.defaults).toMatchObject({ maxTokens: 200_000, maxCostUsd: 0.7 });
+      // 写入（camelCase）+ 读回
+      const p1 = await call('PUT', '/api/settings/budget', { maxTokens: 1_000_000, maxCostUsd: 2.5 });
+      expect(p1.status).toBe(200);
+      expect(p1.json).toMatchObject({ ok: true, maxTokens: 1_000_000, maxCostUsd: 2.5 });
+      const g2 = await call('GET', '/api/settings/budget');
+      expect(g2.json.maxTokens).toBe(1_000_000);
+      // snake_case 双读 + null 清除
+      const p2 = await call('PUT', '/api/settings/budget', { max_tokens: null });
+      expect(p2.status).toBe(200);
+      const g3 = await call('GET', '/api/settings/budget');
+      expect(g3.json.maxTokens).toBeUndefined();
+      expect(g3.json.maxCostUsd).toBe(2.5);
+      // 非法值 → 400
+      const bad = await call('PUT', '/api/settings/budget', { maxTokens: -5 });
+      expect(bad.status).toBe(400);
+    } finally {
+      srv2.close();
+      await fs.rm(home2, { recursive: true, force: true });
+    }
+  });
+});

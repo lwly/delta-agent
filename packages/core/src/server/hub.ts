@@ -42,6 +42,7 @@ import {
   type GitPolicy,
   type Notifier,
   type BranchInfo,
+  type BudgetConfig,
 } from '../index.js';
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
@@ -93,6 +94,11 @@ export interface SessionHubDeps {
   modelRouter?: ModelRouter;
   /** F-32 按 provider id 构建 LLM 实例（路由规则指定 provider 时使用；缺省复用 resolveProvider） */
   resolveProviderById?: (id: string) => Promise<LLMProvider>;
+  /**
+   * 会话预算配置解析（每次运行调用一次）：maxTokens / maxCostUsd 覆盖默认 200k / $0.7。
+   * serve 运行时传 ~/.delta/settings.json 的 budget 键读取器，设置页修改后下一轮生效。
+   */
+  resolveBudgetConfig?: () => Partial<BudgetConfig>;
   /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
   notify?: Notifier;
 }
@@ -576,7 +582,8 @@ export class SessionHub {
         void this.deps.hooks.emit('SessionStart', { sessionId, projectId: session.project_id });
       }
 
-      const budget = new BudgetManager();
+      // 会话预算：优先 settings 解析器（设置页可改，下一轮生效），缺省默认 200k / $0.7
+      const budget = new BudgetManager(this.deps.resolveBudgetConfig?.() ?? {});
 
       // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
       // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）

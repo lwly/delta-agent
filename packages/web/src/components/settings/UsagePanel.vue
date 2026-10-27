@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 设置页·用量面板（F-31 内容区）：时间范围 + 项目筛选 + 总览卡片 + 项目/模型/会话三维度占比条
+// 设置页·用量面板（F-31 内容区）：预算设置 + 时间范围 + 项目筛选 + 总览卡片 + 项目/模型/会话三维度占比条
 // 从 UsageModal 抽取主体内容，弹窗壳保留在 UsageModal.vue 中复用
 import { onMounted, ref } from 'vue';
 import {
@@ -24,6 +24,44 @@ const summary = ref<UsageSummary | null>(null);
 const sessions = ref<UsageSessionRow[]>([]);
 const loading = ref(false);
 const error = ref('');
+
+// ── 预算设置（settings.json 的 budget 键；累计口径，改后下一轮运行生效）──
+const budgetMaxTokens = ref('');
+const budgetMaxCost = ref('');
+const budgetDefaults = ref<{ maxTokens: number; maxCostUsd: number } | null>(null);
+const budgetSaving = ref(false);
+const budgetMsg = ref('');
+
+async function loadBudget() {
+  try {
+    const b = await api.getBudgetSetting();
+    budgetMaxTokens.value = b.maxTokens != null ? String(b.maxTokens) : '';
+    budgetMaxCost.value = b.maxCostUsd != null ? String(b.maxCostUsd) : '';
+    budgetDefaults.value = b.defaults;
+  } catch {
+    // 旧服务端无此端点 → 静默隐藏编辑能力
+    budgetDefaults.value = null;
+  }
+}
+
+async function saveBudget() {
+  budgetSaving.value = true;
+  budgetMsg.value = '';
+  try {
+    const t = budgetMaxTokens.value.trim();
+    const c = budgetMaxCost.value.trim();
+    await api.updateBudgetSetting({
+      maxTokens: t === '' ? null : Number(t),
+      maxCostUsd: c === '' ? null : Number(c),
+    });
+    budgetMsg.value = '✔ 已保存（下一轮运行生效）';
+    await loadBudget();
+  } catch (e) {
+    budgetMsg.value = `✘ ${(e as Error).message}`;
+  } finally {
+    budgetSaving.value = false;
+  }
+}
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const fmtCost = (n: number) => `$${n.toFixed(4)}`;
@@ -60,6 +98,7 @@ function setRange(r: UsageRange) {
 
 onMounted(async () => {
   void load();
+  void loadBudget();
   try {
     projects.value = await api.listProjects();
   } catch {
@@ -71,6 +110,24 @@ onMounted(async () => {
 <template>
   <p class="sub">按项目 / 模型 / 会话维度的费用与 token 统计（软删除会话费用计入汇总，明细仅列活跃会话）</p>
   <p v-if="error" class="error">✘ {{ error }}</p>
+
+  <!-- 预算设置：单轮任务的累计上限（input+output 按轮累加，非上下文占用） -->
+  <section v-if="budgetDefaults" class="block budget">
+    <h4>会话预算（单轮任务累计上限）</h4>
+    <div class="budget-row">
+      <label class="bfield">
+        <span class="blabel">Token 上限</span>
+        <input v-model="budgetMaxTokens" class="binput" inputmode="numeric" :placeholder="`默认 ${fmtInt(budgetDefaults.maxTokens)}`" />
+      </label>
+      <label class="bfield">
+        <span class="blabel">费用上限（USD）</span>
+        <input v-model="budgetMaxCost" class="binput" inputmode="decimal" :placeholder="`默认 ${budgetDefaults.maxCostUsd}`" />
+      </label>
+      <button class="btn primary" :disabled="budgetSaving" @click="saveBudget">{{ budgetSaving ? '保存中…' : '保存' }}</button>
+      <span class="meta">{{ budgetMsg }}</span>
+    </div>
+    <p class="meta">口径：单轮任务所有 LLM 调用的 token/费用累计（含子代理），超出即安全停止并让模型总结收尾。留空 = 使用默认值。</p>
+  </section>
 
   <div class="filters">
     <div class="range-group">
@@ -174,4 +231,10 @@ h4 { font-size: 13px; color: var(--text); margin-bottom: 8px; }
 .fill { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
 .cost { color: var(--green); min-width: 80px; text-align: right; font-family: var(--mono); font-size: 12.5px; }
 .empty { color: var(--text-faint); text-align: center; padding: 14px; font-size: 12.5px; }
+/* 预算设置区 */
+.budget { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+.budget-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 6px; }
+.bfield { display: flex; flex-direction: column; gap: 4px; }
+.blabel { color: var(--text-faint); font-size: 11.5px; }
+.binput { width: 160px; padding: 6px 9px; font-family: var(--mono); }
 </style>

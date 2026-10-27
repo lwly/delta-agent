@@ -9,6 +9,7 @@ import { buildPlan, resolveSimpleTask } from './planner.js';
 import { runPlanWithPool } from './worker-pool.js';
 import { validatePlan } from './plan.js';
 import { createEventPump } from './pump.js';
+import { computeCostUsd } from '../llm/pricing.js';
 
 const SUMMARIZE_SYSTEM = `你是编排汇总器。给定 DAG 各节点的执行结果，输出最终交付说明：
 ## 完成情况（各节点一句话）
@@ -34,6 +35,11 @@ export async function* settleUsage(
   model: string,
 ): AsyncGenerator<AgentEvent> {
   if (usage.inputTokens === 0 && usage.outputTokens === 0) return;
+  // 计价：编排段调用网关同样不回传费用，统一按静态牌价估算（未收录模型不计）
+  if (usage.costUsd === undefined) {
+    const cost = computeCostUsd(model, usage.inputTokens, usage.outputTokens);
+    if (cost !== undefined) usage.costUsd = cost;
+  }
   ctx.budget.record(usage);
   yield { type: 'usage', usage: { ...usage }, model };
 }

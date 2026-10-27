@@ -264,7 +264,7 @@ export const useChatStore = defineStore('chat', {
           const level = Math.round(Number(ev.level) * 100);
           const tokenPct = Math.round(Number(ev.usedTokenPct) * 100);
           const costPct = Math.round(Number(ev.usedCostPct) * 100);
-          this.notice(`⚠ 预算告警（${level}%）：token ${tokenPct}% / 费用 ${costPct}%`);
+          this.notice(`⚠ 预算告警（${level}%）：累计 token ${tokenPct}% / 累计费用 ${costPct}%`);
           break;
         }
         case 'budget_exhausted':

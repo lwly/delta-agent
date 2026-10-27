@@ -21,6 +21,7 @@ import { SessionService, resolveProviderFromEnv } from '../session/service.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { autoOnboardProject } from '../onboarding/index.js';
 import { createSkillRuntime, SessionHub } from './hub.js';
+import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import type { CronExecutor } from '../cron/runner.js';
@@ -120,6 +121,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     service,
     registry,
     resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
+    // 会话预算：每轮运行即时读取 settings.json（设置页修改后下一轮生效）
+    resolveBudgetConfig: () => readBudgetSetting(),
     // F-32 模型路由：路由规则每次运行即时读取（settings 修改后生效）；目标 provider 走同一解析链
     modelRouter: new ModelRouter(),
     resolveProviderById: (id) => resolveProviderFromEnv(id),

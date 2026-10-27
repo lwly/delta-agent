@@ -283,4 +283,21 @@ describe('runReAct', () => {
     );
     expect(events.some((e) => e.type === 'budget_alert')).toBe(false);
   });
+
+  it('computes costUsd from the static price table and feeds the budget guard', async () => {
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }], usage: { input: 500_000, output: 500_000 } },
+      { text: '完成', usage: { input: 1_000_000, output: 0 } },
+    ]);
+    // deepseek 牌价 0.28/0.42 USD per 1M：第一轮 0.14+0.21=0.35，第二轮 0.28 → 累计 0.63
+    const budget = new BudgetManager({ maxTokens: 10_000_000, maxCostUsd: 0.5 });
+    const events = await collect(
+      runReAct(makeCtx(provider, { model: 'deepseek-chat', budget, toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } }), [], 'hi'),
+    );
+    const done = events.find((e): e is Extract<AgentEvent, { type: 'done' }> => e.type === 'done')!;
+    expect(done.usage.costUsd).toBeCloseTo(0.63, 6);
+    // 费用维度已激活：第二輪 guard 前累计 0.35 产生 0.8 级告警（cost 70% > 50%）
+    const alerts = events.filter((e): e is Extract<AgentEvent, { type: 'budget_alert' }> => e.type === 'budget_alert');
+    expect(alerts.length).toBeGreaterThanOrEqual(1);
+  });
 });

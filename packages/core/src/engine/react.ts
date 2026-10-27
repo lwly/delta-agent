@@ -13,6 +13,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolContext } from '../tools/types.js';
 import type { RegistryLike } from './roles.js';
 import { sanitizeHistory } from '../llm/sanitize.js';
+import { computeCostUsd } from '../llm/pricing.js';
 
 export interface RunContext {
   sessionId: string;
@@ -124,6 +125,9 @@ export async function* runReAct(
     } catch {
       return;
     }
+    // 计价：网关不回传费用，用静态牌价估算（未收录模型不计）
+    const cost = computeCostUsd(ctx.model, usage.inputTokens, usage.outputTokens);
+    if (cost !== undefined) usage.costUsd = cost;
     usageTotal.inputTokens += usage.inputTokens;
     usageTotal.outputTokens += usage.outputTokens;
     usageTotal.costUsd = (usageTotal.costUsd ?? 0) + (usage.costUsd ?? 0);
@@ -377,6 +381,9 @@ async function* chatStream(
     }
 
     const toolCalls = acc.hasAny() ? acc.finalize() : [];
+    // 计价：网关不回传费用，用静态牌价估算（未收录模型不计）→ budget 费用维度生效
+    const cost = computeCostUsd(ctx.model, usage.inputTokens, usage.outputTokens);
+    if (cost !== undefined) usage.costUsd = cost;
     yield { kind: 'result', result: { text, toolCalls, usage } };
     return;
   }

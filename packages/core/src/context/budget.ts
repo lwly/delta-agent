@@ -94,8 +94,9 @@ export class BudgetManager {
     const t = this.usedTokens();
     return [
       `预算耗尽，任务已安全停止。`,
-      `Token: ${t.toLocaleString()} / ${this.config.maxTokens.toLocaleString()} (${(this.usedTokenPct() * 100).toFixed(1)}%)`,
-      `费用: $${this.state.usedCostUsd.toFixed(4)} / $${this.config.maxCostUsd.toFixed(2)}`,
+      // 「累计」口径：input+output 按轮累加（非上下文占用，上下文另有 compaction 管理）
+      `累计 Token: ${t.toLocaleString()} / ${this.config.maxTokens.toLocaleString()} (${(this.usedTokenPct() * 100).toFixed(1)}%)`,
+      `累计费用: $${this.state.usedCostUsd.toFixed(4)} / $${this.config.maxCostUsd.toFixed(2)}`,
     ].join('\n');
   }
 
