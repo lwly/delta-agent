@@ -450,7 +450,7 @@ Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue
 | 差异点 | 方案 |
 |--------|------|
 | 路径分隔符 | 全部使用 `path`/`path.posix` API，禁止字符串拼 `/` |
-| Shell 差异 | win 下优先 PowerShell，检测失败降级 cmd；macOS 默认 zsh；`run_command` 抽象 ShellAdapter |
+| Shell 差异 | win 下 shell 探测（进程级缓存）：pwsh 7（原生支持 `&&`）→ Windows PowerShell 5.1 → spawn 失败降级 cmd；输出统一严格 UTF-8 解码、win 非法序列回退 gb18030；macOS 默认 zsh；`run_command` 抽象 ShellAdapter |
 | ripgrep 分发 | 按平台二进制随包分发（`@vscode/ripgrep`） |
 | 键盘中断 | win: SIGINT 模拟（ctrl+c 监听）；macOS: 标准 SIGINT |
 | 配置目录 | 统一 `~/.delta`（win 展开为 `%USERPROFILE%`），经 `os.homedir()` |
