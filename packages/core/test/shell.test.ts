@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectShell, cmdAdapter, runWithShell } from '../src/engine/shell.js';
+import { detectShell, cmdAdapter, runWithShell, decodeShellOutput } from '../src/engine/shell.js';
+import type { ShellAdapter } from '../src/engine/shell.js';
 
 describe('ShellAdapter (M5 跨平台加固)', () => {
   it('darwin: $SHELL → /bin/zsh', () => {
@@ -17,7 +18,12 @@ describe('ShellAdapter (M5 跨平台加固)', () => {
   it('win32: powershell adapter with cmd fallback available', () => {
     const ps = detectShell('win32', {});
     expect(ps.bin).toBe('powershell.exe');
-    expect(ps.args('Get-ChildItem')).toEqual(['-NoProfile', '-Command', 'Get-ChildItem']);
+    // 预置 UTF-8 输出编码，避免中文系统（cp936）双层乱码
+    expect(ps.args('Get-ChildItem')).toEqual([
+      '-NoProfile',
+      '-Command',
+      '[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-ChildItem',
+    ]);
     const cmd = cmdAdapter();
     expect(cmd.args('dir')).toEqual(['/d', '/s', '/c', 'dir']);
   });
@@ -32,5 +38,48 @@ describe('ShellAdapter (M5 跨平台加固)', () => {
     const cmd = process.platform === 'win32' ? 'timeout /t 5' : 'sleep 5';
     const r = await runWithShell(cmd, process.cwd(), 300, new AbortController().signal);
     expect(r.timedOut).toBe(true);
+  });
+});
+
+describe('decodeShellOutput (Windows 控制台乱码修复)', () => {
+  it('合法 UTF-8 原样解码（不受平台影响）', () => {
+    const utf8 = Buffer.from('中文输出', 'utf8');
+    expect(decodeShellOutput(utf8, 'win32')).toBe('中文输出');
+    expect(decodeShellOutput(utf8, 'darwin')).toBe('中文输出');
+  });
+
+  it('GBK 字节在 win32 按 gb18030 解码，不产生 replacement char', () => {
+    // "中文" 的 GBK 编码：中=D6D0，文=CEC4
+    const gbk = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);
+    expect(decodeShellOutput(gbk, 'win32')).toBe('中文');
+  });
+
+  it('GBK 字节在非 win32 维持 UTF-8 宽松解码（替换字符）', () => {
+    const gbk = Buffer.from([0xd6, 0xd0, 0xce, 0xc4]);
+    expect(decodeShellOutput(gbk, 'darwin')).not.toBe('中文');
+    expect(decodeShellOutput(gbk, 'darwin')).toContain('\uFFFD');
+  });
+
+  it('空 Buffer 返回空串', () => {
+    expect(decodeShellOutput(Buffer.alloc(0), 'win32')).toBe('');
+  });
+
+  it('run_command 走 win32 适配器时 GBK 输出可读（端到端）', async () => {
+    // 用 node 子进程模拟一个按 GBK 输出的程序；fake adapter 标记为 win32
+    const adapter: ShellAdapter = {
+      platform: 'win32',
+      bin: process.execPath,
+      args: (c) => ['-e', c],
+      label: 'node-fake-win32',
+    };
+    const r = await runWithShell(
+      'process.stdout.write(Buffer.from([0xd6,0xd0,0xce,0xc4]))',
+      process.cwd(),
+      10_000,
+      new AbortController().signal,
+      adapter,
+    );
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe('中文');
   });
 });
