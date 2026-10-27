@@ -16,6 +16,7 @@ import type {
 } from '@delta/shared';
 import {
   BudgetManager,
+  defaultModelFor,
   PromptBuilder,
   SessionService,
   SkillBuffer,
@@ -541,7 +542,7 @@ export class SessionHub {
 
       const { staticText, dynamicText } = await this.buildPrompt(
         workRoot,
-        session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
+        session.model || this.deps.defaultModel || defaultModelFor(provider.id),
         runRegistry.definitions(),
         expert,
       );
@@ -558,7 +559,7 @@ export class SessionHub {
         sessionId,
         projectId: session.project_id,
         mode: ctxMode,
-        model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
+        model: session.model || this.deps.defaultModel || defaultModelFor(provider.id),
         systemPrompt: staticText,
         systemPromptParts: {
           staticText,
@@ -618,7 +619,7 @@ export class SessionHub {
           emit: (ev) => this.publish(sessionId, ev),
           subagent: {
             provider,
-            model: session.model || this.deps.defaultModel || 'claude-sonnet-4-5-20250929',
+            model: session.model || this.deps.defaultModel || defaultModelFor(provider.id),
             budget,
             budgetConfig: budget.config,
             windowTokens: this.deps.windowTokens ?? 200_000,

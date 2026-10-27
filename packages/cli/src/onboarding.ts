@@ -16,6 +16,7 @@ import {
   agentMdTargetPath,
   memoryMdTargetPath,
   resolveProviderFromEnv,
+  defaultModelFor,
 } from '@delta/core';
 
 /** status：打印状态与草案/目标文件情况（不做任何写操作）。 */
@@ -63,7 +64,7 @@ export async function onboardingRunCommand(opts: { force?: boolean }): Promise<v
     process.exitCode = 1;
     return;
   }
-  const model = process.env.DELTA_MODEL || 'claude-sonnet-4-5-20250929';
+  const model = process.env.DELTA_MODEL || defaultModelFor(provider.id);
   console.log(`⏳ 正在扫描项目并生成静态记忆草案（模型：${model}）…`);
   try {
     const r = await runOnboardingScan({ projectRoot, provider, model, force: opts.force });

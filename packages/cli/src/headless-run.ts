@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import {
   autoOnboardProject,
   BudgetManager,
+  defaultModelFor,
   GitIntegration,
   McpManager,
   PermissionState,
@@ -118,7 +119,8 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   if (!session) {
     session = service.createSession(project.id, {
       title: `headless · ${task.slice(0, 40)}`,
-      model: opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929',
+      // 未显式指定模型时留空，运行期按解析出的 Provider 取默认（见 defaultModelFor）
+      model: opts.model ?? process.env.DELTA_MODEL,
       mode: normalizeMode(opts.mode),
     });
   } else if (opts.model) {
@@ -134,7 +136,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       const r = await autoOnboardProject({
         projectRoot: cwd,
         provider,
-        model: session.model || 'claude-sonnet-4-5-20250929',
+        model: session.model || defaultModelFor(provider.id),
       });
       if (r && !r.skipped) {
         console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
@@ -145,7 +147,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   }
 
   // 提示词组装（7 层 + Skill 三层）
-  const model = session.model || 'claude-sonnet-4-5-20250929';
+  const model = session.model || defaultModelFor(provider.id);
   const promptAssembly = await assemblePrompt({
     projectRoot: cwd,
     model,
