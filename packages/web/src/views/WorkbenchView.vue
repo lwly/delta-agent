@@ -1401,22 +1401,22 @@ watch(
         <!-- 审批卡片区 -->
         <div class="composer-wrap cards-zone">
           <div class="cards-inner">
-            <!-- 工具确认 -->
-            <div v-if="chat.pendingConfirm" class="approve-card confirm">
-              <div class="ac-head"><span class="tool-status confirm">!</span> 需要确认：{{ chat.pendingConfirm.tool }}</div>
-              <div class="ac-reason">{{ chat.pendingConfirm.reason }}</div>
-              <pre>{{ argsPretty(JSON.stringify(chat.pendingConfirm.args)) }}</pre>
+            <!-- 工具确认（队列渲染：同轮多个确认请求全部可见，逐张回填） -->
+            <div v-for="req in chat.pendingConfirms" :key="req.id" class="approve-card confirm">
+              <div class="ac-head"><span class="tool-status confirm">!</span> 需要确认：{{ req.tool }}</div>
+              <div class="ac-reason">{{ req.reason }}</div>
+              <pre>{{ argsPretty(JSON.stringify(req.args)) }}</pre>
               <div class="ac-actions">
-                <button class="btn primary" @click="chat.decideConfirm({ kind: 'allow' })">允许</button>
-                <button class="btn" @click="chat.decideConfirm({ kind: 'reject' })">拒绝</button>
+                <button class="btn primary" @click="chat.decideConfirm(req.id, { kind: 'allow' })">允许</button>
+                <button class="btn" @click="chat.decideConfirm(req.id, { kind: 'reject' })">拒绝</button>
               </div>
             </div>
 
             <!-- 计划审批（可编辑节点） -->
-            <div v-if="chat.pendingPlan" class="approve-card plan">
-              <div class="ac-head">📋 计划审批（rev {{ chat.pendingPlan.plan.revision }} · {{ chat.pendingPlan.plan.nodes.length }} 节点）</div>
-              <div class="ac-reason">总目标：{{ chat.pendingPlan.plan.goal }}</div>
-              <div v-for="(n, i) in chat.pendingPlan.plan.nodes" :key="n.id" class="plan-node">
+            <div v-for="p in chat.pendingPlans" :key="p.requestId" class="approve-card plan">
+              <div class="ac-head">📋 计划审批（rev {{ p.plan.revision }} · {{ p.plan.nodes.length }} 节点）</div>
+              <div class="ac-reason">总目标：{{ p.plan.goal }}</div>
+              <div v-for="(n, i) in p.plan.nodes" :key="n.id" class="plan-node">
                 <code class="nid">{{ n.id }}</code>
                 <input class="goal" v-model="n.goal" placeholder="子任务目标" />
                 <input
@@ -1426,24 +1426,24 @@ watch(
                   @change="n.deps = ($event.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)"
                 />
                 <label class="crit"><input v-model="n.critical" type="checkbox" />critical</label>
-                <button class="btn danger sm" @click="chat.pendingPlan?.plan.nodes.splice(i, 1)">删除</button>
+                <button class="btn danger sm" @click="p.plan.nodes.splice(i, 1)">删除</button>
               </div>
               <div class="ac-actions">
-                <button class="btn primary" @click="chat.decidePlan({ kind: 'edit' })">按此计划执行</button>
-                <button class="btn" @click="chat.decidePlan({ kind: 'reject' })">跳过计划（直接执行）</button>
+                <button class="btn primary" @click="chat.decidePlan(p.requestId, { kind: 'edit' })">按此计划执行</button>
+                <button class="btn" @click="chat.decidePlan(p.requestId, { kind: 'reject' })">跳过计划（直接执行）</button>
               </div>
             </div>
 
             <!-- Agent 提问 -->
-            <div v-if="chat.pendingAsk" class="approve-card ask">
-              <div class="ac-head">❓ {{ chat.pendingAsk.question }}</div>
-              <div v-if="chat.pendingAsk.options?.length" class="ac-actions">
-                <button v-for="o in chat.pendingAsk.options" :key="o" class="btn" @click="chat.answerAsk(o)">{{ o }}</button>
+            <div v-for="a in chat.pendingAsks" :key="a.requestId" class="approve-card ask">
+              <div class="ac-head">❓ {{ a.question }}</div>
+              <div v-if="a.options?.length" class="ac-actions">
+                <button v-for="o in a.options" :key="o" class="btn" @click="chat.answerAsk(a.requestId, o)">{{ o }}</button>
               </div>
               <input
                 class="ask-input"
                 placeholder="输入回答后回车"
-                @keyup.enter="chat.answerAsk(($event.target as HTMLInputElement).value); ($event.target as HTMLInputElement).value = ''"
+                @keyup.enter="chat.answerAsk(a.requestId, ($event.target as HTMLInputElement).value); ($event.target as HTMLInputElement).value = ''"
               />
             </div>
           </div>

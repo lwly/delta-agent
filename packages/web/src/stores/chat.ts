@@ -31,9 +31,12 @@ export const useChatStore = defineStore('chat', {
     permissionMode: 'default' as 'plan' | 'default' | 'yolo',
     /** F-37：底栏 git 状态（项目名 / 分支 / worktree 绑定）；非 git 仓库为 null */
     gitState: null as SessionGitState | null,
-    pendingConfirm: null as ConfirmRequest | null,
-    pendingPlan: null as null | { requestId: string; plan: PlanPayload },
-    pendingAsk: null as { requestId: string; question: string; options?: string[] } | null,
+    /** 待确认卡队列：同一轮可并发发出多个 confirm_request，全部按序渲染（后到不覆盖先到） */
+    pendingConfirms: [] as ConfirmRequest[],
+    /** 待审批计划队列（同轮可多次触发，按 requestId 独立回填） */
+    pendingPlans: [] as Array<{ requestId: string; plan: PlanPayload }>,
+    /** 待回答提问队列（同轮可多次 ask_user，按 requestId 独立回填） */
+    pendingAsks: [] as Array<{ requestId: string; question: string; options?: string[] }>,
     notices: [] as Array<{ id: number; text: string }>,
     unsub: null as null | (() => void),
     noticeId: 1,
@@ -115,9 +118,9 @@ export const useChatStore = defineStore('chat', {
       } catch {
         // 端点不可用（旧服务端）→ 静默
       }
-      this.pendingConfirm = null;
-      this.pendingPlan = null;
-      this.pendingAsk = null;
+      this.pendingConfirms = [];
+      this.pendingPlans = [];
+      this.pendingAsks = [];
       this.unsub = subscribeSession(sessionId, (ev) => this.onEvent(ev));
     },
     close() {
@@ -136,9 +139,9 @@ export const useChatStore = defineStore('chat', {
       this.paused = false;
       this.permissionMode = 'default';
       this.gitState = null;
-      this.pendingConfirm = null;
-      this.pendingPlan = null;
-      this.pendingAsk = null;
+      this.pendingConfirms = [];
+      this.pendingPlans = [];
+      this.pendingAsks = [];
       this.stopped = false;
       this.lastUsage = null;
       this.pendingCalls = {};
@@ -155,6 +158,12 @@ export const useChatStore = defineStore('chat', {
           this.running = ev.running === true;
           // 本地停止标志：新一轮运行开始即清除（用户点停止后又触发续跑的场景）
           if (this.running) this.stopped = false;
+          // 运行结束：清空待决策卡（服务端 waiter 已随超时/中止收尾，残留卡不可再回填）
+          if (!this.running) {
+            this.pendingConfirms = [];
+            this.pendingPlans = [];
+            this.pendingAsks = [];
+          }
           // PASI-9：paused 仅在事件携带时更新（运行开始/暂停时服务端都会显式给出）
           if ('paused' in ev) this.paused = ev.paused === true;
           if (!this.running && this.streamingText) {
@@ -223,25 +232,31 @@ export const useChatStore = defineStore('chat', {
           });
           break;
         }
-        case 'confirm_request':
-          this.pendingConfirm = ev.request as ConfirmRequest;
+        case 'confirm_request': {
+          const req = ev.request as ConfirmRequest;
+          // 入队而非覆盖：同轮并发多个确认请求时全部渲染（SSE 重放时按 id 去重）
+          if (!this.pendingConfirms.some((p) => p.id === req.id)) this.pendingConfirms.push(req);
           break;
+        }
         // F-14 计划审批请求（引擎挂起等待决策）
         case 'plan_approval_request': {
           const req = ev.request as { id: string; plan: PlanPayload };
-          this.pendingPlan = {
+          const entry = {
             requestId: String(req.id),
             plan: JSON.parse(JSON.stringify(req.plan)) as PlanPayload,
           };
+          if (!this.pendingPlans.some((p) => p.requestId === entry.requestId)) this.pendingPlans.push(entry);
           break;
         }
-        case 'ask_user':
-          this.pendingAsk = {
+        case 'ask_user': {
+          const entry = {
             requestId: String(ev.requestId),
             question: String(ev.question),
             options: ev.options as string[] | undefined,
           };
+          if (!this.pendingAsks.some((p) => p.requestId === entry.requestId)) this.pendingAsks.push(entry);
           break;
+        }
         case 'compact_done':
           this.notice(`上下文已压缩：${ev.beforeTokens} → ${ev.afterTokens} tokens`);
           break;
@@ -382,25 +397,27 @@ export const useChatStore = defineStore('chat', {
         this.messages.pop();
       }
     },
-    async decideConfirm(decision: { kind: 'allow' } | { kind: 'reject'; reason?: string }) {
-      if (!this.pendingConfirm) return;
-      const req = this.pendingConfirm;
-      this.pendingConfirm = null;
+    /** 按 id 回填确认决策（队列中移除对应卡片；id 不存在说明已被清理，忽略） */
+    async decideConfirm(id: string, decision: { kind: 'allow' } | { kind: 'reject'; reason?: string }) {
+      const idx = this.pendingConfirms.findIndex((p) => p.id === id);
+      if (idx === -1) return;
+      const [req] = this.pendingConfirms.splice(idx, 1);
       await api.confirm(this.sessionId, req.id, decision);
     },
-    /** F-14：提交计划审批决策（edit 时把编辑后的 plan 一并回传）。 */
-    async decidePlan(decision: { kind: 'approve' } | { kind: 'reject'; reason?: string } | { kind: 'edit' }) {
-      if (!this.pendingPlan) return;
-      const req = this.pendingPlan;
-      this.pendingPlan = null;
+    /** F-14：按 requestId 提交计划审批决策（edit 时把编辑后的 plan 一并回传）。 */
+    async decidePlan(requestId: string, decision: { kind: 'approve' } | { kind: 'reject'; reason?: string } | { kind: 'edit' }) {
+      const idx = this.pendingPlans.findIndex((p) => p.requestId === requestId);
+      if (idx === -1) return;
+      const [req] = this.pendingPlans.splice(idx, 1);
       const payload =
         decision.kind === 'edit' ? { kind: 'edit', plan: req.plan } : decision;
       await api.approvePlan(this.sessionId, req.requestId, payload);
     },
-    async answerAsk(answer: string) {
-      if (!this.pendingAsk) return;
-      const ask = this.pendingAsk;
-      this.pendingAsk = null;
+    /** 按 requestId 回填 ask_user 的文本回答。 */
+    async answerAsk(requestId: string, answer: string) {
+      const idx = this.pendingAsks.findIndex((p) => p.requestId === requestId);
+      if (idx === -1) return;
+      const [ask] = this.pendingAsks.splice(idx, 1);
       await api.answer(this.sessionId, ask.requestId, answer);
     },
     async abort() {

@@ -38,6 +38,15 @@ function errorsText(errors: unknown): string {
 /** run_command global concurrency cap (技术方案 §4.2). */
 const CMD_CONCURRENCY = 2;
 
+/**
+ * run_command 槽位看门狗：fn 超过此时长仍未 settle 也强制释放槽位。
+ * 场景：Windows 上 child.kill('SIGKILL') 只杀直接子进程，孙进程持有 stdout
+ * 管道导致 close 不触发、spawnOnce 永不 resolve —— 槽位是进程级共享资源，
+ * 泄漏 CMD_CONCURRENCY 个后所有会话的 run_command 都会静默排队。
+ * 取值高于命令超时上限 600s，正常运行（含 shell 层 kill 后强制收尾）永不触发。
+ */
+const CMD_SLOT_WATCHDOG_MS = 15 * 60_000;
+
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
   private fileLocks = new Map<string, Promise<unknown>>();
@@ -96,6 +105,50 @@ export class ToolRegistry {
         this.executeOne(call, ctx).catch((e) => this.errResult(call, e as Error)),
       ),
     );
+  }
+
+  /**
+   * 流式执行：每个调用完成即产出（谁先完成先 yield，结果带 callId/name），
+   * 全部 settle 后迭代结束。一个工具挂住不再阻塞其余已完成结果的上报与落库。
+   * 消费方（react 主循环）逐条 yield tool_result，事件实时推送。
+   */
+  async *executeEach(
+    calls: ToolCall[],
+    ctx: ToolContext,
+  ): AsyncGenerator<{ call: ToolCall; result: ToolResult }> {
+    if (calls.length === 0) return;
+    type Item = { call: ToolCall; result: ToolResult } | null;
+    const queue: Item[] = [];
+    let wake: (() => void) | null = null;
+    const push = (item: Item) => {
+      queue.push(item);
+      wake?.();
+      wake = null;
+    };
+    let remaining = calls.length;
+    void Promise.all(
+      calls.map((call) =>
+        this.executeOne(call, ctx)
+          .catch((e) => this.errResult(call, e as Error))
+          .then((result) => {
+            result.callId = call.id;
+            result.name = call.name;
+            push({ call, result });
+            if (--remaining === 0) push(null);
+          }),
+      ),
+    ).catch(() => push(null)); // 防御：意外异常也要保证迭代结束
+
+    while (true) {
+      while (queue.length > 0) {
+        const item = queue.shift()!;
+        if (item === null) return;
+        yield item;
+      }
+      await new Promise<void>((r) => {
+        wake = r;
+      });
+    }
   }
 
   private errResult(call: ToolCall, e: Error): ToolResult {
@@ -268,20 +321,27 @@ export class ToolRegistry {
   }
 
   private runWithCmdSlot<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.cmdRunning < CMD_CONCURRENCY) {
+    const run = (): Promise<T> => {
       this.cmdRunning++;
-      return fn().finally(() => {
+      let released = false;
+      const release = () => {
+        if (released) return; // 看门狗已强制释放过（fn 仍悬挂），不得重复扣减/放行
+        released = true;
         this.cmdRunning--;
         this.cmdQueue.shift()?.();
+      };
+      // 兜底：即使 fn 永不 settle（孙进程持有管道等极端场景），也强制释放槽位
+      const watchdog = setTimeout(release, CMD_SLOT_WATCHDOG_MS);
+      watchdog.unref?.(); // 看门狗不阻止进程退出
+      return fn().finally(() => {
+        clearTimeout(watchdog);
+        release();
       });
-    }
+    };
+    if (this.cmdRunning < CMD_CONCURRENCY) return run();
     return new Promise<T>((resolve) => {
       this.cmdQueue.push(() => {
-        this.cmdRunning++;
-        fn().finally(() => {
-          this.cmdRunning--;
-          this.cmdQueue.shift()?.();
-        }).then(resolve);
+        run().then(resolve);
       });
     });
   }

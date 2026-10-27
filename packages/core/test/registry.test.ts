@@ -197,3 +197,75 @@ describe('ToolRegistry', () => {
     expect(todos[0]!.status).toBe('done');
   });
 });
+
+// ── executeEach：流式上报（问题3修复）────────────────────────────────────────
+
+import { ok } from '../src/tools/types.js';
+
+function probe(
+  name: string,
+  ms: number,
+  onDone?: () => void,
+): Parameters<ToolRegistry['register']>[0] {
+  return {
+    name,
+    description: `probe tool (${ms}ms)`,
+    schema: { type: 'object' } as Record<string, unknown>,
+    danger: 'safe',
+    execute: async () => {
+      await new Promise((r) => setTimeout(r, ms));
+      onDone?.();
+      return ok(`${name} done`);
+    },
+  };
+}
+
+describe('ToolRegistry.executeEach (流式上报)', () => {
+  it('谁先完成先产出，且 callId/name 已回填', async () => {
+    const reg = new ToolRegistry();
+    let slowSettled = false;
+    reg.register(probe('slow_probe', 250, () => (slowSettled = true)));
+    reg.register(probe('fast_probe', 20));
+
+    const seen: Array<{ content: string; slowSettledAtYield: boolean }> = [];
+    for await (const { call: c, result } of reg.executeEach(
+      [call('slow_probe', {}), call('fast_probe', {})],
+      makeCtx(),
+    )) {
+      seen.push({ content: result.content, slowSettledAtYield: slowSettled });
+      expect(result.callId).toBe(c.id);
+      expect(result.name).toBe(c.name);
+    }
+    // fast 先完成先上报；上报时 slow 尚未完成（一个挂住不再阻塞其余结果）
+    expect(seen.map((s) => s.content)).toEqual(['fast_probe done', 'slow_probe done']);
+    expect(seen[0]!.slowSettledAtYield).toBe(false);
+    expect(seen[1]!.slowSettledAtYield).toBe(true);
+  });
+
+  it('工具抛异常 → 转为错误结果按完成顺序产出', async () => {
+    const reg = new ToolRegistry();
+    reg.register({
+      name: 'crash_probe',
+      description: 'always throws',
+      schema: { type: 'object' } as Record<string, unknown>,
+      danger: 'safe',
+      execute: async () => {
+        throw new Error('boom');
+      },
+    });
+    const out: Array<{ name: string; ok: boolean }> = [];
+    for await (const { call: c, result } of reg.executeEach([call('crash_probe', {})], makeCtx())) {
+      expect(result.callId).toBe(c.id);
+      out.push({ name: result.name, ok: result.ok });
+      expect(result.content).toContain('crash_probe crashed: boom');
+    }
+    expect(out).toEqual([{ name: 'crash_probe', ok: false }]);
+  });
+
+  it('空调用列表直接结束', async () => {
+    const reg = new ToolRegistry();
+    const out: unknown[] = [];
+    for await (const item of reg.executeEach([], makeCtx())) out.push(item);
+    expect(out).toHaveLength(0);
+  });
+});

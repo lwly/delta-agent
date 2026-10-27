@@ -50,6 +50,10 @@ export interface ExpertTeamRuntime {
   baseRegistry?: {
     definitions(): ToolDefinition[];
     executeAll(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]>;
+    executeEach(
+      calls: ToolCall[],
+      ctx: ToolContext,
+    ): AsyncGenerator<{ call: ToolCall; result: ToolResult }>;
   };
 }
 
@@ -89,6 +93,10 @@ export interface ToolContext {
   registry?: {
     definitions(): ToolDefinition[];
     executeAll(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]>;
+    executeEach(
+      calls: ToolCall[],
+      ctx: ToolContext,
+    ): AsyncGenerator<{ call: ToolCall; result: ToolResult }>;
   };
   /** F-26 子代理运行时（provider/model/预算/深度）；缺省时 task 报 task_unavailable */
   subagent?: SubagentRuntime;

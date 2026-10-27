@@ -70,6 +70,11 @@ export function roleSystemPrompt(role: TaskRole, ctx: { planGoal: string; nodeGo
 export interface RegistryLike {
   definitions(): ToolDefinition[];
   executeAll(calls: ToolCall[], ctx: ToolContext): Promise<ToolResult[]>;
+  /** 流式执行：谁先完成先产出（结果已带 callId/name），避免一个挂死调用阻塞其余结果上报 */
+  executeEach(
+    calls: ToolCall[],
+    ctx: ToolContext,
+  ): AsyncGenerator<{ call: ToolCall; result: ToolResult }>;
 }
 
 /** 白名单受限视图：definitions 过滤，越权调用直接拒绝（不进确认流）。 */
@@ -87,16 +92,35 @@ export class RestrictedRegistry implements RegistryLike {
     return Promise.all(
       calls.map(async (call) => {
         if (!this.allow.has(call.name)) {
-          return {
-            callId: call.id,
-            name: call.name,
-            ok: false,
-            content: `tool ${call.name} is not allowed for this role (allowed: ${[...this.allow].join(', ')})`,
-            error: 'tool_not_allowed',
-          } satisfies ToolResult;
+          return this.deniedResult(call);
         }
         return (await this.base.executeAll([call], ctx))[0]!;
       }),
     );
+  }
+
+  async *executeEach(
+    calls: ToolCall[],
+    ctx: ToolContext,
+  ): AsyncGenerator<{ call: ToolCall; result: ToolResult }> {
+    const allowed: ToolCall[] = [];
+    for (const call of calls) {
+      if (this.allow.has(call.name)) {
+        allowed.push(call);
+      } else {
+        yield { call, result: this.deniedResult(call) };
+      }
+    }
+    if (allowed.length > 0) yield* this.base.executeEach(allowed, ctx);
+  }
+
+  private deniedResult(call: ToolCall): ToolResult {
+    return {
+      callId: call.id,
+      name: call.name,
+      ok: false,
+      content: `tool ${call.name} is not allowed for this role (allowed: ${[...this.allow].join(', ')})`,
+      error: 'tool_not_allowed',
+    };
   }
 }

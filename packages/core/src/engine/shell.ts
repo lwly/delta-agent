@@ -112,15 +112,16 @@ export function runWithShell(
   timeoutMs: number,
   signal: AbortSignal,
   adapter?: ShellAdapter,
+  killGraceMs?: number,
 ): Promise<ShellSpawnResult> {
   const run = (a: ShellAdapter) =>
-    spawnOnce(command, cwd, timeoutMs, signal, a).then((r) => {
+    spawnOnce(command, cwd, timeoutMs, signal, a, killGraceMs).then((r) => {
       const fallbackNeeded =
         a.platform === 'win32' &&
         r.code === -1 &&
         /ENOENT|EACCES/i.test(r.stderr);
       if (!fallbackNeeded) return r;
-      return spawnOnce(command, cwd, timeoutMs, signal, cmdAdapter());
+      return spawnOnce(command, cwd, timeoutMs, signal, cmdAdapter(), killGraceMs);
     });
   if (adapter) return run(adapter);
   if (process.platform === 'win32') return resolveWin32Shell().then(run);
@@ -150,12 +151,20 @@ export function decodeShellOutput(buf: Buffer, platform: ShellAdapter['platform'
   }
 }
 
+/**
+ * kill（超时/中止）后的强制收尾宽限期：直接子进程被 SIGKILL 后，孙进程若仍持有
+ * stdout/stderr 管道（Windows 尤其常见），`close` 事件永不触发、上层 Promise 永不
+ * resolve —— 并发槽位随之永久泄漏。宽限期后用已收集的输出强制 resolve。
+ */
+export const KILL_FORCE_RESOLVE_MS = 5_000;
+
 function spawnOnce(
   command: string,
   cwd: string,
   timeoutMs: number,
   signal: AbortSignal,
   adapter: ShellAdapter,
+  killGraceMs: number = KILL_FORCE_RESOLVE_MS,
 ): Promise<ShellSpawnResult> {
   return new Promise((resolve) => {
     const child = spawn(adapter.bin, adapter.args(command), { cwd, env: process.env, windowsHide: true });
@@ -163,39 +172,50 @@ function spawnOnce(
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let timedOut = false;
+    let settled = false;
+    let forceTimer: NodeJS.Timeout | undefined;
+    const finish = (code: number | null, stderrSuffix = '') => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(forceTimer);
+      signal.removeEventListener('abort', onAbort);
+      resolve({
+        code,
+        stdout: decodeShellOutput(Buffer.concat(stdoutChunks), adapter.platform),
+        stderr: decodeShellOutput(Buffer.concat(stderrChunks), adapter.platform) + stderrSuffix,
+        timedOut,
+        shellUsed: adapter.label,
+      });
+    };
+    // kill 后宽限期兜底：close 事件被孙进程管道卡死时，用已收集的输出强制收尾
+    const armForceResolve = () => {
+      clearTimeout(forceTimer);
+      forceTimer = setTimeout(
+        () => finish(timedOut ? null : (child.exitCode ?? null)),
+        killGraceMs,
+      );
+      forceTimer.unref?.();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGKILL');
+      armForceResolve();
     }, timeoutMs);
     const onAbort = () => {
       timedOut = false;
       child.kill('SIGKILL');
+      armForceResolve();
     };
     signal.addEventListener('abort', onAbort, { once: true });
 
     child.stdout?.on('data', (d: Buffer) => stdoutChunks.push(d));
     child.stderr?.on('data', (d: Buffer) => stderrChunks.push(d));
     child.on('error', (e) => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve({
-        code: -1,
-        stdout: decodeShellOutput(Buffer.concat(stdoutChunks), adapter.platform),
-        stderr: decodeShellOutput(Buffer.concat(stderrChunks), adapter.platform) + String(e.message),
-        timedOut,
-        shellUsed: adapter.label,
-      });
+      finish(-1, String(e.message));
     });
     child.on('close', (code) => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      resolve({
-        code,
-        stdout: decodeShellOutput(Buffer.concat(stdoutChunks), adapter.platform),
-        stderr: decodeShellOutput(Buffer.concat(stderrChunks), adapter.platform),
-        timedOut,
-        shellUsed: adapter.label,
-      });
+      finish(code);
     });
   });
 }

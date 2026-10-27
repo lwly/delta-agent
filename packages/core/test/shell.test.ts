@@ -112,3 +112,38 @@ describe('decodeShellOutput (Windows 控制台乱码修复)', () => {
     expect(r.stdout).toBe('中文');
   });
 });
+
+describe('spawnOnce kill 后强制收尾（问题4修复）', () => {
+  it('kill 后孙进程持有 stdout 管道：宽限期后强制 resolve，槽位不泄漏', async () => {
+    if (process.platform === 'win32') return; // 场景构造依赖 POSIX shell
+    // 后台 sleep 继承 stdout：直接子进程被 SIGKILL 后，close 事件被孙进程卡住 ~4s；
+    // 强制收尾宽限期 300ms → 应在 ~500ms 内拿到已收集的部分输出
+    const start = Date.now();
+    const r = await runWithShell(
+      'echo grandchild-marker; sleep 4',
+      process.cwd(),
+      150,
+      new AbortController().signal,
+      undefined,
+      300,
+    );
+    const elapsed = Date.now() - start;
+    expect(r.timedOut).toBe(true);
+    expect(r.stdout).toContain('grandchild-marker');
+    expect(elapsed).toBeLessThan(2_500);
+  });
+
+  it('正常命令不受强制收尾影响（close 先于宽限期触发）', async () => {
+    const r = await runWithShell(
+      'echo normal-ok',
+      process.cwd(),
+      10_000,
+      new AbortController().signal,
+      undefined,
+      300,
+    );
+    expect(r.code).toBe(0);
+    expect(r.timedOut).toBe(false);
+    expect(r.stdout.trim()).toBe('normal-ok');
+  });
+});

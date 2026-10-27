@@ -119,24 +119,72 @@ export interface BranchSwitchResult {
   path?: string;
 }
 
-interface PendingConfirm {
-  kind: 'confirm';
-  resolve: (d: ConfirmDecision) => void;
+/** 等人决策种类（确认 / 提问 / 计划审批共用一套 waiter 机制） */
+type DecisionKind = 'confirm' | 'ask' | 'plan';
+
+interface DecisionWaiter {
+  kind: DecisionKind;
+  resolve: (v: unknown) => void;
+  /** 超时 / 运行中止时以 reject 收尾（engine 侧转为工具错误结果，不再永久悬挂） */
+  reject: (e: Error) => void;
 }
-interface PendingAsk {
-  kind: 'ask';
-  resolve: (answer: string) => void;
-}
-interface PendingPlan {
-  kind: 'plan';
-  resolve: (d: PlanDecision) => void;
+
+/**
+ * 等人决策等待上限：确认卡/提问/计划审批超过此时长未回填即 reject。
+ * 此前是裸 Promise（只 resolve 不 reject、不监听 abort），点「停止」都停不下来，
+ * running 标记只能等 zombieReap 的 30 分钟上限才清理。
+ */
+export const DECISION_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * 创建等人决策 Promise：
+ * - 正常路径：HTTP 端点回填 → entry.resolve(v)（waiters 移除由 unregister 完成）
+ * - 超时路径：reject（错误信息回传为工具结果，运行继续）
+ * - 中止路径：signal abort → reject（与点「停止」联动，引擎立即收尾）
+ * 已 settle 后的所有后续回调（重复 resolve / 超时 / abort）一律忽略。
+ */
+export function createDecisionWaiter<T>(
+  kind: DecisionKind,
+  signal: AbortSignal,
+  opts: {
+    timeoutMs?: number;
+    register?: (e: DecisionWaiter) => void;
+    unregister?: (e: DecisionWaiter) => void;
+  } = {},
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let entry!: DecisionWaiter;
+    const onAbort = () => entry.reject(new Error('运行已中止，等待用户决策取消'));
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      opts.unregister?.(entry);
+      fn();
+    };
+    entry = {
+      kind,
+      resolve: (v) => finish(() => resolve(v as T)),
+      reject: (e) => finish(() => reject(e)),
+    };
+    timer = setTimeout(
+      () => entry.reject(new Error(`等待用户决策超时（${kind} 等待超过 ${Math.round((opts.timeoutMs ?? DECISION_TIMEOUT_MS) / 60_000)} 分钟未响应）`)),
+      opts.timeoutMs ?? DECISION_TIMEOUT_MS,
+    );
+    timer.unref?.(); // 超时定时器不阻止进程退出
+    signal.addEventListener('abort', onAbort, { once: true });
+    opts.register?.(entry);
+  });
 }
 
 export class SessionHub {
   /** F-27：已触发 SessionStart 的会话（每会话一次） */
   private readonly sessionStarted = new Set<string>();
   private readonly subs = new Map<string, Set<(ev: HubEvent) => void>>();
-  private readonly waiters = new Map<string, PendingConfirm | PendingAsk | PendingPlan>();
+  private readonly waiters = new Map<string, DecisionWaiter>();
   /** 运行中会话：AbortController 用于僵尸判定（aborted = 用户已点停止但收尾卡死） */
   private running = new Map<string, { ac: AbortController; startedAt: number }>();
   /** 会话级权限模式覆盖（未设置的会话回退 deps.permissionMode / default） */
@@ -244,6 +292,16 @@ export class SessionHub {
   }
 
   // ── 确认 / 提问回填 ─────────────────────────────────────────────────────
+
+  /** 创建挂在 waiters 表上的决策等待（超时 / abort 自动收尾，见 createDecisionWaiter）。 */
+  private decision<T>(key: string, kind: DecisionKind, signal: AbortSignal): Promise<T> {
+    return createDecisionWaiter<T>(kind, signal, {
+      register: (e) => this.waiters.set(key, e),
+      unregister: (e) => {
+        if (this.waiters.get(key) === e) this.waiters.delete(key);
+      },
+    });
+  }
 
   /** HTTP 端点回填确认决策（allow / reject / edit）。 */
   confirm(requestId: string, decision: ConfirmDecision): boolean {
@@ -546,7 +604,7 @@ export class SessionHub {
         runRegistry.definitions(),
         expert,
       );
-      const askId = `ask_${sessionId}_${Date.now()}`;
+      let askSeq = 0; // 本轮 ask_user 递增序号（配合时间戳保证每次提问 id 唯一）
 
       // 记忆里程碑：本轮输入的 L2 记忆召回（Top-K 注入动态段，最后追加不动缓存前缀）
       const memoryScopes = ['global', `project:${session.project_id}`, `session:${sessionId}`];
@@ -597,15 +655,15 @@ export class SessionHub {
               // 通知失败不影响确认流
             }
             this.publish(sessionId, { type: 'confirm_request', request: req });
-            return new Promise<ConfirmDecision>((resolve) => {
-              this.waiters.set(req.id, { kind: 'confirm', resolve });
-            });
+            // 超时 / abort 以 reject 收尾：请求 id = call.id（每次调用唯一），
+            // 同轮多个 confirm_request 各自独立等待，互不覆盖
+            return this.decision<ConfirmDecision>(req.id, 'confirm', ac.signal);
           },
           askUser: async (question: string, options?: string[]) => {
-            this.publish(sessionId, { type: 'ask_user', requestId: askId, question, options });
-            return new Promise<string>((resolve) => {
-              this.waiters.set(askId, { kind: 'ask', resolve });
-            });
+            // 每次提问独立 id（此前整轮共用一个 askId，同轮两次 ask_user 会覆盖前一次的 waiter）
+            const id = `ask_${sessionId}_${Date.now()}_${++askSeq}`;
+            this.publish(sessionId, { type: 'ask_user', requestId: id, question, options });
+            return this.decision<string>(id, 'ask', ac.signal);
           },
           todos: [],
           skills: this.deps.skills,
@@ -635,9 +693,7 @@ export class SessionHub {
           ctxMode === 'plan-execute' || ctxMode === 'multi-agent'
             ? (req) => {
                 this.publish(sessionId, { type: 'plan_approval_request', request: req });
-                return new Promise<PlanDecision>((resolve) => {
-                  this.waiters.set(req.id, { kind: 'plan', resolve });
-                });
+                return this.decision<PlanDecision>(req.id, 'plan', ac.signal);
               }
             : undefined,
       };

@@ -180,37 +180,35 @@ export async function* runReAct(
         yield { type: 'tool_call_start', call };
       }
 
-      // ── tools (parallel inside registry) ──
-      const results = await ctx.registry.executeAll(toolCalls, ctx.toolContext);
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i]!;
-        result.callId = toolCalls[i]!.id;
-        result.name = toolCalls[i]!.name;
+      // ── tools (parallel inside registry, streamed) ──
+      // 流式上报：谁先完成先 yield tool_result（registry 负责回填 callId/name），
+      // 一个工具挂住不再阻塞其余已完成结果的事件推送与落库（此前 executeAll 全部完成才逐条处理）
+      for await (const { call, result } of ctx.registry.executeEach(toolCalls, ctx.toolContext)) {
         const ms = 0; // timing handled by registry callers if needed
-        yield { type: 'tool_result', call: toolCalls[i]!, result, ms };
+        yield { type: 'tool_result', call, result, ms };
         const msg: ChatMessage = {
           role: 'tool',
           content: result.content,
-          toolCallId: toolCalls[i]!.id,
+          toolCallId: call.id,
         };
         msg.tokens = ctx.provider.estimateTokens([msg]);
         push(messages, msg);
 
         // circuit breaker: same tool failing >=3 times in a row
         if (!result.ok) {
-          const n = (toolFailures.get(toolCalls[i]!.name) ?? 0) + 1;
-          toolFailures.set(toolCalls[i]!.name, n);
+          const n = (toolFailures.get(call.name) ?? 0) + 1;
+          toolFailures.set(call.name, n);
           if (n >= 3) {
             const note: ChatMessage = {
               role: 'user',
-              content: `（系统提示：工具 ${toolCalls[i]!.name} 已连续失败 ${n} 次，本轮请换一种思路，不要立即重复同一调用）`,
+              content: `（系统提示：工具 ${call.name} 已连续失败 ${n} 次，本轮请换一种思路，不要立即重复同一调用）`,
             };
             note.tokens = ctx.provider.estimateTokens([note]);
             push(messages, note);
-            toolFailures.set(toolCalls[i]!.name, 0);
+            toolFailures.set(call.name, 0);
           }
         } else {
-          toolFailures.set(toolCalls[i]!.name, 0);
+          toolFailures.set(call.name, 0);
         }
       }
       // ctx.turn++ handled by for-loop
