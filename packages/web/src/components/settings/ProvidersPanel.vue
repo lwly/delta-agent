@@ -2,7 +2,7 @@
 // 设置页·模型配置面板（F-04a 内容区）：Provider 列表（测试/启停/排序/删除）+ 新增/编辑表单
 // 从 ProvidersModal 抽取主体内容，弹窗壳保留在 ProvidersModal.vue 中复用
 import { onMounted, ref } from 'vue';
-import { api, type ProviderView } from '../../api/client';
+import { apiFetch, type ProviderView } from '../../api/client';
 
 const providers = ref<ProviderView[]>([]);
 const error = ref('');
@@ -14,18 +14,36 @@ const editing = ref(false);
 
 const PRESETS = ['anthropic', 'openai', 'deepseek', 'qwen'];
 
+/** 非数组响应（含错误对象）容错为空列表；serve 未挂 ProviderManager 时为 404 */
+function asList(json: unknown): ProviderView[] {
+  return Array.isArray(json) ? (json as ProviderView[]) : [];
+}
+
+/** 非 2xx 时提取服务端错误信息（读取失败退化 HTTP 状态码） */
+async function readError(res: Response): Promise<string> {
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  return json.error ?? `HTTP ${res.status}`;
+}
+
 async function refresh() {
-  const res = await fetch('/api/providers');
-  const json = await res.json();
-  // serve 未挂 ProviderManager 时该端点 404/返回错误对象，容错为空列表
-  providers.value = Array.isArray(json) ? (json as ProviderView[]) : [];
+  const res = await apiFetch('/api/providers');
+  const json = await res.json().catch(() => ({}));
+  // 404 = CLI serve 未挂 ProviderManager，按既有约定静默退化为空列表；
+  // 其余非 2xx（如桌面端 401）显式报错，避免故障被吞成「空数据」
+  if (!res.ok && res.status !== 404) {
+    error.value = `加载列表失败：${(json as { error?: string }).error ?? `HTTP ${res.status}`}`;
+    providers.value = [];
+    return;
+  }
+  error.value = '';
+  providers.value = asList(json);
 }
 onMounted(refresh);
 
 async function save() {
   error.value = '';
   try {
-    const res = await fetch(`/api/providers/${form.value.id}`, {
+    const res = await apiFetch(`/api/providers/${form.value.id}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -53,25 +71,38 @@ function edit(p: ProviderView) {
 
 async function remove(id: string) {
   if (!confirm(`删除 Provider「${id}」？`)) return;
-  await fetch(`/api/providers/${id}`, { method: 'DELETE' });
-  await refresh();
+  error.value = '';
+  try {
+    const res = await apiFetch(`/api/providers/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await readError(res));
+    await refresh();
+  } catch (e) {
+    error.value = `删除失败：${(e as Error).message}`;
+  }
 }
 
 async function action(id: string, act: 'default' | 'enable' | 'move', body?: object) {
-  await fetch(`/api/providers/${id}/${act}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  await refresh();
+  error.value = '';
+  try {
+    const res = await apiFetch(`/api/providers/${id}/${act}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(await readError(res));
+    await refresh();
+  } catch (e) {
+    error.value = `操作失败：${(e as Error).message}`;
+  }
 }
 
 async function test(id: string) {
   testing.value = id;
   testResult.value[id] = '… 测试中';
   try {
-    const res = await fetch(`/api/providers/${id}/test`, { method: 'POST' });
-    const r = (await res.json()) as { ok: boolean; latencyMs: number; detail: string };
+    const res = await apiFetch(`/api/providers/${id}/test`, { method: 'POST' });
+    const r = (await res.json().catch(() => ({}))) as Partial<{ ok: boolean; latencyMs: number; detail: string; error: string }>;
+    if (!res.ok) throw new Error(r.error ?? `HTTP ${res.status}`);
     testResult.value[id] = `${r.ok ? '✔' : '✘'} ${r.detail}（${r.latencyMs}ms）`;
   } catch (e) {
     testResult.value[id] = `✘ ${(e as Error).message}`;

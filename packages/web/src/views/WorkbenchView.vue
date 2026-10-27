@@ -7,7 +7,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
-import { api, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
+import { api, apiFetch, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
 import TrashModal from '../components/TrashModal.vue';
@@ -255,7 +255,7 @@ async function pauseSession(id: string) {
 
 async function refreshProviders() {
   try {
-    const res = await fetch('/api/providers');
+    const res = await apiFetch('/api/providers');
     const json = await res.json();
     // serve 未挂 ProviderManager 时该端点 404/返回错误对象，退化为空列表
     providers.value = Array.isArray(json) ? (json as ProviderView[]) : [];

@@ -202,6 +202,19 @@ async function request<T>(method: string, p: string, body?: unknown): Promise<T>
   return json as T;
 }
 
+/**
+ * 统一 fetch 封装：供未走 `api` 对象的调用方（面板组件直连端点等）使用。
+ * 桌面宿主对 /api/* 强制校验 x-delta-auth，任何裸 fetch 都会 401，
+ * 必须经此函数（或 request()）发起请求。
+ * token 为空（CLI serve / 浏览器形态）时原样透传 headers，不附加任何凭据。
+ */
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    headers: { ...(init.headers as Record<string, string> | undefined), ...authHeaders() },
+  });
+}
+
 export interface MemoryItem {
   id: string;
   scope: string;
