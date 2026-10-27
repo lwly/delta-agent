@@ -12,3 +12,5 @@ coverage/
 # 打包产物与中间物（scripts/build-sea.mjs 生成，体积上百 MB）
 build/
 release/
+# 打包中间产物目录（release-win/ 等；release/ 只精确匹配单目录）
+release-*/

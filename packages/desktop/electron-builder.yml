@@ -2,6 +2,9 @@
 # 签名/公证挂起（发布前补齐）：mac 需 Developer ID + notarize，win 证书可选
 appId: com.delta.agent
 productName: delta-agent
+# 内置 @electron/rebuild 捆绑 node-gyp 9.x（gyp 仍 import distutils，Python 3.12+ 必失败），
+# 原生模块改由 scripts/rebuild-native.mjs 编译（pnpm dist 已串入，勿删）
+npmRebuild: false
 directories:
   output: release
 files:
