@@ -6,7 +6,7 @@ import type {
   StreamEvent,
   ToolDefinition,
 } from '@delta/shared';
-import { parseSse, parseDataFrames, openSseStream, isRetriableOpenError } from '../sse.js';
+import { parseSse, parseDataFrames, openSseStream, isRetriableOpenError, resolveLlmTimeouts, type LlmTimeouts } from '../sse.js';
 import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok */
@@ -35,6 +35,8 @@ interface AnthropicOptions {
   baseUrl?: string; // default https://api.anthropic.com
   model?: string;
   version?: string;
+  /** 流式请求超时（缺省用默认值，可被 DELTA_LLM_*_TIMEOUT_MS 环境变量覆盖） */
+  timeouts?: Partial<LlmTimeouts>;
 }
 
 /**
@@ -47,12 +49,14 @@ export class AnthropicProvider implements LLMProvider {
   private baseUrl: string;
   private defaultModel: string;
   private version: string;
+  private timeouts: LlmTimeouts;
 
   constructor(opts: AnthropicOptions) {
     this.apiKey = opts.apiKey;
     this.baseUrl = (opts.baseUrl ?? 'https://api.anthropic.com').replace(/\/+$/, '');
     this.defaultModel = opts.model ?? 'claude-sonnet-4-5-20250929';
     this.version = opts.version ?? '2023-06-01';
+    this.timeouts = resolveLlmTimeouts(opts.timeouts);
   }
 
   estimateTokens(messages: ChatMessage[]): number {
@@ -88,11 +92,12 @@ export class AnthropicProvider implements LLMProvider {
     for (let attempt = 0; attempt <= 1; attempt++) {
       let started = false;
       try {
-        const res = await openSseStream(`${this.baseUrl}/v1/messages`, init, attempt === 0 ? 1 : 0);
+        // 网关挂死防护：连接阶段超时 + 流空闲超时（只认有效帧）+ 整体时长上限
+        const res = await openSseStream(`${this.baseUrl}/v1/messages`, init, attempt === 0 ? 1 : 0, this.timeouts.connectMs);
         // block index -> tool_use id/name (from content_block_start)
         const blocks = new Map<number, { id: string; name: string }>();
 
-        for await (const frame of parseSse(res.body!)) {
+        for await (const frame of parseSse(res.body!, { idleTimeoutMs: this.timeouts.idleMs, maxDurationMs: this.timeouts.maxDurationMs })) {
           for (const ev of parseDataFrames(frame.data)) {
             const raw = ev as unknown as Record<string, unknown>;
             const type = raw.type as string;

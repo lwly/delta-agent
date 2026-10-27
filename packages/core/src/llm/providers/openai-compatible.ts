@@ -7,7 +7,7 @@ import type {
   ToolDefinition,
   Usage,
 } from '@delta/shared';
-import { parseSse, openSseStream, isRetriableOpenError } from '../sse.js';
+import { parseSse, openSseStream, isRetriableOpenError, resolveLlmTimeouts, type LlmTimeouts } from '../sse.js';
 import { imageDimensions, estimateImageTokens } from '../../media/images.js';
 
 /** rough client-side estimate: CJK 1 tok/char, latin 3 chars/tok (shared rule) */
@@ -45,6 +45,8 @@ export interface OpenAICompatibleOptions {
   thinkingField?: 'reasoning_content' | '';
   /** extra headers (e.g. Qwen's X-DashScope-* options) */
   headers?: Record<string, string>;
+  /** 流式请求超时（缺省用默认值，可被 DELTA_LLM_*_TIMEOUT_MS 环境变量覆盖） */
+  timeouts?: Partial<LlmTimeouts>;
 }
 
 /**
@@ -59,6 +61,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   protected defaultModel: string;
   protected thinkingField: string;
   protected extraHeaders: Record<string, string>;
+  protected timeouts: LlmTimeouts;
 
   constructor(opts: OpenAICompatibleOptions) {
     this.id = opts.id;
@@ -67,6 +70,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.defaultModel = opts.model ?? 'gpt-4o';
     this.thinkingField = opts.thinkingField ?? '';
     this.extraHeaders = opts.headers ?? {};
+    this.timeouts = resolveLlmTimeouts(opts.timeouts);
   }
 
   estimateTokens(messages: ChatMessage[]): number {
@@ -103,10 +107,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     for (let attempt = 0; attempt <= 1; attempt++) {
       let started = false;
       try {
-        // 流空闲超时：网关挂死（连接不关也不发数据）时避免永久卡住引擎
-        const res = await openSseStream(`${this.baseUrl}/chat/completions`, init, attempt === 0 ? 1 : 0);
+        // 网关挂死防护：连接阶段超时 + 流空闲超时（只认有效帧）+ 整体时长上限
+        const res = await openSseStream(`${this.baseUrl}/chat/completions`, init, attempt === 0 ? 1 : 0, this.timeouts.connectMs);
         const usage: Usage = { inputTokens: 0, outputTokens: 0 };
-        for await (const frame of parseSse(res.body!, { idleTimeoutMs: 180_000 })) {
+        for await (const frame of parseSse(res.body!, { idleTimeoutMs: this.timeouts.idleMs, maxDurationMs: this.timeouts.maxDurationMs })) {
           if (req.signal?.aborted) break; // abort 穿透：立刻停止消费，上层按中止处理
           const data = frame.data;
           if (!data || data === '[DONE]') break;
