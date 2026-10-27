@@ -22,6 +22,7 @@ import {
   SessionService,
   ToolRegistry,
   compareBaseline,
+  defaultModelFor,
   filterCases,
   loadBaseline,
   loadEvalSuite,
@@ -209,7 +210,7 @@ async function runSuiteForProvider(
 
   const service = new SessionService(opts.db);
   const project = service.ensureProject(cwd);
-  const model = opts.model ?? process.env.DELTA_MODEL ?? 'claude-sonnet-4-5-20250929';
+  const model = opts.model ?? process.env.DELTA_MODEL ?? defaultModelFor(provider.id);
   const engineMode = normalizeMode(undefined);
   const permissionMode = resolvePermissionMode(Boolean(opts.yolo), opts.permission);
   const maxTurns = Number(opts.maxTurns) || 30;

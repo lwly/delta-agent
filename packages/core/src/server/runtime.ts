@@ -16,6 +16,7 @@ import { HookManager } from '../hooks/manager.js';
 import { McpManager, loadMcpConfig } from '../mcp/client.js';
 import { ModelRouter } from '../llm/router.js';
 import { ProviderManager } from '../llm/manager.js';
+import { defaultModelFor } from '../llm/defaults.js';
 import { SessionService, resolveProviderFromEnv } from '../session/service.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { autoOnboardProject } from '../onboarding/index.js';
@@ -23,9 +24,6 @@ import { createSkillRuntime, SessionHub } from './hub.js';
 import { createWebServer } from './http.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import type { CronExecutor } from '../cron/runner.js';
-
-/** onboarding 用的缺省模型（与 CLI serve 原行为一致） */
-const DEFAULT_ONBOARD_MODEL = 'claude-sonnet-4-5-20250929';
 
 export interface ServeRuntimeOptions {
   /** 监听端口（缺省 7900） */
@@ -99,7 +97,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
           const r = await autoOnboardProject({
             projectRoot,
             provider: onboardingProvider,
-            model: process.env.DELTA_MODEL || DEFAULT_ONBOARD_MODEL,
+            model: process.env.DELTA_MODEL || defaultModelFor(onboardingProvider.id),
           });
           if (r && !r.skipped) {
             log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
