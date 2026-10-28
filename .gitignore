@@ -25,3 +25,7 @@ release-*/
 # 环境变量：密钥只经 env 或 CI secrets 注入，任何 .env 都不入库
 .env
 .env.*
+
+# F-45 Playwright 失败工件（CI 归档用，不入库）
+e2e/test-results/
+e2e/playwright-report/
