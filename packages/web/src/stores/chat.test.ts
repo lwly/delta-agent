@@ -97,3 +97,28 @@ describe('chat store 待决策卡队列', () => {
     expect(chat.pendingConfirms).toHaveLength(1);
   });
 });
+
+describe('chat store 预算告警提示', () => {
+  it('逐级触发（50% → 80% → 100%）只保留最新一条', () => {
+    const chat = useChatStore();
+    chat.onEvent({ type: 'budget_alert', level: 0.5, usedTokenPct: 0.5, usedCostPct: 0.04 });
+    chat.onEvent({ type: 'budget_alert', level: 0.8, usedTokenPct: 0.85, usedCostPct: 0.07 });
+    chat.onEvent({ type: 'budget_alert', level: 1.0, usedTokenPct: 1.09, usedCostPct: 0.09 });
+    const alerts = chat.notices.filter((n) => n.text.startsWith('⚠ 预算告警'));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.text).toBe('⚠ 预算告警（100%）：累计 token 109% / 累计费用 9%');
+  });
+
+  it('同 tag 替换不影响其他 notice（数量不丢失、相对顺序保持）', () => {
+    const chat = useChatStore();
+    chat.onEvent({ type: 'compact_done', beforeTokens: 100, afterTokens: 50 });
+    chat.onEvent({ type: 'budget_alert', level: 0.5, usedTokenPct: 0.5, usedCostPct: 0.04 });
+    chat.onEvent({ type: 'subtask_done', nodeId: 'n1' });
+    chat.onEvent({ type: 'budget_alert', level: 0.8, usedTokenPct: 0.85, usedCostPct: 0.07 });
+    expect(chat.notices.map((n) => n.text)).toEqual([
+      expect.stringContaining('上下文已压缩'),
+      '✔ n1 完成',
+      '⚠ 预算告警（80%）：累计 token 85% / 累计费用 7%',
+    ]);
+  });
+});

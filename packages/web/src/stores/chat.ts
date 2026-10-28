@@ -37,7 +37,8 @@ export const useChatStore = defineStore('chat', {
     pendingPlans: [] as Array<{ requestId: string; plan: PlanPayload }>,
     /** 待回答提问队列（同轮可多次 ask_user，按 requestId 独立回填） */
     pendingAsks: [] as Array<{ requestId: string; question: string; options?: string[] }>,
-    notices: [] as Array<{ id: number; text: string }>,
+    /** tag：替换标签——同 tag 的旧提示先移除再入队（如预算告警只保留最新一条） */
+    notices: [] as Array<{ id: number; text: string; tag?: string }>,
     unsub: null as null | (() => void),
     noticeId: 1,
     // ── UI 本地状态（不来自服务端协议，见各字段注释）──────────────────
@@ -156,8 +157,12 @@ export const useChatStore = defineStore('chat', {
       this.toolSeq = 0;
       this.thinkingText = '';
     },
-    notice(text: string) {
-      this.notices.push({ id: this.noticeId++, text });
+    notice(text: string, tag?: string) {
+      if (tag) {
+        const idx = this.notices.findIndex((n) => n.tag === tag);
+        if (idx !== -1) this.notices.splice(idx, 1);
+      }
+      this.notices.push({ id: this.noticeId++, text, ...(tag ? { tag } : {}) });
       if (this.notices.length > 20) this.notices.shift();
     },
     async onEvent(ev: { type: string; [k: string]: unknown }) {
@@ -275,7 +280,8 @@ export const useChatStore = defineStore('chat', {
           const level = Math.round(Number(ev.level) * 100);
           const tokenPct = Math.round(Number(ev.usedTokenPct) * 100);
           const costPct = Math.round(Number(ev.usedCostPct) * 100);
-          this.notice(`⚠ 预算告警（${level}%）：累计 token ${tokenPct}% / 累计费用 ${costPct}%`);
+          // 同 tag 替换：50% → 80% → 100% 逐级触发时只保留最新一条，不堆叠历史告警
+          this.notice(`⚠ 预算告警（${level}%）：累计 token ${tokenPct}% / 累计费用 ${costPct}%`, 'budget_alert');
           break;
         }
         case 'budget_exhausted':
