@@ -1,4 +1,5 @@
 import { ok, fail, type AgentTool } from '../types.js';
+import { wrapUntrusted } from '../../context/untrusted.js';
 
 // ── web_fetch ──────────────────────────────────────────────────────────────
 
@@ -55,7 +56,8 @@ export const webFetchTool: AgentTool = {
       const body = contentType.includes('html') ? htmlToText(text) : text;
       // E-3：抓取正文截断收紧（30k → 15k 字符），降低回灌上下文的 token 体积
       const capped = body.length > 15_000 ? body.slice(0, 15_000) + '\n...[truncated]' : body;
-      return ok(`[${res.status} ${contentType}]\n${capped}`);
+      // F-44：抓取正文为外部内容，统一 untrusted 包裹（提示词注入防护基线）
+      return ok(`[${res.status} ${contentType}]\n${wrapUntrusted(capped, url)}`);
     } catch (e) {
       return fail(String((e as Error).message));
     }

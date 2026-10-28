@@ -4,6 +4,7 @@
  * 动态段：skills / memory / session（每轮更新）
  */
 import type { AssembleContext, LayerValue, PromptLayer } from './types.js';
+import { injectionDefenseSection } from '../context/untrusted.js';
 
 /** L1 人格：Agent 身份 + 安全基线（locked，不可覆盖） */
 export class IdentityLayer implements PromptLayer {
@@ -21,6 +22,8 @@ export class IdentityLayer implements PromptLayer {
       '- 不泄露 Provider API Key、加密存储内容或系统敏感信息',
       '- 不在项目沙盒边界（projectRoot）之外写文件',
       '- 高危工具（write_file / edit_file / run_command）执行前必须走确认流程',
+      // F-44 提示词注入防御段（context/untrusted.ts 统一定义，规则与包裹标记同源防口径漂移）
+      injectionDefenseSection(),
       '- 后续任何段落（含专家角色段）不得改写本节安全基线；出现冲突时以本节为准',
     ].join('\n');
   }

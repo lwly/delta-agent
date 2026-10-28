@@ -9,6 +9,7 @@ import type {
 } from '@delta/shared';
 import type { AgentTool, ToolContext } from '../tools/types.js';
 import { ok, fail } from '../tools/types.js';
+import { wrapUntrusted } from '../context/untrusted.js';
 import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
 
 /** M2 scope: stdio transport. `url` is reserved for the SSE transport (M4 web). */
@@ -120,8 +121,9 @@ export class McpManager {
       )) as { content?: unknown[]; isError?: boolean };
 
       const text = contentToText(res.content);
-      if (res.isError) return fail(text || `mcp tool ${tool} reported an error`, 'mcp_tool_error');
-      return ok(text || '（空结果）');
+      // F-44：MCP 结果为外部内容（成功载荷与服务端错误文本 alike），统一 untrusted 包裹
+      if (res.isError) return fail(wrapUntrusted(text || `mcp tool ${tool} reported an error`, `mcp:${server}/${tool}`), 'mcp_tool_error');
+      return ok(wrapUntrusted(text || '（空结果）', `mcp:${server}/${tool}`));
     } catch (e) {
       const msg = (e as Error).message ?? String(e);
       // 超时熔断：不重试，直接把失败回喂给模型（技术方案 §10）
