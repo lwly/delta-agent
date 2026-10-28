@@ -386,4 +386,43 @@ describe('settings/budget 端点', () => {
       await fs.rm(home2, { recursive: true, force: true });
     }
   });
+
+  it('POST /api/settings/budget/extend：现有上限乘以 multiply 持久化；非法 multiply 400', async () => {
+    const home3 = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-budget-ext-'));
+    const hub3 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv3 = createWebServer({
+      service,
+      hub: hub3,
+      port: 0,
+      providers: new ProviderManager(path.join(tmp, 'm3.json')),
+      configHomeDir: home3,
+    });
+    await new Promise<void>((r) => srv3.listen(0, '127.0.0.1', r));
+    const addr = srv3.address();
+    const base3 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    const call = async (method: string, p: string, body?: unknown) => {
+      const res = await fetch(`${base3}${p}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: res.status, json: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+    };
+    try {
+      // 无既有设置 → 按默认翻倍（200k×2 / $0.7×2）
+      const e1 = await call('POST', '/api/settings/budget/extend', { multiply: 2 });
+      expect(e1.status).toBe(200);
+      expect(e1.json).toMatchObject({ ok: true, maxTokens: 400_000, maxCostUsd: 1.4 });
+      // 既有设置上继续追加 ×3
+      const e2 = await call('POST', '/api/settings/budget/extend', { multiply: 3 });
+      expect(e2.json).toMatchObject({ ok: true, maxTokens: 1_200_000 });
+      expect(e2.json.maxCostUsd).toBeCloseTo(4.2, 6);
+      // 非法 multiply → 400
+      const bad = await call('POST', '/api/settings/budget/extend', { multiply: -1 });
+      expect(bad.status).toBe(400);
+    } finally {
+      srv3.close();
+      await fs.rm(home3, { recursive: true, force: true });
+    }
+  });
 });

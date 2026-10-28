@@ -300,4 +300,98 @@ describe('runReAct', () => {
     const alerts = events.filter((e): e is Extract<AgentEvent, { type: 'budget_alert' }> => e.type === 'budget_alert');
     expect(alerts.length).toBeGreaterThanOrEqual(1);
   });
+
+  // ── 方案 D：预算耗尽降级续跑（budgetDegrade 链路）──
+
+  it('budgetDegrade：耗尽不硬停——禁用 task、maxTokens 降到 1024、主循环继续', async () => {
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }], usage: { input: 2_000, output: 0 } },
+      { text: '降级后完成', usage: { input: 100, output: 10 } },
+    ]);
+    const seen: Array<ChatRequest> = [];
+    const base = makeCtx(provider, {
+      budget: new BudgetManager({ maxTokens: 1_000, maxCostUsd: 1000 }),
+      toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot },
+    });
+    const ctx: RunContext = { ...base, budgetDegrade: true };
+    const origChat = provider.chat.bind(provider);
+    (provider as unknown as { chat: (req: ChatRequest) => AsyncIterable<StreamEvent> }).chat =
+      async function* (req: ChatRequest) {
+        seen.push(req);
+        yield* origChat(req);
+      };
+
+    const events = await collect(runReAct(ctx, [], 'hi'));
+    const types = events.map((e) => e.type);
+    // 降级事件恰好一次，且不再发 budget_exhausted（硬停协议只在缺省链路）
+    const degraded = events.filter((e): e is Extract<AgentEvent, { type: 'budget_degraded' }> => e.type === 'budget_degraded');
+    expect(degraded).toHaveLength(1);
+    expect(degraded[0]!.summary).toContain('已降级续跑');
+    expect(types).not.toContain('budget_exhausted');
+    // 主循环继续：第二轮真实发生并以文本答案收尾
+    expect(events.filter((e) => e.type === 'turn_start')).toHaveLength(2);
+    const text = events.filter((e): e is Extract<AgentEvent, { type: 'text_delta' }> => e.type === 'text_delta')
+      .map((e) => e.text).join('');
+    expect(text).toBe('降级后完成');
+    // 降级轮：task 工具被摘除 + 单轮输出上限 1024
+    expect(seen[0]!.tools.some((d) => d.name === 'task')).toBe(true);
+    expect(seen[1]!.tools.some((d) => d.name === 'task')).toBe(false);
+    expect(seen[1]!.maxTokens).toBe(1024);
+    expect(types[types.length - 1]).toBe('done');
+  });
+
+  it('budgetDegrade 缺省 false：保持硬停 + budget_exhausted（headless 退出码 4 协议）', async () => {
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'list_dir', argsJson: '{}' }], usage: { input: 2_000, output: 0 } },
+      { text: '收尾总结', usage: { input: 50, output: 10 } },
+    ]);
+    const events = await collect(
+      runReAct(
+        makeCtx(provider, {
+          budget: new BudgetManager({ maxTokens: 1_000, maxCostUsd: 1000 }),
+          toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot },
+        }),
+        [],
+        'hi',
+      ),
+    );
+    expect(events.some((e) => e.type === 'budget_exhausted')).toBe(true);
+    expect(events.some((e) => e.type === 'budget_degraded')).toBe(false);
+  });
+
+  // ── 方案 B：子代理用量统一口径（tool_result.meta.usage → usageTotal + usage 事件 + done.subagents）──
+
+  it('aggregates subagent usage from tool_result.meta.usage into done.usage and emits a usage event', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: 'fake_task',
+      description: '模拟 task 工具',
+      schema: { type: 'object' },
+      danger: 'safe',
+      execute: async () => ({
+        callId: '',
+        name: 'fake_task',
+        ok: true,
+        content: '子代理汇报',
+        meta: { usage: { inputTokens: 500, outputTokens: 100, costUsd: 0.01 } },
+      }),
+    });
+    const provider = new MockProvider([
+      { toolCalls: [{ id: 'c1', name: 'fake_task', argsJson: '{}' }], usage: { input: 10, output: 5 } },
+      { text: '完成', usage: { input: 10, output: 5 } },
+    ]);
+    const events = await collect(
+      runReAct(makeCtx(provider, { registry, toolContext: { ...makeCtx(provider).toolContext, projectRoot: tmpRoot } }), [], 'hi'),
+    );
+    const done = events.find((e): e is Extract<AgentEvent, { type: 'done' }> => e.type === 'done')!;
+    // 主循环 (10+5)+(10+5) + 子代理 (500+100)
+    expect(done.usage.inputTokens).toBe(520);
+    expect(done.usage.outputTokens).toBe(110);
+    expect(done.usage.costUsd).toBeCloseTo(0.01, 6);
+    expect(done.subagents).toBe(1);
+    // 子代理用量补发了一条 usage 事件（hub 据此逐轮落库，DB 口径与预算一致）
+    const usages = events.filter((e): e is Extract<AgentEvent, { type: 'usage' }> => e.type === 'usage');
+    expect(usages).toHaveLength(3);
+    expect(usages.some((u) => u.usage.inputTokens === 500 && u.usage.outputTokens === 100)).toBe(true);
+  });
 });

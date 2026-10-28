@@ -38,6 +38,12 @@ export interface RunContext {
   registry: ToolRegistry | RegistryLike;
   toolContext: ToolContext;
   budget: BudgetManager;
+  /**
+   * 方案 D：预算耗尽降级续跑（缺省 false = 保持硬停 + budget_exhausted 事件，headless 退出码 4 协议不变）。
+   * 开启时（Web serve 链路）到 100% 不终止：禁用 task/子代理、单轮 maxTokens 降到 1024、主循环继续，
+   * 并发出一次 budget_degraded 事件（UI 据此展示「追加预算继续」）。
+   */
+  budgetDegrade?: boolean;
   /** model context window in tokens (for compaction trigger) */
   windowTokens: number;
   /** retry limit for transient LLM failures */
@@ -94,6 +100,10 @@ export async function* runReAct(
   const maxRetries = ctx.maxRetries ?? 3;
   const toolFailures = new Map<string, number>();
   const usageTotal: Usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  /** 方案 B：子代理（task 工具 meta.usage）派生次数，随 done 事件上报供 UI 标注 */
+  let subagentCount = 0;
+  /** 方案 D：是否已进入降级续跑（一次性转换，降级后 guard 不再硬停） */
+  let degraded = false;
   let prevSummary = '';
 
   /**
@@ -143,7 +153,7 @@ export async function* runReAct(
       // ── budget guard (before LLM call) ──
       // F-31：分级告警改在 record 之后判定（D7），轮首仅保留 100% 硬停检查（行为不变）
       const guard = ctx.budget.guard();
-      if (guard.exceeded) {
+      if (guard.exceeded && !ctx.budgetDegrade) {
         const summary = ctx.budget.summarize();
         yield { type: 'budget_exhausted', summary };
         // 预算耗尽也给一次纯文本总结：用户拿到结论，而不是一堆工具卡后戛然而止
@@ -152,6 +162,19 @@ export async function* runReAct(
           turn,
         );
         return;
+      }
+      // ── 方案 D：降级续跑（budgetDegrade 链路，仅转换一次）──
+      // 不终止主循环：禁用 task/子代理、单轮输出上限降到 1024，让任务自然收敛；
+      // 后续轮 guard 仍 exceeded 但 degraded 已置位，直接放行（停止手段 = 用户中断/最大轮次）。
+      if (guard.exceeded && !degraded) {
+        degraded = true;
+        yield { type: 'budget_degraded', summary: ctx.budget.summarize('degraded') };
+        const note: ChatMessage = {
+          role: 'user',
+          content:
+            '（系统提示：预算已耗尽，已降级续跑——子代理已停用、单轮输出上限降低。请尽快收敛任务并输出结论，不要再派生子代理或做大规模检索。）',
+        };
+        push(messages, note);
       }
 
       // ── auto compaction (80% trigger / 55% target) ──
@@ -191,7 +214,7 @@ export async function* runReAct(
 
       // ── LLM round-trip (SSE, with retries, streaming deltas) ──
       let round: { text: string; toolCalls: ToolCall[]; usage: Usage } | undefined;
-      for await (const item of chatStream(ctx, messages, turn)) {
+      for await (const item of chatStream(ctx, messages, turn, degraded)) {
         if (item.kind === 'delta') {
           if (item.ev.type === 'text_delta') yield { type: 'text_delta', text: item.ev.text };
           else if (item.ev.type === 'thinking_delta') yield { type: 'thinking_delta', text: item.ev.text };
@@ -232,6 +255,19 @@ export async function* runReAct(
       for await (const { call, result } of ctx.registry.executeEach(toolCalls, ctx.toolContext)) {
         const ms = 0; // timing handled by registry callers if needed
         yield { type: 'tool_result', call, result, ms };
+        // ── 方案 B：子代理用量统一口径 ──
+        // task 工具在 meta.usage 回传子代理消耗（其内部 usage 事件不外抛）：
+        // 1) 并入 usageTotal → done.usage 覆盖主循环 + 子代理，与预算累计口径一致；
+        // 2) 补发一条 usage 事件 → hub 逐轮落库（DB 口径同样包含子代理），UI 可标注「含子代理 N 个」。
+        // 预算侧不在此重复 record（task 工具已回写父预算）。
+        const metaUsage = result.meta?.['usage'] as Usage | undefined;
+        if (metaUsage && typeof metaUsage.inputTokens === 'number' && typeof metaUsage.outputTokens === 'number') {
+          usageTotal.inputTokens += metaUsage.inputTokens;
+          usageTotal.outputTokens += metaUsage.outputTokens;
+          usageTotal.costUsd = (usageTotal.costUsd ?? 0) + (metaUsage.costUsd ?? 0);
+          subagentCount += 1;
+          yield { type: 'usage', usage: metaUsage, model: ctx.model };
+        }
         const msg: ChatMessage = {
           role: 'tool',
           content: result.content,
@@ -275,7 +311,11 @@ export async function* runReAct(
       yield { type: 'error', message: err.message, fatal: true };
     }
   } finally {
-    yield { type: 'done', usage: usageTotal };
+    yield {
+      type: 'done',
+      usage: usageTotal,
+      ...(subagentCount > 0 ? { subagents: subagentCount } : {}),
+    };
   }
 }
 
@@ -321,6 +361,7 @@ async function* chatStream(
   ctx: RunContext,
   messages: ChatMessage[],
   turn: number,
+  degraded = false,
 ): AsyncGenerator<StreamItem> {
   const { ToolCallAccumulator } = await import('../llm/accumulator.js');
   const maxRetries = ctx.maxRetries ?? 3;
@@ -340,8 +381,13 @@ async function* chatStream(
     try {
       for await (const ev of ctx.provider.chat({
         messages: [{ role: 'system', content: systemContent(ctx, turn) }, ...messages],
-        tools: ctx.registry.definitions(),
+        // 方案 D：降级续跑时禁用 task（子代理派生）工具
+        tools: degraded
+          ? ctx.registry.definitions().filter((d) => d.name !== 'task')
+          : ctx.registry.definitions(),
         model: ctx.model,
+        // 方案 D：降级续跑时单轮输出上限降到 1024，抑制长输出的 token 放大
+        ...(degraded ? { maxTokens: 1024 } : {}),
         signal: ctx.signal,
       })) {
         switch (ev.type) {

@@ -149,4 +149,49 @@ describe('task 子代理工具（F-26）', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('subagent_failed');
   });
+
+  // ── 方案 C：子代理配额 min(父剩余, 60k) ──
+
+  it('子代理 token 预算封顶 60k：父预算充裕时也只给 60k，超限只终止子代理', async () => {
+    // 父预算 1M 充裕；子代理消耗 70k > 60k 上限 → 子代理 budget_exhausted，而非跑满父预算
+    const provider = new MockProvider([
+      { toolCalls: [call('c1', 'list_dir', {})], usage: { input: 70_000, output: 1_000 } },
+      { text: '不应到达' },
+    ]);
+    const result = await taskTool.execute(
+      { description: '大消耗', prompt: '超大检索任务' },
+      makeCtx(provider),
+    );
+    expect(result.meta!.error).toBe('子代理预算耗尽');
+    // 部分用量仍回写父预算（不丢账，含收尾轮默认 10 tokens），预留已释放
+    expect(parentBudget.state.usedInputTokens).toBe(70_010);
+    expect(parentBudget.remainingTokens()).toBe(1_000_000 - 71_015); // output 1000+5
+  });
+
+  it('子代理预算 = 父剩余（父剩余 < 60k 时取父剩余）', async () => {
+    parentBudget.record({ inputTokens: 995_000, outputTokens: 0 }); // 剩余 5k
+    const provider = new MockProvider([
+      { toolCalls: [call('c1', 'list_dir', {})], usage: { input: 6_000, output: 0 } },
+      { text: '不应到达' },
+    ]);
+    const result = await taskTool.execute(
+      { description: 'x', prompt: 'y' },
+      makeCtx(provider),
+    );
+    // 6k > 5k 父剩余 → 子代理预算耗尽（若封顶是 60k 则不会触发）
+    expect(result.meta!.error).toBe('子代理预算耗尽');
+  });
+
+  it('父预算剩余为 0 → fail-fast，不派生子代理', async () => {
+    parentBudget.record({ inputTokens: 1_000_000, outputTokens: 0 });
+    const provider = new MockProvider([{ text: '不应被消费' }]);
+    const result = await taskTool.execute(
+      { description: 'x', prompt: 'y' },
+      makeCtx(provider),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('subagent_budget_exhausted');
+    // 父用量未被子代理污染
+    expect(parentBudget.state.usedInputTokens).toBe(1_000_000);
+  });
 });

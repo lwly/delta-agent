@@ -162,6 +162,12 @@ export type AgentEvent =
   | { type: 'compact_done'; beforeTokens: number; afterTokens: number }
   | { type: 'budget_alert'; level: 0.5 | 0.8 | 1.0; usedTokenPct: number; usedCostPct: number }
   | { type: 'budget_exhausted'; summary: string }
+  /**
+   * 预算耗尽降级续跑（仅 budgetDegrade 链路发出，headless 硬停协议不受影响）：
+   * 子代理停用、单轮输出上限降到 1024，主循环继续到自然收敛；
+   * summary 携带耗尽时的累计用量（与 budget_exhausted.summarize() 同口径）。
+   */
+  | { type: 'budget_degraded'; summary: string }
   | { type: 'confirm_request'; request: ConfirmRequest }
   | { type: 'plan_approval_request'; request: PlanApprovalRequest }
   | { type: 'plan_created'; plan: Plan }
@@ -203,7 +209,11 @@ export type AgentEvent =
       /** 父会话为 plan 模式时的只读降级标记（成员卡角标） */
       readonlyDegraded?: boolean;
     }
-  | { type: 'done'; usage: Usage }
+  /**
+   * done.usage 统一口径：主循环各轮 + 收尾轮 + 子代理（task 工具回传 meta.usage）。
+   * subagents = 本次运行派生的子代理次数（> 0 时 UI 标注「含子代理 N 个」）。
+   */
+  | { type: 'done'; usage: Usage; subagents?: number }
   | { type: 'error'; message: string; fatal: boolean };
 
 // ── Confirmation flow ─────────────────────────────────────────────────────

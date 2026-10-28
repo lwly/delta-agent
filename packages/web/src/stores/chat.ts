@@ -45,6 +45,10 @@ export const useChatStore = defineStore('chat', {
     stopped: false,
     /** 上一次 done 事件的任务 token 用量（协议口径，状态条展示，不做假实时） */
     lastUsage: null as null | { inputTokens: number; outputTokens: number },
+    /** 上一次 done 事件携带的子代理派生次数（>0 时 token 小字标注「含子代理 N 个」） */
+    lastSubagents: 0,
+    /** 方案 D：本轮运行触发过预算降级续跑（非运行态时展示「追加预算继续」按钮） */
+    budgetDegraded: false,
     /** callId → 调用元信息（tool_call_start 记录；结果卡配对 / 运行中卡片 / 本地耗时计算的数据源） */
     pendingCalls: {} as Record<string, { name: string; argsJson: string; startedAt: number; seq: number }>,
     /** 本次会话内工具调用递增序号（open 时归零；第 N 步展示口径） */
@@ -86,6 +90,8 @@ export const useChatStore = defineStore('chat', {
       // UI 本地状态随会话切换重置（序号 / 计时 / 停止标志 / 思考文本均属会话作用域）
       this.stopped = false;
       this.lastUsage = null;
+      this.lastSubagents = 0;
+      this.budgetDegraded = false;
       this.pendingCalls = {};
       this.toolSeq = 0;
       this.thinkingText = '';
@@ -144,6 +150,8 @@ export const useChatStore = defineStore('chat', {
       this.pendingAsks = [];
       this.stopped = false;
       this.lastUsage = null;
+      this.lastSubagents = 0;
+      this.budgetDegraded = false;
       this.pendingCalls = {};
       this.toolSeq = 0;
       this.thinkingText = '';
@@ -157,7 +165,10 @@ export const useChatStore = defineStore('chat', {
         case 'state':
           this.running = ev.running === true;
           // 本地停止标志：新一轮运行开始即清除（用户点停止后又触发续跑的场景）
-          if (this.running) this.stopped = false;
+          if (this.running) {
+            this.stopped = false;
+            this.budgetDegraded = false; // 新一轮运行按新预算重新计，降级态不复用
+          }
           // 运行结束：清空待决策卡（服务端 waiter 已随超时/中止收尾，残留卡不可再回填）
           if (!this.running) {
             this.pendingConfirms = [];
@@ -270,6 +281,11 @@ export const useChatStore = defineStore('chat', {
         case 'budget_exhausted':
           this.notice(`⚠ ${String(ev.summary ?? '预算耗尽')}`);
           break;
+        case 'budget_degraded':
+          // 方案 D：预算耗尽已降级续跑（子代理停用、输出限长），运行不会因此终止
+          this.budgetDegraded = true;
+          this.notice(`⚠ ${String(ev.summary ?? '预算耗尽，已降级续跑')}`);
+          break;
         // ── M5: Plan DAG / Worker Pool / Reviewer 事件（notice 最小渲染）──
         case 'plan_created': {
           const plan = ev.plan as { revision: number; nodes: Array<{ id: string; goal: string; deps: string[] }> };
@@ -351,7 +367,10 @@ export const useChatStore = defineStore('chat', {
           const usage = ev.usage as { inputTokens?: number; outputTokens?: number } | undefined;
           if (usage) {
             this.lastUsage = { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 };
-            this.notice(`本任务 token：${this.lastUsage.inputTokens} 入 / ${this.lastUsage.outputTokens} 出`);
+            this.lastSubagents = Number(ev.subagents ?? 0);
+            // 方案 B：done.usage 已统一口径（主循环 + 子代理），有子代理时显式标注
+            const sub = this.lastSubagents > 0 ? `（含子代理 ${this.lastSubagents} 个）` : '';
+            this.notice(`本任务 token：${this.lastUsage.inputTokens} 入 / ${this.lastUsage.outputTokens} 出${sub}`);
           }
           this.stopped = false;
           // 以服务端落库为准重拉一次（期间会话已切换则丢弃过期响应，防止旧会话消息覆盖新会话）。
@@ -389,6 +408,7 @@ export const useChatStore = defineStore('chat', {
       this.streamingText = '';
       this.paused = false; // PASI-9：发送即恢复（服务端 hub.send 同步清除 paused 落库）
       this.stopped = false; // 本地停止标志：重新发送即清除（含从停止点继续的场景）
+      this.budgetDegraded = false; // 触发续跑即清除降级态（新一轮按追加后的预算计）
       this.thinkingText = '';
       try {
         await api.send(this.sessionId, input, images);
@@ -439,6 +459,18 @@ export const useChatStore = defineStore('chat', {
         await api.pause(this.sessionId);
       } catch (e) {
         this.notice(`✘ ${(e as Error).message}`);
+      }
+    },
+    /** 方案 D：追加预算（默认翻倍）并自动发送「继续」触发下一轮运行 */
+    async extendBudgetAndContinue(multiply = 2) {
+      try {
+        const r = await api.extendBudget(multiply);
+        this.notice(
+          `✚ 预算已追加 ×${multiply}：token 上限 ${r.maxTokens?.toLocaleString() ?? '默认'} / 费用上限 $${r.maxCostUsd ?? '默认'}，正在继续…`,
+        );
+        await this.send('继续');
+      } catch (e) {
+        this.notice(`✘ 追加预算失败：${(e as Error).message}`);
       }
     },
     /** 会话级权限模式切换（仅影响后续运行；yolo 放行所有写/执行操作） */

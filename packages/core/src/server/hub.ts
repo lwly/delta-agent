@@ -692,6 +692,8 @@ export class SessionHub {
           },
         },
         budget,
+        // 方案 D：Web 链路预算耗尽降级续跑（headless/cron 硬停协议不受影响）
+        budgetDegrade: true,
         windowTokens: this.deps.windowTokens ?? 200_000,
         plan: this.deps.plan,
         tasks: service.tasks,

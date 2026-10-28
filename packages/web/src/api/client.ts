@@ -791,6 +791,9 @@ export const api = {
     request<BudgetSetting & { defaults: { maxTokens: number; maxCostUsd: number } }>('GET', '/api/settings/budget'),
   updateBudgetSetting: (patch: { maxTokens?: number | null; maxCostUsd?: number | null }) =>
     request<{ ok: boolean } & BudgetSetting>('PUT', '/api/settings/budget', patch),
+  // 方案 D「追加预算继续」：现有上限乘以 multiply（默认 2），下一轮运行生效
+  extendBudget: (multiply = 2) =>
+    request<{ ok: boolean } & BudgetSetting>('POST', '/api/settings/budget/extend', { multiply }),
 
   // cron（F-22 定时任务面板；F-22b WorkBuddy 化改版）
   cronList: () => request<CronListResponse>('GET', '/api/cron'),

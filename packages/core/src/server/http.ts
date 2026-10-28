@@ -951,6 +951,25 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
+      // ── settings/budget/extend（方案 D「追加预算继续」：现有上限乘以 multiply，下一轮运行生效）──
+      if (parts[0] === 'api' && parts[1] === 'settings' && parts[2] === 'budget' && parts[3] === 'extend' && method === 'POST') {
+        const settingsHome = opts.configHomeDir ?? opts.skillsHomeDir ?? os.homedir();
+        const body = (await readBody(req)) as Record<string, unknown>;
+        const multiply = Number(body.multiply ?? 2);
+        if (!Number.isFinite(multiply) || multiply <= 0 || multiply > 100) {
+          return err(res, 400, 'multiply 必须是 (0, 100] 内的数值');
+        }
+        const cur = readBudgetSetting(settingsHome);
+        const next = writeBudgetSetting(
+          {
+            maxTokens: Math.round((cur.maxTokens ?? DEFAULT_SESSION_BUDGET.maxTokens) * multiply),
+            maxCostUsd: (cur.maxCostUsd ?? DEFAULT_SESSION_BUDGET.maxCostUsd) * multiply,
+          },
+          settingsHome,
+        );
+        return json(res, 200, { ok: true, ...next });
+      }
+
       // ── cron（F-22 定时任务面板：清单/增改删/立即运行；存储与 CLI 共用 ~/.delta/cron.json）──
       if (parts[0] === 'api' && parts[1] === 'cron') {
         const cronHome = opts.cronHomeDir;

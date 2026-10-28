@@ -11,7 +11,7 @@
  */
 import type { AgentEvent, ToolResult, Usage } from '@delta/shared';
 import { fail, type AgentTool, type ToolContext } from '../types.js';
-import { BudgetManager } from '../../context/budget.js';
+import { BudgetManager, DEFAULT_SESSION_BUDGET } from '../../context/budget.js';
 import { PermissionState } from '../permissions.js';
 import { RestrictedRegistry } from '../../engine/roles.js';
 import { runReAct, type RunContext } from '../../engine/react.js';
@@ -36,6 +36,13 @@ export const MAX_SUBAGENT_DEPTH = 1;
 
 export const DEFAULT_SUBAGENT_TURNS = 15;
 export const MAX_SUBAGENT_TURNS = 30;
+
+/**
+ * 单个子代理的 token 预算上限（方案 C）：min(父预算剩余, 60k)。
+ * 子代理超限只终止该子代理（budget_exhausted → "子代理预算耗尽"），父代理继续跑；
+ * 并行派生时父预算按序预留（reserveTokens），保证预留总量不超过父剩余，避免一次并行超卖。
+ */
+export const SUBAGENT_MAX_TOKENS = 60_000;
 
 /** 回填主上下文的摘要上限（与 engine/subtask.ts 口径一致） */
 const SUMMARY_MAX_CHARS = 4_000;
@@ -79,6 +86,33 @@ export const taskTool: AgentTool = {
     if (!prompt) {
       return fail('缺少 prompt 参数：请描述子代理要完成的任务', 'invalid_args');
     }
+    // ── 方案 C：子代理预算 = min(父剩余, 60k)，并行派生按序预留防超卖 ──
+    // 预算校验/预留必须先于委派副作用（delegation 计数、expert_delegate_start），
+    // 预算不足时直接失败，不留下悬挂的成员卡
+    const parentBudget = ctx.subagent.budget;
+    const parentConfig = ctx.subagent.budgetConfig ?? {};
+    let reserved = 0;
+    let childMaxTokens: number;
+    if (parentBudget) {
+      reserved = parentBudget.reserveTokens(SUBAGENT_MAX_TOKENS);
+      if (reserved <= 0) {
+        return fail(
+          `父预算剩余不足，无法派生子代理（剩余 ${parentBudget.remainingTokens()} tokens）`,
+          'subagent_budget_exhausted',
+        );
+      }
+      childMaxTokens = reserved;
+    } else {
+      // 无父预算实例（部分测试/嵌入场景）：仍封顶 60k，费用维度沿用传入配置
+      childMaxTokens = Math.min(parentConfig.maxTokens ?? DEFAULT_SESSION_BUDGET.maxTokens, SUBAGENT_MAX_TOKENS);
+    }
+    const budget = new BudgetManager({
+      ...parentConfig,
+      maxTokens: childMaxTokens,
+      ...(parentBudget
+        ? { maxCostUsd: Math.max(0, parentBudget.config.maxCostUsd - parentBudget.state.usedCostUsd) }
+        : {}),
+    });
     // ── F-39：专家团成员解析（不传 agent 时以下分支全部跳过，行为与历史一致）──
     const agentId = String(args['agent'] ?? '').trim();
     const member = agentId ? ctx.expertTeam?.members.find((m) => m.id === agentId) : undefined;
@@ -133,7 +167,6 @@ export const taskTool: AgentTool = {
       }
     }
     const registry = new RestrictedRegistry(baseRegistry, allow);
-    const budget = new BudgetManager(ctx.subagent.budgetConfig ?? {});
     const parentMode = ctx.permissions?.policy.mode ?? 'default';
     const childCtx: RunContext = {
       sessionId: ctx.sessionId ?? '',
@@ -223,8 +256,9 @@ export const taskTool: AgentTool = {
       error = (err as Error).message;
     }
     if (current) blocks.push(current);
-    // 用量回写父预算：会话级费用口径包含子代理消耗
+    // 用量回写父预算：会话级费用口径包含子代理消耗；随后释放本子代理的配额预留
     ctx.subagent.budget?.record(usageTotal);
+    if (parentBudget && reserved > 0) parentBudget.releaseTokens(reserved);
 
     const emitDone = (status: 'ok' | 'failed' | 'canceled', summary: string): void => {
       if (!member) return;

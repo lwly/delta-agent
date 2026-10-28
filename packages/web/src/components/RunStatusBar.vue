@@ -12,11 +12,13 @@ import { toolLabel } from '../utils/toolNames';
 const emit = defineEmits<{ (e: 'resume'): void }>();
 const chat = useChatStore();
 
-/** 三态推导：运行中 > 已停止（本地标志）> 已暂停；空闲不渲染状态条 */
-const state = computed<'running' | 'stopped' | 'paused' | null>(() => {
+/** 三态推导：运行中 > 已停止（本地标志）> 已暂停 > 预算降级（方案 D）；空闲不渲染状态条 */
+const state = computed<'running' | 'stopped' | 'paused' | 'degraded' | null>(() => {
   if (chat.running) return 'running';
   if (chat.stopped) return 'stopped';
   if (chat.paused) return 'paused';
+  // 方案 D：本轮触发过预算降级续跑 → 提供「追加预算继续」入口（续跑结束后仍可见）
+  if (chat.budgetDegraded) return 'degraded';
   return null;
 });
 
@@ -78,6 +80,7 @@ function onResume() {
     <span class="runbar-text">
       <template v-if="state === 'running'">Agent 运行中<template v-if="latestCall"> · 正在执行第 {{ latestCall.seq }} 步 · 最近工具：{{ toolLabel(latestCall.name) }}</template> · 已执行 {{ executedSteps }} 步工具调用</template>
       <template v-else-if="state === 'paused'">⏸ 已暂停 · 发送消息以继续</template>
+      <template v-else-if="state === 'degraded'">⚠ 预算已耗尽（本轮已降级续跑）· 可追加预算后再继续</template>
       <template v-else>■ 已停止 · 可重新发送任务或从停止点继续（直接输入即可）</template>
     </span>
     <!-- token 口径小字：任一数据源缺失则整段隐藏；胶囊样式与左侧运行状态区隔，避免误读为本轮开销 -->
@@ -94,6 +97,9 @@ function onResume() {
     <button v-if="state === 'running'" class="ctrl pause" type="button" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
     <button v-if="state === 'running'" class="ctrl stop" type="button" title="停止执行（停止后可直接继续输入）" @click="chat.abort()">■ 停止</button>
     <button v-if="state === 'paused'" class="ctrl resume" type="button" title="聚焦输入区，发送消息即继续执行" @click="onResume">▶ 继续</button>
+    <!-- 方案 D：追加预算继续（现有上限 ×2 后自动发送「继续」） -->
+    <button v-if="state === 'degraded'" class="ctrl resume" type="button" title="预算上限 ×2（下一轮生效）并自动继续任务" @click="chat.extendBudgetAndContinue(2)">✚ 追加预算继续</button>
+    <button v-if="state === 'degraded'" class="ctrl extend" type="button" title="预算上限 ×5（下一轮生效）并自动继续任务" @click="chat.extendBudgetAndContinue(5)">×5</button>
   </div>
 </template>
 
@@ -110,6 +116,7 @@ function onResume() {
 .runbar.running .runbar-stripe { background: var(--green); }
 .runbar.paused .runbar-stripe { background: var(--orange); }
 .runbar.stopped .runbar-stripe { background: var(--red); }
+.runbar.degraded .runbar-stripe { background: var(--orange); }
 .runbar-text { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* token 小字：胶囊化与运行状态文案区隔（反馈：紧贴「运行中」易被误读为本轮开销） */
 .runbar-tok {
