@@ -10,7 +10,7 @@
  * 发送语义：fire-and-forget——一切错误静默吞掉（AC-7：通知失败绝不影响主流程）。
  * mac 未签名构建下通知可能被通知中心静默丢弃（签名挂起项）；发送失败静默，无副作用。
  */
-import { Notification, app } from 'electron';
+import { Notification, app, type BrowserWindow } from 'electron';
 import {
   loadNotifyConfig,
   sanitizeBody,
@@ -33,11 +33,30 @@ export interface ElectronNotifierOptions {
 
 export class ElectronNotifier implements Notifier {
   readonly config: NotifyConfig;
+  /** 主窗口引用（main 装配后注入）：用于前台抑制判定 */
+  private win: BrowserWindow | null = null;
 
   constructor(opts: ElectronNotifierOptions = {}) {
     this.config =
       opts.config ??
       loadNotifyConfig({ projectRoot: opts.projectRoot ?? app.getPath('home') }).config;
+  }
+
+  /** main 进程装配完 BrowserWindow 后注入（notifier 创建先于窗口） */
+  setWindow(win: BrowserWindow): void {
+    this.win = win;
+  }
+
+  /**
+   * 前台抑制：窗口可见且聚焦（用户正看着界面）时不再弹系统通知；
+   * 最小化（isVisible=false）或被遮挡（isFocused=false）→ 照常提醒。
+   */
+  private suppressed(): boolean {
+    try {
+      return Boolean(this.win && this.win.isVisible() && this.win.isFocused());
+    } catch {
+      return false;
+    }
   }
 
   /** 任务结束通知：enabled / onDone / minDurationMs 三重判定（D3：只打扰"长任务"） */
@@ -66,9 +85,10 @@ export class ElectronNotifier implements Notifier {
     this.deliver(`${NOTIFY_TITLE} 需要确认`, body);
   }
 
-  /** Electron 原生通知（fire-and-forget；未初始化/失败/无后端均静默） */
+  /** Electron 原生通知（fire-and-forget；未初始化/失败/无后端/前台聚焦均静默） */
   deliver(title: string, body: string): void {
     try {
+      if (this.suppressed()) return;
       if (!Notification.isSupported()) return;
       new Notification({ title, body }).show();
     } catch {

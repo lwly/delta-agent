@@ -15,12 +15,15 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Tray } from 'electron';
 import { createServeRuntime, type ServeRuntime } from '@delta/core';
 import { ElectronNotifier } from './electron-notifier.js';
 
 const APP_ID = 'com.delta.agent';
 const DEV_SERVER_ORIGIN = process.env.DELTA_DESKTOP_DEV_ORIGIN ?? '';
+
+/** 托盘是否可用（bootstrap 内判定）：决定关窗语义（驻留 vs 退出） */
+let trayActive = false;
 
 /** 单实例锁：防双实例并发写 ~/.delta/agent.db（WAL 下读安全、写竞争无收益） */
 if (!app.requestSingleInstanceLock()) {
@@ -58,6 +61,7 @@ function resolveWindowIcon(): string | undefined {
 
 async function bootstrap(): Promise<void> {
   const authToken = crypto.randomBytes(32).toString('hex');
+  const notifier = new ElectronNotifier();
   let runtime: ServeRuntime;
   try {
     runtime = await createServeRuntime({
@@ -65,7 +69,7 @@ async function bootstrap(): Promise<void> {
       authToken,
       webDistDir: resolveWebDistDir(),
       registerProject: false, // 桌面端无 cwd 概念：项目由 UI 创建（POST /api/projects）
-      notify: new ElectronNotifier(),
+      notify: notifier,
       log: (line) => console.log(line),
       logError: (line) => console.error(line),
     });
@@ -100,6 +104,48 @@ async function bootstrap(): Promise<void> {
     void win.loadURL(`http://127.0.0.1:${runtime.port}/?auth=${authToken}`);
   }
 
+  // 前台抑制：notifier 据窗口可见/聚焦状态决定是否弹系统通知（挂后面才提醒）
+  notifier.setWindow(win);
+
+  // ── 托盘驻留（Windows 系统托盘 / macOS 顶部菜单栏）────────────────────────
+  // 反馈：关闭窗口 = 隐藏到托盘（软件不退出），托盘「退出」才真正退出。
+  // 图标缺失（dev 部分形态）时退回旧行为：关窗即退出，避免窗口藏起来无法召回。
+  let quitting = false;
+  const trayIcon = resolveWindowIcon();
+  const showMain = (): void => {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  };
+  const tray = trayIcon ? new Tray(trayIcon) : undefined;
+  if (tray) {
+    trayActive = true;
+    tray.setToolTip('delta-agent');
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: '显示主窗口', click: showMain },
+        { type: 'separator' },
+        {
+          label: '退出',
+          click: () => {
+            quitting = true;
+            app.quit();
+          },
+        },
+      ]),
+    );
+    // Windows 左键单击托盘图标唤起主窗口；macOS 设置了 contextMenu 后 click 即展开菜单
+    if (process.platform !== 'darwin') tray.on('click', showMain);
+  }
+
+  // 关闭窗口 → 隐藏驻留（托盘可召回）；托盘「退出」/ app.quit() 时放行
+  win.on('close', (e) => {
+    if (!quitting && tray) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+
   // 注册项目：渲染进程经桥接请求系统目录选择器（sandbox 开启，渲染侧无 Node 能力）。
   // 仅回传所选绝对路径字符串，不做任何 fs 操作；鉴权沿用 /api 侧（注册仍走 POST /api/projects）。
   ipcMain.handle('dialog:pick-directory', async () => {
@@ -112,12 +158,10 @@ async function bootstrap(): Promise<void> {
   });
 
   app.on('second-instance', () => {
-    if (win.isMinimized()) win.restore();
-    win.focus();
+    showMain();
   });
 
-  // 优雅退出：关 server → 断 MCP → 关 SQLite（desktop v1 全平台关窗即退出，简化 SQLite 生命周期）
-  let quitting = false;
+  // 优雅退出：关 server → 断 MCP → 关 SQLite
   app.on('before-quit', (e) => {
     if (quitting) return;
     quitting = true;
@@ -134,6 +178,9 @@ app.whenReady().then(bootstrap).catch((e) => {
   app.quit();
 });
 
+// 托盘驻留形态：关窗 = 隐藏（win.on('close') 拦截），全部窗口关闭不退出；
+// 真正退出只有两条路：托盘菜单「退出」/ app.quit()（before-quit 负责 dispose 收尾）。
+// 无托盘图标（dev 缺图标）形态保留旧行为：全部窗口关闭即退出，避免窗口藏起来无法召回。
 app.on('window-all-closed', () => {
-  app.quit();
+  if (!trayActive) app.quit();
 });
