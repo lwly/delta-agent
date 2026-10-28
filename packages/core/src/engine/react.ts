@@ -381,6 +381,9 @@ async function* chatStream(
     try {
       for await (const ev of ctx.provider.chat({
         messages: [{ role: 'system', content: systemContent(ctx, turn) }, ...messages],
+        // E-4：静态前缀透传 → Anthropic 在静态/动态边界打 cache_control 断点，
+        // 每轮重复的 8 层系统提示命中前缀缓存（input 计费与延迟双降）
+        systemStatic: ctx.systemPromptParts?.staticText ?? ctx.systemPrompt,
         // 方案 D：降级续跑时禁用 task（子代理派生）工具
         tools: degraded
           ? ctx.registry.definitions().filter((d) => d.name !== 'task')

@@ -13,6 +13,7 @@ import type {
 import {
   BudgetManager,
   ExpertStore,
+  ModelRouter,
   defaultModelFor,
   readExpertsConfig,
   isTrusted,
@@ -68,6 +69,23 @@ interface Item {
 
 /** F-36 运行状态行 spinner 的盲文字符帧（80ms/帧） */
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/**
+ * E-1 子代理模型路由（TUI 侧）：命中 F-32 routing 的 subagent 规则且
+ * 目标 provider 未指定 / 与当前一致时返回小模型，否则回退会话主模型。
+ * 每次运行即时读取（settings/models.json 修改后下一轮生效，与 hub 语义一致）。
+ */
+function subagentRoutedModel(provider: { id: string }, sessionModel?: string | null): string {
+  try {
+    const route = new ModelRouter().resolve('subagent');
+    if (route && (route.provider === undefined || route.provider === provider.id)) {
+      return route.model;
+    }
+  } catch {
+    // 配置缺失/损坏 → 回退主模型
+  }
+  return sessionModel || defaultModelFor(provider.id);
+}
 
 /** F-36 运行状态行动画帧（active 时启动 interval，停止即静止）。 */
 function useSpinnerFrame(active: boolean): string {
@@ -369,7 +387,9 @@ export function App(props: AppOptions) {
           },
           subagent: {
             provider: props.provider,
-            model: props.session.model || defaultModelFor(props.provider.id),
+            // E-1 子代理模型路由：命中 subagent 规则且目标为同 provider（或未指定 provider）时用小模型，
+            // 跨 provider 规则 TUI 侧无法构建第二 Provider，回退会话主模型
+            model: subagentRoutedModel(props.provider, props.session.model),
             budget: budgetRef.current,
             budgetConfig: budgetRef.current.config,
             windowTokens: 200_000,
@@ -379,6 +399,9 @@ export function App(props: AppOptions) {
           hooks: props.hooks,
         },
         budget: budgetRef.current,
+        // 预算耗尽降级续跑（方案 D）：TUI 与 Web 同语义——停用子代理、输出限长、主循环收敛；
+        // headless（delta run）保持硬停退出码 4 协议不变
+        budgetDegrade: true,
         windowTokens: 200_000,
         // F-14 强制路由：/plan（强制规划）/ /direct（强制直达）一次性覆盖，缺省走自动检测
         plan: runForce ? { force: runForce } : undefined,
@@ -533,6 +556,10 @@ export function App(props: AppOptions) {
               break;
             case 'budget_exhausted':
               addItem({ kind: 'system', text: e.summary });
+              break;
+            case 'budget_degraded':
+              // 方案 D：TUI 与 Web 同语义——降级续跑（子代理停用、输出限长），任务不会因此终止
+              addItem({ kind: 'system', text: `⚠ ${e.summary}\n（可直接继续输入；到 Web 控制台可「追加预算继续」）` });
               break;
             // ── M5: Plan DAG / Worker Pool / Reviewer 事件 ──
             case 'plan_created': {

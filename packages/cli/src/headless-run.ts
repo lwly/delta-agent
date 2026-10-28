@@ -17,6 +17,7 @@ import {
   defaultModelFor,
   GitIntegration,
   McpManager,
+  ModelRouter,
   PermissionState,
   SessionService,
   ToolRegistry,
@@ -171,6 +172,22 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     opts.maxCost ? { maxCostUsd: Number(opts.maxCost) || 0.7 } : {},
   );
 
+  // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型；
+  // 目标 provider 构建失败 / 规则缺失 → 回退主模型（预算/用量仍回写任务预算，口径不变）
+  let subProvider = provider;
+  let subModel = model;
+  try {
+    const r = new ModelRouter().resolve('subagent');
+    if (r) {
+      if (r.provider) {
+        subProvider = await resolveProviderFromEnv(r.provider);
+      }
+      subModel = r.model;
+    }
+  } catch {
+    // 回退主模型
+  }
+
   // F-27 Hook 系统：加载用户级 + 项目级 hooks.json
   const hooks = HookManager.load(cwd);
 
@@ -206,8 +223,8 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写任务预算）
       registry,
       subagent: {
-        provider,
-        model,
+        provider: subProvider,
+        model: subModel,
         budget,
         budgetConfig: budget.config,
         windowTokens: 200_000,

@@ -585,6 +585,11 @@ export class SessionHub {
       // 会话预算：优先 settings 解析器（设置页可改，下一轮生效），缺省默认 200k / $0.7
       const budget = new BudgetManager(this.deps.resolveBudgetConfig?.() ?? {});
 
+      // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型（省 token）；
+      // 规则缺失 / 目标 provider 不可用 → 回退会话主模型（与 routeAux 降级语义一致）
+      const subRoute = await this.routeAux('subagent');
+      const subagentModel = subRoute?.model ?? session.model ?? '';
+
       // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
       // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）
       const expert: ExpertRecord | undefined = session.expert
@@ -683,8 +688,8 @@ export class SessionHub {
           // F-39：委派事件透传 SSE（Web 成员卡 / CLI 单行）
           emit: (ev) => this.publish(sessionId, ev),
           subagent: {
-            provider,
-            model: session.model || this.deps.defaultModel || defaultModelFor(provider.id),
+            provider: subRoute?.provider ?? provider,
+            model: subagentModel || session.model || this.deps.defaultModel || defaultModelFor(provider.id),
             budget,
             budgetConfig: budget.config,
             windowTokens: this.deps.windowTokens ?? 200_000,

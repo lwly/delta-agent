@@ -7,6 +7,12 @@ export const TOOL_RESULT_FOLD_LIMIT = 4000;
 export const SAFETY_RESERVE_TOKENS = 1024;
 /** Turns (user -> assistant exchanges) kept verbatim. */
 export const KEEP_TURNS = 6;
+/**
+ * 压缩触发比例（E-2：80% → 65%）。
+ * 更早触发压缩可显著降低"上下文重发"的 token 消耗（长会话最大浪费源）；
+ * 目标压缩后占用仍为窗口 55%，单次压缩比相应变大。
+ */
+export const COMPACT_TRIGGER_RATIO = 0.65;
 
 export interface CompactionResult {
   messages: ChatMessage[];
@@ -83,11 +89,11 @@ export function foldToolResults(messages: ChatMessage[]): ChatMessage[] {
 }
 
 /**
- * Compact trigger check.
+ * Compact trigger check (E-2: 65% trigger / 55% target).
  */
 export function shouldCompact(messages: ChatMessage[], deps: CompressorDeps): boolean {
   const used = estimateMessagesTokens(messages);
-  return used >= deps.windowTokens * 0.8 - SAFETY_RESERVE_TOKENS;
+  return used >= deps.windowTokens * COMPACT_TRIGGER_RATIO - SAFETY_RESERVE_TOKENS;
 }
 
 /**

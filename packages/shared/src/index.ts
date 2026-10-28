@@ -135,6 +135,12 @@ export interface ChatRequest {
   maxTokens?: number;
   temperature?: number;
   signal?: AbortSignal;
+  /**
+   * E-4 prompt caching：系统提示的静态前缀（跨轮稳定可缓存段，M3 静态/动态分段）。
+   * Provider 据此在静态/动态边界打缓存断点（Anthropic cache_control；
+   * OpenAI 兼容网关的自动前缀缓存无需此字段）。缺省 = 整条系统消息视作可缓存。
+   */
+  systemStatic?: string;
 }
 
 export interface ToolDefinition {

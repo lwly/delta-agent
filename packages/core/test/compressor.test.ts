@@ -63,11 +63,15 @@ describe('foldToolResults', () => {
 });
 
 describe('shouldCompact', () => {
-  // latin: 3 chars ≈ 1 token → 7000 chars ≈ 2334 tokens
-  const deps4k: CompressorDeps = { ...deps, windowTokens: 4000 }; // threshold 4000*0.8-1024 = 2176
-  it('triggers at 80% of window minus reserve', () => {
-    const messages: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(7000), tokens: 2334 }];
+  // latin: 3 chars ≈ 1 token → 5000 chars ≈ 1667 tokens
+  const deps4k: CompressorDeps = { ...deps, windowTokens: 4000 }; // threshold 4000*0.65-1024 = 1576（E-2：65% 触发）
+  it('triggers at 65% of window minus reserve', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(5000), tokens: 1667 }];
     expect(shouldCompact(messages, deps4k)).toBe(true);
+  });
+  it('does not trigger below 65% of window', () => {
+    const messages: ChatMessage[] = [{ role: 'user', content: 'a'.repeat(3000), tokens: 1000 }];
+    expect(shouldCompact(messages, deps4k)).toBe(false);
   });
   it('does not trigger for small contexts', () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'hello', tokens: 10 }];

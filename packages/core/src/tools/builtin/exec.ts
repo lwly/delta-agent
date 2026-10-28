@@ -6,7 +6,8 @@ import { runWithShell } from '../../engine/shell.js';
 import type { SandboxMeta } from '../../sandbox/types.js';
 
 export const DEFAULT_CMD_TIMEOUT_MS = 120_000;
-export const MAX_CMD_OUTPUT = 20_000;
+/** E-3：stdout 截断收紧（20k → 10k 字符 ≈ 3.3k tokens）。大输出应重定向落文件后用 read_file 分段读。 */
+export const MAX_CMD_OUTPUT = 10_000;
 
 export interface ShellResult {
   code: number | null;

@@ -8,7 +8,7 @@
 import { loadModelsFile, modelsConfigPath, type RoutingConfig, type RoutingRule } from './keychain.js';
 
 /** 已知任务类型（未覆盖的辅助调用可按需扩展，自定义 kind 同样可配） */
-export const KNOWN_TASK_KINDS = ['distill', 'classify', 'summarize'] as const;
+export const KNOWN_TASK_KINDS = ['distill', 'classify', 'summarize', 'subagent'] as const;
 
 export type RoutingTaskKind = (typeof KNOWN_TASK_KINDS)[number] | (string & {});
 

@@ -73,7 +73,7 @@ export class AnthropicProvider implements LLMProvider {
       stream: true,
       messages: converted,
     };
-    if (system) body.system = system;
+    if (system) body.system = splitSystemForCache(system, req.systemStatic);
     if (req.temperature !== undefined) body.temperature = req.temperature;
     if (req.tools.length > 0) body.tools = convertTools(req.tools);
 
@@ -181,6 +181,23 @@ function convertTools(tools: ToolDefinition[]): unknown[] {
     description: t.description,
     input_schema: t.parameters,
   }));
+}
+
+/**
+ * E-4 prompt caching：把系统消息拆为 [静态(打 cache_control 断点), 动态] 两个 text 块。
+ * 静态段（8 层提示词的 identity/environment/project/tools 等）跨轮稳定，命中 Anthropic
+ * 前缀缓存后按 ~0.1× 计费；动态段（时间戳/记忆召回/模式段）每轮变化，置于断点之后不破坏缓存。
+ * systemStatic 缺失或不是 system 前缀时（防御）：整串打断点退化为单块缓存。
+ */
+export function splitSystemForCache(system: string, systemStatic?: string): unknown[] {
+  const stat = systemStatic?.trim();
+  if (stat && stat.length > 0 && system.startsWith(stat)) {
+    const rest = system.slice(stat.length).replace(/^\n+/, '');
+    const blocks: unknown[] = [{ type: 'text', text: stat, cache_control: { type: 'ephemeral' } }];
+    if (rest) blocks.push({ type: 'text', text: rest });
+    return blocks;
+  }
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
 }
 
 /** Map unified messages to Anthropic content blocks. (exported for tests) */
