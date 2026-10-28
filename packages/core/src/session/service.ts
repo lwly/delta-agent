@@ -185,6 +185,14 @@ export class SessionService {
     return this.store.getMessages(sessionId);
   }
 
+  /**
+   * F-46 会话分叉（copy-on-write）：把 [0, afterIndex) 消息前缀复制到新会话。
+   * 分叉点必须是 user 消息（其内容作为新会话首条输入，重跑由调用方触发）。
+   */
+  forkSession(sessionId: string, afterIndex: number): SessionRow {
+    return this.store.forkSession(sessionId, { afterIndex });
+  }
+
   // ── F-18 会话回放（按 user 消息切分任务边界）─────────────────────────────
 
   getMessagesDetailed(sessionId: string): Array<{ message: ChatMessage; at: string }> {

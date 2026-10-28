@@ -765,6 +765,30 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const ok = hub.pause(sessionId);
           return ok ? json(res, 200, { ok: true }) : err(res, 409, '会话未在执行中，无需暂停');
         }
+        // F-46 会话分叉：copy-on-write 复制 [0, after_index) 前缀 → 新会话（标题带「· 分叉」）；
+        // 可选 run=true 立即以 content（缺省 = 分叉点消息原文）触发重跑（SSE 订阅新 session_id 即可）
+        if (method === 'POST' && parts[3] === 'fork') {
+          const body = await readBody(req);
+          const afterIndex = Number(body.after_index);
+          if (!Number.isInteger(afterIndex) || afterIndex < 0) return err(res, 400, 'after_index 非法（非负整数）');
+          if (hub.isRunning(sessionId)) return err(res, 409, '会话运行中，请先停止再分叉');
+          let forked;
+          try {
+            forked = service.forkSession(sessionId, afterIndex);
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
+          }
+          const sourceMessages = service.getHistory(sessionId);
+          const content = body.content !== undefined ? String(body.content) : sourceMessages[afterIndex]?.content ?? '';
+          if (body.run === false || !content.trim()) {
+            return json(res, 200, { ok: true, session_id: forked.id, run: false });
+          }
+          // 自动重跑：与普通发送同链路；失败经 run_error 事件收尾，不阻塞响应
+          void hub.send(forked.id, content).catch((e) => {
+            console.error('[hub] fork rerun crashed before run_error publish:', (e as Error).message);
+          });
+          return json(res, 200, { ok: true, session_id: forked.id, run: true });
+        }
         if (method === 'POST' && parts[3] === 'confirm') {
           const body = await readBody(req);
           const ok = hub.confirm(String(body.requestId ?? ''), body.decision as ConfirmDecision);

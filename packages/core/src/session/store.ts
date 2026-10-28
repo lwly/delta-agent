@@ -351,6 +351,48 @@ export class SessionStore {
     return rows.map((r) => ({ message: JSON.parse(r.content_json) as ChatMessage, at: r.created_at }));
   }
 
+  /**
+   * F-46 会话分叉（copy-on-write）：把 [0, afterIndex) 的消息前缀深复制到新会话，原会话只读不动。
+   * 分叉点必须是 user 消息（其内容作为新会话的首条输入，由调用方触发重跑）。
+   * 模式/模型/专家绑定继承源会话；预算/权限/todos/usage 为新会话初始值（重跑语义）。
+   * 新会话标题带「· 分叉」后缀（侧栏来源标注，AC-46-3）；FTS 由 SearchStore 懒回填覆盖。
+   */
+  forkSession(sessionId: string, opts: { afterIndex: number }): SessionRow {
+    const src = this.getSession(sessionId);
+    if (!src) throw new Error('session not found');
+    const messages = this.getMessages(sessionId);
+    const afterIndex = opts.afterIndex;
+    if (!Number.isInteger(afterIndex) || afterIndex < 0 || afterIndex > messages.length) {
+      throw new Error(`分叉点越界：after_index=${afterIndex}（消息数 ${messages.length}）`);
+    }
+    if (afterIndex >= messages.length || messages[afterIndex]!.role !== 'user') {
+      throw new Error('分叉点必须是 user 消息（从此重跑语义）');
+    }
+    const forked = this.createSession({
+      id: crypto.randomUUID(),
+      projectId: src.project_id,
+      title: `${src.title} · 分叉`,
+      mode: src.mode,
+      model: src.model,
+      expert: src.expert,
+      expertType: (src.expert_type as 'agent' | 'team' | null) ?? null,
+    });
+    const prefix = messages.slice(0, afterIndex);
+    const now = new Date().toISOString();
+    const insert = this.db.prepare(
+      'INSERT INTO messages (session_id, seq, role, content_json, tokens, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    const tx = this.db.transaction(() => {
+      prefix.forEach((m, seq) => {
+        // content_json 原样复制（保留 images/toolCalls 等全部字段），seq 重排
+        insert.run(forked.id, seq, m.role, JSON.stringify(m), Math.max(0, m.tokens ?? 0), now);
+      });
+      this.touchSession(forked.id, {});
+    });
+    tx();
+    return this.getSession(forked.id)!;
+  }
+
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void {
     this.db
       .prepare('INSERT INTO compactions (session_id, before_tokens, after_tokens, summary_json, created_at) VALUES (?, ?, ?, ?, ?)')

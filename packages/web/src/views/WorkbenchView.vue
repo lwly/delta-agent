@@ -871,17 +871,36 @@ function cancelEdit() {
   editingIdx.value = -1;
   editText.value = '';
 }
-/** 保存编辑并重发（作为一条新的用户消息发送） */
+/** 保存编辑并重发（F-46 分叉截断语义：以编辑内容在分叉新会话重跑，原会话只读不动） */
 async function resendEdit() {
   const text = editText.value.trim();
-  if (!text || chat.running) return;
+  const idx = editingIdx.value;
+  if (!text || chat.running || !chat.sessionId || idx < 0) return;
   cancelEdit();
-  await chat.send(text);
+  try {
+    const r = await api.forkSession(chat.sessionId, idx, { content: text, run: true });
+    if (ws.activeProjectId) await ws.selectProject(ws.activeProjectId);
+    await openSession(r.session_id);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
 }
 /** 原样重发该消息 */
 async function resend(m: { content: string }) {
   if (chat.running || !m.content.trim()) return;
   await chat.send(m.content);
+}
+
+/** F-46 从此重跑：分叉新会话（复制该消息之前的历史，标题带「· 分叉」），以该消息内容自动重跑 */
+async function forkFrom(i: number) {
+  if (chat.running || !chat.sessionId) return;
+  try {
+    const r = await api.forkSession(chat.sessionId, i, { run: true });
+    if (ws.activeProjectId) await ws.selectProject(ws.activeProjectId); // 侧栏纳入分叉会话
+    await openSession(r.session_id); // 订阅新会话 SSE，重跑流式可见
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
 }
 
 async function submit() {
@@ -1313,6 +1332,7 @@ watch(
                       <button class="uop ico" title="复制原文" @click="copyText(m.content)">📋</button>
                       <button class="uop ico" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">✏️</button>
                       <button class="uop ico" title="原样重发" :disabled="chat.running" @click="resend(m)">🔁</button>
+                      <button class="uop ico" title="从此重跑（分叉新会话，原会话不动）" :disabled="chat.running" @click="forkFrom(i)">🔀</button>
                     </div>
                   </div>
                 </div>

@@ -707,6 +707,12 @@ export const api = {
   exportExpertUrl: (name: string) => `/api/experts/${encodeURIComponent(name)}/export${authQuery()}`,
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
+  // F-46 会话分叉：copy-on-write 复制 [0, after_index) 前缀 → 新会话；run=true 以 content 触发重跑
+  forkSession: (id: string, afterIndex: number, opts?: { content?: string; run?: boolean }) =>
+    request<{ ok: boolean; session_id: string; run: boolean }>('POST', `/api/sessions/${id}/fork`, {
+      after_index: afterIndex,
+      ...opts,
+    }),
   removeSession: (id: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/sessions/${id}?hard=${hard}`),
   // PASI-9：暂停执行中的会话（中止本轮 + 状态落库 paused；发消息即恢复）
