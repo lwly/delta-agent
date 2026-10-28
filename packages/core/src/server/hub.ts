@@ -53,6 +53,7 @@ import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
 import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
 import { FILES, projectConfigDir } from '../paths.js';
+import type { RunLogSink, LogLevel } from '../logging/logger.js';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 
@@ -101,6 +102,8 @@ export interface SessionHubDeps {
   resolveBudgetConfig?: () => Partial<BudgetConfig>;
   /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
   notify?: Notifier;
+  /** F-41 运行日志 sink（缺省不记录；serve 运行时注入 RunLog，埋点见 design-f41 §4） */
+  runLog?: RunLogSink;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -324,6 +327,15 @@ export class SessionHub {
     }
   }
 
+  /** F-41 运行日志埋点（旁路；RunLog 内部已静默，这里再防宿主注入对象抛错） */
+  private log(level: LogLevel, message: string, sessionId?: string): void {
+    try {
+      this.deps.runLog?.append(level, 'hub', message, sessionId);
+    } catch {
+      // 日志失败不影响主流程
+    }
+  }
+
   // ── 确认 / 提问回填 ─────────────────────────────────────────────────────
 
   /** 创建挂在 waiters 表上的决策等待（超时 / abort 自动收尾，见 createDecisionWaiter）。 */
@@ -527,6 +539,8 @@ export class SessionHub {
 
     this.running.set(sessionId, { ac: new AbortController(), startedAt: Date.now() });
     this.publish(sessionId, { type: 'state', running: true, paused: false });
+    // F-41：任务开始（输入截断 200 字符，design-f41 §4）
+    this.log('info', `任务开始：${input.slice(0, 200)}`, sessionId);
 
     const service = this.deps.service;
     const startedAt = Date.now(); // F-33：任务时长门槛判定基准
@@ -767,6 +781,8 @@ export class SessionHub {
             // 保证历史中 assistant.tool_calls 与紧随的 tool 消息一一对应（网关强校验）
             saveTurnAssistant();
             answeredCalls.add(ev.result.callId);
+            // F-41：工具调用过程行
+            this.log('info', `工具 ${ev.call.name} ${ev.result.ok ? '✔' : '✘'}（${ev.ms}ms）`, sessionId);
             service.appendMessage(sessionId, {
               role: 'tool',
               content: ev.result.content,
@@ -774,6 +790,10 @@ export class SessionHub {
             });
             break;
           }
+          case 'error':
+            // F-41：引擎致命错误留痕（非致命错误引擎自愈，不刷日志）
+            if (ev.fatal) this.log('error', ev.message, sessionId);
+            break;
           case 'usage': {
             // F-31：逐轮落库（每条 usage 事件一行；子代理用量事件同样计入，口径 = usage 行数）
             usageTurn++;
@@ -832,6 +852,7 @@ export class SessionHub {
     } catch (e) {
       runError = (e as Error).message;
       this.publish(sessionId, { type: 'run_error', message: (e as Error).message });
+      this.log('error', `任务异常：${(e as Error).message}`, sessionId);
       // 中断/异常时保留本轮已产出的文本与调用，并为未响应的调用补齐占位 tool 消息
       //（此前直接丢弃 calls 丢失上下文；不补齐则 assistant.tool_calls 悬空，下轮请求被网关 400）
       saveTurnAssistant();
@@ -839,6 +860,12 @@ export class SessionHub {
     } finally {
       this.running.delete(sessionId);      this.deps.service.unregisterRun(sessionId);
       this.publish(sessionId, { type: 'state', running: false });
+      // F-41：任务结束留痕（中止 warn / 完成 info；异常已在 catch 记录，此处不再重复）
+      const durationMs = Date.now() - startedAt;
+      if (!runError) {
+        if (acRef?.signal.aborted) this.log('warn', `任务被中止（${durationMs}ms）`, sessionId);
+        else this.log('info', `任务完成（${durationMs}ms）`, sessionId);
+      }
       // F-33 桌面通知：任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定）
       try {
         this.deps.notify?.notifyDone({

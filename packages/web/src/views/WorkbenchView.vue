@@ -1107,6 +1107,8 @@ watch(
       <div class="side-section">
         <nav class="side-nav">
           <router-link class="nav-item" to="/cron"><span class="ni-ico">⏰</span>定时任务</router-link>
+          <!-- F-41 运行日志（/logs 子路由；serve 内存环形缓冲 + SSE 实时） -->
+          <router-link class="nav-item" to="/logs"><span class="ni-ico">📜</span>运行日志</router-link>
         </nav>
         <div class="sidebar-actions">
           <button class="btn-sm" @click="showNewProject = true">＋ 新项目</button>

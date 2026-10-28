@@ -63,6 +63,8 @@ export const FILES = {
   expertsConfig: 'experts.json',
   /** 评测集目录 */
   evalsDir: 'evals',
+  /** F-41 运行日志目录（serve-YYYYMMDD.log / runs/） */
+  logsDir: 'logs',
 } as const;
 
 /** Docker 容器 label 键：用于识别本应用创建的沙箱容器（GC / 清理） */

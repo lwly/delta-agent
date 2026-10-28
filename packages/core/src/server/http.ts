@@ -38,6 +38,8 @@ import {
   findCronJob,
 } from '../cron/store.js';
 import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
+// F-41 运行日志（/api/logs 尾读 + /api/logs/stream 实时推送）
+import type { RunLog } from '../logging/logger.js';
 // F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
 import { handleBrowseRoute, type BrowseDeps } from './browse-routes.js';
 // F-39 专家库路由（5 端点；分发在静态托管分支之前）
@@ -79,6 +81,11 @@ export interface ServeOptions {
    * 测试注入以避免真的弹出系统窗口。
    */
   browseReveal?: (absPath: string, isDir: boolean) => void;
+  /**
+   * F-41 运行日志（serve 运行时注入）。缺省不提供：
+   * GET /api/logs 与 GET /api/logs/stream 返回 404（能力未装配口径，对齐 cronExecutor）。
+   */
+  runLog?: RunLog;
   /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
@@ -271,6 +278,35 @@ export function createWebServer(opts: ServeOptions): http.Server {
       if (parts[0] === 'api' && (parts[1] === 'sessions' || parts[1] === 'projects') && parts[3] === 'browse') {
         const out = await handleBrowseRoute({ method, parts, url, req, service, browseDeps });
         if (out) return json(res, out.status, out.body);
+      }
+
+      // ── F-41 运行日志（尾读 + SSE 实时；runLog 未装配时 404）──────────────
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && !opts.runLog) {
+        return err(res, 404, 'run log not configured');
+      }
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && parts.length === 2 && opts.runLog) {
+        const limit = Number(url.searchParams.get('limit'));
+        return json(res, 200, { items: opts.runLog.tail(Number.isFinite(limit) && limit > 0 ? limit : 200) });
+      }
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && parts[2] === 'stream' && parts.length === 3 && opts.runLog) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        // 连入即补发当前尾部（对齐 sessions/events 的「连入先发状态帧」惯例）
+        for (const e of opts.runLog.tail(200)) {
+          res.write(`data: ${JSON.stringify(e)}\n\n`);
+        }
+        const unsub = opts.runLog.subscribe((e) => {
+          res.write(`data: ${JSON.stringify(e)}\n\n`);
+        });
+        const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+        req.on('close', () => {
+          clearInterval(ping);
+          unsub();
+        });
+        return;
       }
 
       // ── projects ──────────────────────────────────────────────────────────
@@ -1081,6 +1117,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
               onlyJobId: job.id,
               trigger: 'manual',
               homeDir: cronHome,
+              // F-41：调度过程行（到期/跳过/结果）落运行日志（Web 日志页可见）
+              ...(opts.runLog
+                ? { logger: (line: string) => opts.runLog!.append('info', 'cron', line) }
+                : {}),
             }).catch(() => undefined);
             return json(res, 202, { ok: true, running: true });
           }

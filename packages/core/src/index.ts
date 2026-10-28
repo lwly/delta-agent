@@ -405,6 +405,16 @@ export {
   type ServeRuntimeOptions,
 } from './server/runtime.js';
 
+// F-41 运行日志
+export {
+  RunLog,
+  createRunFileLogger,
+  type LogEntry,
+  type LogLevel,
+  type RunLogOptions,
+  type RunLogSink,
+} from './logging/logger.js';
+
 export {
   discoverSkills,
   defaultBuiltinSkillsDir,

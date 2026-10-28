@@ -633,6 +633,16 @@ export interface DiffResponse {
   head_missing?: boolean;
 }
 
+// ── F-41 运行日志（GET /api/logs 尾读；SSE 走 api/sse.ts subscribeLogs）──────
+
+export interface LogEntryView {
+  ts: string;
+  level: 'info' | 'warn' | 'error';
+  source: string;
+  sessionId?: string;
+  message: string;
+}
+
 /** browse 端点的作用域前缀（session 主 / project 回落） */
 const browseBase = (scope: BrowseScope): string =>
   scope.kind === 'session' ? `/api/sessions/${scope.id}` : `/api/projects/${scope.id}`;
@@ -809,6 +819,9 @@ export const api = {
   cronUpdate: (id: string, patch: CronJobPatch) => request<CronJobView>('PATCH', `/api/cron/${id}`, patch),
   cronRemove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/cron/${id}`),
   cronRun: (id: string) => request<{ ok: boolean; running: boolean }>('POST', `/api/cron/${id}/run`),
+
+  // F-41 运行日志（尾读；实时流走 subscribeLogs）
+  logsTail: (limit = 200) => request<{ items: LogEntryView[] }>('GET', `/api/logs?limit=${limit}`),
 
   // skills / mcp 配置中心（设置页面板）
   skillDetails: (projectId?: string) =>

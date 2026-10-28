@@ -11,10 +11,13 @@
  *   0 成功 / 1 配置参数错误 / 2 引擎致命错误 / 3 达最大轮次 / 4 预算耗尽 / 5 SIGINT 中断
  */
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   autoOnboardProject,
   BudgetManager,
+  createRunFileLogger,
   defaultModelFor,
+  FILES,
   GitIntegration,
   McpManager,
   ModelRouter,
@@ -34,6 +37,7 @@ import {
   runReAct,
   modeSegment,
   createDesktopNotifier,
+  userConfigDir,
   type AgentEvent,
   type ChatMessage,
   type EngineMode,
@@ -249,6 +253,16 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
 
   // 进度输出：文本流到 stdout（人类模式）；工具/系统行到 stderr（两模式都有）
   let streamed = false;
+
+  // F-41 运行日志留档：~/.delta/logs/runs/<YYYYMMDD-HHmmss>-<sessionId8>.log
+  // （cron spawn 子进程即 delta run，自动获得同一份留档；写入失败静默，不影响主流程）
+  const stamp = new Date();
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const runLogName = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}-${session.id.slice(0, 8)}.log`;
+  const runLogFile = createRunFileLogger(path.join(userConfigDir(), FILES.logsDir, 'runs'), runLogName);
+  runLogFile.log(`# delta run 留档  ${stamp.toISOString()}`);
+  runLogFile.log(`# 任务：${task}`);
+  runLogFile.log(`# 模式：${engineMode}  会话：${session.id}`);
   const onEvent = (ev: AgentEvent) => {
     if (!opts.json && ev.type === 'text_delta') {
       process.stdout.write(ev.text);
@@ -258,15 +272,20 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     if (ev.type === 'tool_call_start') {
       const args = ev.call.args ?? {};
       const brief = JSON.stringify(args);
+      runLogFile.log(`⚙ ${ev.call.name}${brief.length > 160 ? ` ${brief.slice(0, 160)}…` : ` ${brief}`}`);
       console.error(`⚙ ${ev.call.name}${brief.length > 160 ? ` ${brief.slice(0, 160)}…` : ` ${brief}`}`);
     } else if (ev.type === 'tool_result') {
+      runLogFile.log(`${ev.result.ok ? '✔' : '✘'} ${ev.call.name}（${ev.ms}ms）`);
       console.error(`${ev.result.ok ? '✔' : '✘'} ${ev.call.name}（${ev.ms}ms）`);
     } else if (ev.type === 'budget_alert') {
-      console.error(
-        `⚠ 预算告警：${(ev.level * 100).toFixed(0)}%（token ${(ev.usedTokenPct * 100).toFixed(0)}% / 费用 ${(ev.usedCostPct * 100).toFixed(0)}%）`,
-      );
+      const line = `⚠ 预算告警：${(ev.level * 100).toFixed(0)}%（token ${(ev.usedTokenPct * 100).toFixed(0)}% / 费用 ${(ev.usedCostPct * 100).toFixed(0)}%）`;
+      runLogFile.log(line);
+      console.error(line);
     } else if (ev.type === 'compact_done') {
+      runLogFile.log(`🗜 上下文压缩：${ev.beforeTokens} → ${ev.afterTokens} tokens`);
       console.error(`🗜 上下文压缩：${ev.beforeTokens} → ${ev.afterTokens} tokens`);
+    } else if (ev.type === 'error') {
+      runLogFile.log(`${ev.fatal ? '✘' : '⚠'} 引擎错误：${ev.message}`);
     }
   };
 
@@ -288,6 +307,14 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     task,
     images,
   );
+
+  // F-41：结束状态留档
+  runLogFile.log(`# 结束：${outcome.status}（轮次 ${outcome.turns}，${outcome.durationMs}ms）`);
+  runLogFile.log(
+    `# 用量：in ${outcome.usage.inputTokens} / out ${outcome.usage.outputTokens} / $${outcome.usage.costUsd.toFixed(4)}`,
+  );
+  if (outcome.error) runLogFile.log(`# 错误：${outcome.error}`);
+  runLogFile.log(`# 工具调用 ${outcome.toolCalls.length} 次，留档文件：${runLogFile.path}`);
 
   // F-33 桌面通知：长任务结束（旁路 fire-and-forget；enabled/onDone/minDurationMs 在 notifier 内判定；
   // detached spawn 使本进程退出后子进程仍可完成弹窗，CI 无桌面环境时发送失败静默）

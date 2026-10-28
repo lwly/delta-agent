@@ -11,7 +11,11 @@ export const router = createRouter({
       path: '/',
       name: 'workbench',
       component: () => import('./views/WorkbenchView.vue'),
-      children: [{ path: 'cron', name: 'cron', component: () => import('./views/CronView.vue') }],
+      children: [
+        { path: 'cron', name: 'cron', component: () => import('./views/CronView.vue') },
+        // F-41 运行日志页（工作台子路由，对齐 /cron 模式）
+        { path: 'logs', name: 'logs', component: () => import('./views/LogsView.vue') },
+      ],
     },
     { path: '/projects', redirect: '/' },
     { path: '/chat/:sessionId', redirect: '/' },

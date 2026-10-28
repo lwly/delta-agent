@@ -12,6 +12,7 @@
  *    由宿主显式决定（v1 缺省不传 → Web 面板「立即运行」返回 400）、authToken 必配。
  */
 import * as http from 'node:http';
+import * as path from 'node:path';
 import { HookManager } from '../hooks/manager.js';
 import { McpManager, loadMcpConfig } from '../mcp/client.js';
 import { ModelRouter } from '../llm/router.js';
@@ -24,6 +25,8 @@ import { createSkillRuntime, SessionHub } from './hub.js';
 import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
+import { RunLog } from '../logging/logger.js';
+import { userConfigDir, FILES } from '../paths.js';
 import type { CronExecutor } from '../cron/runner.js';
 
 export interface ServeRuntimeOptions {
@@ -55,6 +58,11 @@ export interface ServeRuntimeOptions {
   logError?: (line: string) => void;
   /** F-22 cron.json 存储目录（缺省用户主目录；透传 createWebServer） */
   cronHomeDir?: string;
+  /**
+   * F-41 运行日志（缺省自建：落盘 `~/.delta/logs/serve-YYYYMMDD.log`）。
+   * 测试 / 桌面宿主可注入隔离目录的实例；不落盘场景传 `new RunLog()`。
+   */
+  runLog?: RunLog;
 }
 
 export interface ServeRuntime {
@@ -69,8 +77,17 @@ export interface ServeRuntime {
  * 组装并启动 serve 运行时。解析完成（server 已 listen）后 resolve。
  */
 export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promise<ServeRuntime> {
-  const log = opts.log ?? ((line: string) => console.log(line));
-  const logError = opts.logError ?? ((line: string) => console.error(line));
+  // F-41 运行日志：缺省落盘 ~/.delta/logs/serve-YYYYMMDD.log（构造时清理过期文件）
+  const runLog = opts.runLog ?? new RunLog({ dir: path.join(userConfigDir(), FILES.logsDir) });
+  // log/logError 升级为 tee：console 照旧 + 落盘（MCP/onboarding 等既有调用点零改动即获得留盘）
+  const log = (line: string): void => {
+    runLog.append('info', 'serve', line);
+    (opts.log ?? ((l: string) => console.log(l)))(line);
+  };
+  const logError = (line: string): void => {
+    runLog.append('error', 'serve', line);
+    (opts.logError ?? ((l: string) => console.error(l)))(line);
+  };
   const projectRoot = opts.projectRoot;
 
   const service = new SessionService(opts.dbPath);
@@ -130,6 +147,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     hooks,
     // F-33 桌面通知：任务结束 / 确认卡出现时系统级通知（旁路 fire-and-forget）
     notify: opts.notify ?? noopNotifier,
+    // F-41 运行日志：hub 埋点（任务开始/工具调用/完成/异常）
+    runLog,
   });
 
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
@@ -143,6 +162,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     ...(opts.cronExecutor !== undefined ? { cronExecutor: opts.cronExecutor } : {}),
     ...(opts.authToken !== undefined ? { authToken: opts.authToken } : {}),
     ...(opts.cronHomeDir !== undefined ? { cronHomeDir: opts.cronHomeDir } : {}),
+    runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
   });
 
   let disposed = false;
