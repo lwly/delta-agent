@@ -160,3 +160,14 @@ runReAct done ─▶ SessionHub
 2. **Web 设置页**：设置中心增「模型路由」卡片，HTTP 层包 `getRouting/setRouting` 即可
 3. **usage 归因**：distill 调用上报带 `kind` 的 usage 行，F-31 报表增「辅助调用」分组
 4. **子代理模型路由**：`tools/builtin/task.ts` 的 `ctx.subagent.model` 可按 `subagent` kind 路由
+
+---
+
+## 增量（2026-10-28）：subagent 路由 kind
+
+- `KNOWN_TASK_KINDS` 新增 `subagent`：task 工具派生的只读探索子代理整体走路由目标模型
+  （E 方案：子代理固定开销用小模型重复计算是最大浪费源）。
+- 生效入口：SessionHub（Web serve）、headless-run（delta run）、CLI TUI（仅同 provider 规则，
+  跨 provider 规则 TUI 无第二 Provider 实例，回退主模型）。
+- 未配置 / 总开关关闭 / 目标 provider 构建失败：一律回退会话主模型，预算与用量口径不变
+  （子代理用量仍回写父预算，见 design-f31 §11.2）。

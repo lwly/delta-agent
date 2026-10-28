@@ -460,3 +460,28 @@ sequenceDiagram
 - 单测：budget.test.ts（预留/释放/剩余）、task-tool.test.ts（60k 封顶 / 父剩余 / fail-fast / 释放）、
   react.test.ts（降级行为 / 缺省硬停不回归 / 子代理用量聚合与 done.subagents）、
   server.test.ts（extend 端点）；`pnpm typecheck`、`pnpm test`、`pnpm smoke:web` 通过。
+
+---
+
+## 12. 2026-10-28 增量（二）：TUI 降级续跑 + 方案 E（真降 token）
+
+### 12.1 TUI 降级续跑（方案 D 收尾）
+
+- `cli/src/ui/app.tsx` 构建 RunContext 时传 `budgetDegrade: true`，TUI 与 Web 同语义：
+  预算 100% 不终止，停用子代理、单轮输出限长 1024、主循环收敛。
+- TUI 事件处理新增 `budget_degraded` 分支（打印降级摘要 + 提示可到 Web 追加预算）；
+  `budget_exhausted` 分支保留（headless/evals 仍走硬停协议，退出码 4 不变）。
+
+### 12.2 方案 E —— 真正降低 token 消耗
+
+| 项 | 实现 | 说明 |
+|----|------|------|
+| E-1 子代理小模型 | F-32 路由新增 `subagent` kind（`KNOWN_TASK_KINDS`）；hub / headless-run / TUI 三入口在派生子代理前解析路由 | 命中规则走小模型（如 flash 级），规则缺失/目标 provider 不可用回退主模型；TUI 仅支持同 provider 规则（无法构建第二 Provider 实例）。配置示例：`~/.delta/models.json` → `routing.rules.subagent = { model: "<小模型id>" }` |
+| E-2 compaction 提前 | `COMPACT_TRIGGER_RATIO` 0.8 → **0.65**（`context/compressor.ts`） | 更早压缩显著降低上下文重发；目标压缩后占用仍 55% |
+| E-3 截断收紧 | exec stdout `MAX_CMD_OUTPUT` 20k → **10k** 字符；web_fetch 正文 30k → **15k** 字符 | 大输出引导重定向落文件后 `read_file` 分段读；task 回填摘要 4000 / 折叠阈值 4000 维持 |
+| E-4 prompt caching | `ChatRequest.systemStatic` 透传静态前缀；Anthropic provider `splitSystemForCache` 把 system 拆为 [静态(cache_control) + 动态] | 静态 8 层提示词跨轮命中前缀缓存（~0.1× 计费）；子代理固定开销同样受益（SUBAGENT_SYSTEM 每轮缓存命中）。OpenAI 兼容网关的自动前缀缓存无需此字段。usage 事件仍按 Anthropic 返回的未缓存 input_tokens 计入预算——缓存命中的输入自然不计费，预算口径偏保守（安全方向） |
+
+### 12.3 验证
+
+- `pnpm typecheck` / `pnpm test`（core 1034 + web 82 + cli 4 全绿，新增 anthropic-cache 5 例、
+  compressor 触发阈值用例改写）/ `pnpm smoke:web` 通过；CLI/Web 构建通过。
