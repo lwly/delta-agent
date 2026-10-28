@@ -9,7 +9,7 @@ import type {
   ToolResult,
 } from '@delta/shared';
 import { AgentError } from '@delta/shared';
-import type { AgentTool, ToolContext } from './types.js';
+import type { AgentTool, ToolContext, ToolDanger } from './types.js';
 import { resolveInSandbox } from './sandbox.js';
 import { readSnapshot } from '../session/changes.js';
 import {
@@ -90,6 +90,18 @@ export class ToolRegistry {
       name: t.name,
       description: t.description,
       parameters: t.schema,
+    }));
+  }
+
+  /**
+   * 工具清单（Web 设置页「功能」面板数据源）：name + 描述 + 危险级。
+   * 与 definitions() 的区别：携带 danger、不携带参数 schema（面板展示无需 schema 体量）。
+   */
+  introspect(): Array<{ name: string; description: string; danger: ToolDanger }> {
+    return [...this.tools.values()].map((t) => ({
+      name: t.name,
+      description: t.description,
+      danger: t.danger,
     }));
   }
 

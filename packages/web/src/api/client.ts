@@ -710,6 +710,12 @@ export const api = {
   // projects = 有会话运行中的项目 id（旧服务端可能不返回，调用方需兼容 undefined）
   runningSessions: () => request<{ ids: string[]; projects?: string[] }>('GET', '/api/running-sessions'),
 
+  // 系统集成工具清单（设置页「功能」面板：内置 + MCP 工具）
+  toolList: () =>
+    request<{ items: Array<{ name: string; description: string; danger: 'safe' | 'confirm' }> }>(
+      'GET', '/api/tools',
+    ),
+
   // F-37 git 分支切换 + worktree（session 作用域，与 /permission 同级同风格）
   gitState: (sessionId: string) => request<SessionGitState>('GET', `/api/sessions/${sessionId}/git`),
   listBranches: (sessionId: string) =>

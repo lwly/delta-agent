@@ -282,6 +282,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'running-sessions' && parts.length === 2) {
         return json(res, 200, { ids: hub.runningSessionIds(), projects: hub.runningProjectIds() });
       }
+      // 系统集成工具清单（Web 设置页「功能」面板：内置 + MCP 工具的名称/描述/危险级）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'tools' && parts.length === 2) {
+        return json(res, 200, { items: hub.toolInventory() });
+      }
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         const body = await readBody(req);
         const root = String(body.root ?? '');

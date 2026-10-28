@@ -218,6 +218,14 @@ export class SessionHub {
   }
 
   /**
+   * 系统集成工具清单（Web 设置页「功能」面板数据源）：
+   * 内置工具 + 已接入的 MCP 工具（同一注册表，introspect 携带危险级）。
+   */
+  toolInventory(): Array<{ name: string; description: string; danger: string }> {
+    return this.deps.registry.introspect();
+  }
+
+  /**
    * 僵尸运行清理：引擎可能卡死在不可中断的 await 上（如网关流挂死），
    * abort 信号无法穿透 → finally 不执行 → running 永不清理 → 会话被永久锁死（发消息 409）。
    * 判定：AbortController 已中止（用户点过停止但收尾未完成）或运行超 30 分钟。

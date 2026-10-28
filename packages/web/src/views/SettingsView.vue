@@ -11,6 +11,7 @@ import SkillsPanel from '../components/settings/SkillsPanel.vue';
 import SkillHubPanel from '../components/settings/SkillHubPanel.vue';
 import McpPanel from '../components/settings/McpPanel.vue';
 import ExpertsPanel from '../components/settings/ExpertsPanel.vue';
+import ToolsPanel from '../components/settings/ToolsPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -22,6 +23,7 @@ const SECTIONS = [
   { key: 'skills', ico: '🧩', label: 'Skills' },
   { key: 'hub', ico: '🛒', label: 'Skill Hub' },
   { key: 'mcp', ico: '🔌', label: 'MCP' },
+  { key: 'tools', ico: '🛠️', label: '功能' },
   { key: 'experts', ico: '🧑‍💼', label: '专家' },
   { key: 'usage', ico: '📊', label: '用量' },
 ] as const;
@@ -72,6 +74,7 @@ function switchTab(key: SectionKey) {
         <SkillsPanel v-else-if="activeTab === 'skills'" />
         <SkillHubPanel v-else-if="activeTab === 'hub'" />
         <McpPanel v-else-if="activeTab === 'mcp'" />
+        <ToolsPanel v-else-if="activeTab === 'tools'" />
         <ExpertsPanel v-else-if="activeTab === 'experts'" />
         <UsagePanel v-else-if="activeTab === 'usage'" />
       </main>
