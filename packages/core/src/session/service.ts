@@ -204,7 +204,7 @@ export class SessionService {
     const rows = this.getMessagesDetailed(sessionId);
     const runs: RunSummary[] = [];
     let current: RunSummary | undefined;
-    for (const { message: m, at } of rows) {
+    for (const [rowIdx, { message: m, at }] of rows.entries()) {
       if (m.role === 'user') {
         current = {
           index: runs.length,
@@ -213,6 +213,8 @@ export class SessionService {
           userPreview: m.content.slice(0, 80),
           messages: 1,
           toolCalls: 0,
+          // F-46：首条 user 消息在全量消息数组中的下标（回放页「从此重跑」分叉入口用）
+          afterIndex: rowIdx,
         };
         runs.push(current);
         continue;
@@ -435,6 +437,8 @@ export interface RunSummary {
   userPreview: string;
   messages: number;
   toolCalls: number;
+  /** F-46：该 run 首条 user 消息在全量消息数组中的下标（回放页「从此重跑」分叉入口用） */
+  afterIndex: number;
 }
 
 export interface RunTimeline {

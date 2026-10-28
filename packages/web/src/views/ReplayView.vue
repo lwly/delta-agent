@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // F-18 会话回放：任务（run）列表 + 单次任务时间线（含工具调用与结果配对）
 import { computed, onMounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, type RunStep, type RunSummary, type RunTimeline } from '../api/client';
 
 const route = useRoute();
+const router = useRouter();
 const sessionId = computed(() => String(route.params.sessionId ?? ''));
 
 const runs = ref<RunSummary[]>([]);
@@ -52,6 +53,17 @@ function argsPretty(json: string): string {
   }
 }
 
+/** F-46 回放页分叉入口：从该任务的 user 消息分叉新会话并自动重跑，完成后跳入新会话 */
+async function forkFrom(r: RunSummary) {
+  error.value = '';
+  try {
+    const res = await api.forkSession(sessionId.value, r.afterIndex, { run: true });
+    await router.push(`/chat/${res.session_id}`);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
 function stepIcon(s: RunStep): string {
   if (s.type === 'user') return '👤';
   if (s.type === 'assistant') return '🤖';
@@ -95,6 +107,7 @@ onMounted(loadRuns);
           <div class="preview">{{ r.userPreview }}</div>
           <div class="meta">
             #{{ r.index + 1 }} · {{ fmt(r.startedAt) }} · {{ r.toolCalls }} 次工具调用
+            <button class="run-fork" title="从此重跑（分叉新会话，原会话不动）" @click.stop="forkFrom(r)">🔀 从此重跑</button>
           </div>
         </div>
         <p v-if="runs.length === 0 && !loading" class="empty">（暂无任务记录）</p>
@@ -164,6 +177,13 @@ h2 { margin: 0; font-size: 18px; }
 .run.active { background: var(--accent-soft); border-color: rgba(88, 166, 255, 0.4); }
 .run .preview { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run .meta { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
+/* F-46 分叉入口：默认隐藏，悬停任务条目时浮现（与工作台消息操作一致） */
+.run-fork {
+  margin-left: 6px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint);
+  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s;
+}
+.run:hover .run-fork { opacity: 1; }
+.run-fork:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
 .timeline { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; overflow-y: auto; background: var(--bg-panel); }
 .tl-head { color: var(--text-dim); font-size: 13px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .step { display: flex; gap: 10px; margin: 12px 0; }

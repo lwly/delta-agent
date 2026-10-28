@@ -51,8 +51,17 @@ describe('F-18 会话回放', () => {
       userPreview: '修复预算检查 bug',
       messages: 4,
       toolCalls: 1,
+      afterIndex: 0,
     });
-    expect(runs[1]).toMatchObject({ index: 1, messages: 2, toolCalls: 0 });
+    expect(runs[1]).toMatchObject({ index: 1, messages: 2, toolCalls: 0, afterIndex: 4 });
+  });
+
+  it('afterIndex 可直接用于 forkSession（F-46 回放页分叉入口）', () => {
+    const runs = service.getRuns(sid);
+    // 从 run 1 的 user 消息分叉：副本 = run 0 的全部 4 条消息，源会话不动
+    const forked = service.forkSession(sid, runs[1]!.afterIndex);
+    expect(service.getHistory(forked.id)).toHaveLength(4);
+    expect(service.getHistory(sid)).toHaveLength(6);
   });
 
   it('getRunTimeline pairs tool results with calls by callId', () => {

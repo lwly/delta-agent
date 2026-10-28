@@ -270,6 +270,8 @@ export interface RunSummary {
   userPreview: string;
   messages: number;
   toolCalls: number;
+  /** F-46：该 run 首条 user 消息的下标（回放页「从此重跑」分叉入口用） */
+  afterIndex: number;
 }
 
 export interface RunStep {
