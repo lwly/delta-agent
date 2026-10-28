@@ -12,6 +12,8 @@ import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { SessionHub } from '../src/server/hub.js';
 import type { RunLogSink, LogLevel } from '../src/logging/logger.js';
+import { saveModelsFile } from '../src/llm/keychain.js';
+import { ModelRouter } from '../src/llm/router.js';
 
 /** 伪造 sink：记录全部 append 调用 */
 class FakeSink implements RunLogSink {
@@ -126,6 +128,80 @@ describe('F-41 SessionHub 运行日志埋点', () => {
         resolveProvider: async () => provider,
       });
       await expect(hub.send(sid, 'plain')).resolves.toBeUndefined();
+    } finally {
+      svc.close();
+    }
+  });
+});
+
+describe('F-42 路由回退 debug 标注（AC-42-4）', () => {
+  it('路由目标 provider 构建失败：debug 日志标注回退主模型，任务不受阻', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-runlog-hub-route-'));
+    await fs.writeFile(path.join(dir, 'README.md'), '# demo');
+    const svc = new SessionService(path.join(dir, 'db.sqlite'));
+    try {
+      const pid = svc.ensureProject(dir).id;
+      const sid = svc.createSession(pid, { title: '路由回退' }).id;
+      const modelsFile = path.join(dir, 'models.json');
+      saveModelsFile(
+        {
+          version: 1,
+          providers: [],
+          routing: { enabled: true, rules: { summarize: { provider: 'ghost', model: 'small-model' } } },
+        },
+        modelsFile,
+      );
+      const sink = new FakeSink();
+      const hub = new SessionHub({
+        service: svc,
+        registry: new ToolRegistry(),
+        resolveProvider: async () => new MockProvider([{ text: 'ok' }]),
+        modelRouter: new ModelRouter(modelsFile),
+        resolveProviderById: async () => {
+          throw new Error('provider ghost 未配置');
+        },
+        runLog: sink,
+      });
+      await expect(hub.send(sid, '普通任务')).resolves.toBeUndefined();
+
+      const dbg = sink.entries.find((e) => e.level === 'debug');
+      expect(dbg).toBeDefined();
+      expect(dbg!.message).toContain('summarize');
+      expect(dbg!.message).toContain('回退主模型');
+      expect(dbg!.sessionId).toBe(sid);
+    } finally {
+      svc.close();
+    }
+  });
+
+  it('规则未命中 / 路由命中且可用：不产生 debug 回退行', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-runlog-hub-route-ok-'));
+    await fs.writeFile(path.join(dir, 'README.md'), '# demo');
+    const svc = new SessionService(path.join(dir, 'db.sqlite'));
+    try {
+      const pid = svc.ensureProject(dir).id;
+      const sid = svc.createSession(pid, { title: '路由正常' }).id;
+      const modelsFile = path.join(dir, 'models.json');
+      saveModelsFile(
+        {
+          version: 1,
+          providers: [],
+          routing: { enabled: true, rules: { summarize: { model: 'small-model' } } },
+        },
+        modelsFile,
+      );
+      const sink = new FakeSink();
+      const hub = new SessionHub({
+        service: svc,
+        registry: new ToolRegistry(),
+        resolveProvider: async () => new MockProvider([{ text: 'ok' }]),
+        modelRouter: new ModelRouter(modelsFile),
+        runLog: sink,
+      });
+      await expect(hub.send(sid, '普通任务')).resolves.toBeUndefined();
+
+      // 规则命中（provider 缺省 = 主 provider，构建必成功）→ 无 debug 行
+      expect(sink.entries.some((e) => e.level === 'debug')).toBe(false);
     } finally {
       svc.close();
     }

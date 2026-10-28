@@ -192,20 +192,8 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     // 回退主模型
   }
 
-  // F-42：压缩摘要（summarize kind）路由——命中规则时压缩摘要走小模型，用量按 aux model 归因；
-  // 规则缺失 / 目标 provider 构建失败 → undefined 回退主模型（与 subagent 路由降级语义一致）
-  let summarizeRoute: RunContext['summarizeRoute'];
-  try {
-    const r = new ModelRouter().resolve('summarize');
-    if (r) {
-      summarizeRoute = {
-        provider: r.provider ? await resolveProviderFromEnv(r.provider) : provider,
-        model: r.model,
-      };
-    }
-  } catch {
-    // 回退主模型
-  }
+  // F-42：压缩摘要（summarize kind）路由见下方 runLogFile 初始化之后——
+  // 回退时需要 F-41 run log 做 debug 留档（AC-42-4），故解析延后到落盘句柄就绪
 
   // F-27 Hook 系统：加载用户级 + 项目级 hooks.json
   const hooks = HookManager.load(cwd);
@@ -253,8 +241,6 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       hooks,
     },
     budget,
-    // F-42：压缩摘要路由目标（undefined = 跟随主模型）
-    summarizeRoute,
     windowTokens: 200_000,
     tasks: service.tasks,
   };
@@ -280,6 +266,28 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   runLogFile.log(`# delta run 留档  ${stamp.toISOString()}`);
   runLogFile.log(`# 任务：${task}`);
   runLogFile.log(`# 模式：${engineMode}  会话：${session.id}`);
+
+  // F-42：压缩摘要（summarize kind）路由——命中规则时压缩摘要走小模型，用量按 aux model 归因；
+  // 规则缺失 / 目标 provider 构建失败 → 回退主模型（与 subagent 路由降级语义一致），
+  // 回退时以 debug 级别写入留档（AC-42-4）
+  let summarizeTarget: ReturnType<ModelRouter['resolve']>;
+  try {
+    summarizeTarget = new ModelRouter().resolve('summarize');
+  } catch {
+    summarizeTarget = undefined;
+  }
+  if (summarizeTarget) {
+    try {
+      baseCtx.summarizeRoute = {
+        provider: summarizeTarget.provider ? await resolveProviderFromEnv(summarizeTarget.provider) : provider,
+        model: summarizeTarget.model,
+      };
+    } catch (e) {
+      runLogFile.log(
+        `[DEBUG] summarize 路由目标不可用（provider=${summarizeTarget.provider ?? '主'}，model=${summarizeTarget.model}）→ 回退主模型：${(e as Error).message}`,
+      );
+    }
+  }
   const onEvent = (ev: AgentEvent) => {
     if (!opts.json && ev.type === 'text_delta') {
       process.stdout.write(ev.text);

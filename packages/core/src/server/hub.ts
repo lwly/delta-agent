@@ -507,8 +507,12 @@ export class SessionHub {
   /**
    * F-32：解析某类辅助任务的路由目标（如 distill 用小模型）。
    * 未启用路由 / 规则缺失 / 目标 provider 构建失败时返回 undefined，调用方回退会话主模型。
+   * F-42（AC-42-4）：目标 provider 构建失败时以 debug 级别标注回退（沿用 F-32 容错语义，不向主任务传播）。
    */
-  private async routeAux(kind: RoutingTaskKind): Promise<{ provider: LLMProvider; model: string } | undefined> {
+  private async routeAux(
+    kind: RoutingTaskKind,
+    sessionId?: string,
+  ): Promise<{ provider: LLMProvider; model: string } | undefined> {
     const target = this.deps.modelRouter?.resolve(kind);
     if (!target) return undefined;
     try {
@@ -516,8 +520,13 @@ export class SessionHub {
         ? await (this.deps.resolveProviderById ?? this.deps.resolveProvider)(target.provider)
         : await this.deps.resolveProvider();
       return { provider, model: target.model };
-    } catch {
-      return undefined; // 路由目标不可用 → 回退主模型，不阻塞任务
+    } catch (e) {
+      this.log(
+        'debug',
+        `辅助任务 ${kind} 路由目标不可用（provider=${target.provider ?? '主'}，model=${target.model}）→ 回退主模型：${(e as Error).message}`,
+        sessionId,
+      );
+      return undefined;
     }
   }
 
@@ -628,12 +637,12 @@ export class SessionHub {
 
       // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型（省 token）；
       // 规则缺失 / 目标 provider 不可用 → 回退会话主模型（与 routeAux 降级语义一致）
-      const subRoute = await this.routeAux('subagent');
+      const subRoute = await this.routeAux('subagent', sessionId);
       const subagentModel = subRoute?.model ?? session.model ?? '';
 
       // F-42：压缩摘要（summarize kind）路由——规则命中时压缩摘要走小模型，
       // 用量按 aux model 归因落库；未配置 / 目标 provider 构建失败 → 跟随会话主模型
-      const summarizeRoute = await this.routeAux('summarize');
+      const summarizeRoute = await this.routeAux('summarize', sessionId);
 
       // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
       // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）
@@ -824,7 +833,7 @@ export class SessionHub {
                 .map((m) => `${m.role}: ${m.content}`)
                 .join('\n');
               // F-32：提炼属轻量辅助调用，优先走路由规则指定的小模型（未配置则回退主模型）
-              const routed = await this.routeAux('distill');
+              const routed = await this.routeAux('distill', sessionId);
               void distillMemories(service.memory, routed?.provider ?? provider, routed?.model ?? ctx.model, {
                 scope: `project:${session.project_id}`,
                 transcript,

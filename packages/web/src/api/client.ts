@@ -637,7 +637,7 @@ export interface DiffResponse {
 
 export interface LogEntryView {
   ts: string;
-  level: 'info' | 'warn' | 'error';
+  level: 'debug' | 'info' | 'warn' | 'error';
   source: string;
   sessionId?: string;
   message: string;

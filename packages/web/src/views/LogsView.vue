@@ -6,7 +6,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, type LogEntryView } from '../api/client';
 import { subscribeLogs } from '../api/sse';
 
-type LevelFilter = 'all' | 'info' | 'warn' | 'error';
+type LevelFilter = 'all' | 'debug' | 'info' | 'warn' | 'error';
 
 const entries = ref<LogEntryView[]>([]);
 const error = ref('');
@@ -32,6 +32,7 @@ const filtered = computed(() => {
 
 const counts = computed(() => ({
   all: entries.value.length,
+  debug: entries.value.filter((e) => e.level === 'debug').length,
   info: entries.value.filter((e) => e.level === 'info').length,
   warn: entries.value.filter((e) => e.level === 'warn').length,
   error: entries.value.filter((e) => e.level === 'error').length,
@@ -116,7 +117,7 @@ watch([levelFilter, textFilter], () => scrollToBottom());
     <div class="filters">
       <div class="levels">
         <button
-          v-for="(label, key) in { all: `全部 ${counts.all}`, info: `info ${counts.info}`, warn: `warn ${counts.warn}`, error: `error ${counts.error}` }"
+          v-for="(label, key) in { all: `全部 ${counts.all}`, debug: `debug ${counts.debug}`, info: `info ${counts.info}`, warn: `warn ${counts.warn}`, error: `error ${counts.error}` }"
           :key="key"
           class="chip"
           :class="{ active: levelFilter === key }"
@@ -175,6 +176,7 @@ watch([levelFilter, textFilter], () => scrollToBottom());
 .log-line.warn .l-msg { color: var(--warning, #eb5); }
 .l-ts { color: var(--text-dim, #777); flex: none; }
 .l-badge { flex: none; width: 40px; text-align: center; border-radius: 4px; font-size: 10px; padding: 0 2px; }
+.l-badge.debug { color: var(--text-faint, #666); }
 .l-badge.info { color: var(--text-dim, #999); }
 .l-badge.warn { color: var(--warning, #eb5); }
 .l-badge.error { color: var(--danger, #f66); }
