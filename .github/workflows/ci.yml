@@ -95,3 +95,41 @@ jobs:
       # Web 端冒烟不需要 Provider 密钥，始终执行（F-31 新增用量页已纳入覆盖）
       - name: Smoke (web)
         run: pnpm smoke:web
+
+  # F-45 E2E 测试体系：CLI 黄金路径（退出码协议）+ Web Playwright 套件。
+  # 假 Provider（DELTA_FAKE_PROVIDER）零密钥；双平台必需检查（AC-45-3）。
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @delta/e2e exec playwright install chromium
+
+      - name: E2E (CLI golden paths + Web Playwright)
+        run: pnpm e2e
+
+      # AC-45-4：失败产物归档（截图 / trace / error-context；CLI 日志在 job log 中）
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.os }}
+          path: e2e/test-results/
+          if-no-files-found: ignore

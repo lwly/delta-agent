@@ -15,10 +15,12 @@
     "typecheck": "pnpm run build:deps && pnpm -r run typecheck",
     "smoke": "node scripts/smoke.mjs",
     "smoke:web": "pnpm --filter @delta/web build && node scripts/smoke-web.mjs",
+    "e2e": "pnpm run build:deps && pnpm --filter @delta/web build && node e2e/cli/e2e-cli.mjs && pnpm --filter @delta/e2e test",
     "clean": "pnpm -r run clean",
     "prepare": "node scripts/install-hooks.mjs"
   },
   "devDependencies": {
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3"
   }
 }

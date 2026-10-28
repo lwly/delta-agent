@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "e2e"
 # pnpm ≥10 默认不运行依赖生命周期脚本；显式放行含原生模块的包（pnpm 9 忽略此键，行为不变）
 onlyBuiltDependencies:
   - better-sqlite3

@@ -91,6 +91,7 @@ export { OpenAIProvider } from './llm/providers/openai.js';
 export { DeepSeekProvider } from './llm/providers/deepseek.js';
 export { QwenProvider } from './llm/providers/qwen.js';
 export { ProviderManager, type ProviderView } from './llm/manager.js';
+export { ScriptedFakeProvider, type FakeProviderMode } from './llm/fake-provider.js';
 export { PROVIDER_DEFAULT_MODELS, defaultModelFor } from './llm/defaults.js';
 export {
   ModelRouter,

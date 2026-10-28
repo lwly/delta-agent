@@ -462,6 +462,14 @@ export async function resolveProviderFromEnv(
   id?: string,
   opts?: { modelsFile?: string },
 ): Promise<LLMProvider> {
+  // F-45 E2E：脚本化假 Provider 注入（显式环境变量开启；默认关闭对生产零影响）。
+  // scripted=确定性「工具→答案」脚本；error=致命错误（退出码 2）；burn=大用量（触发退出码 4）。
+  const fakeMode = process.env.DELTA_FAKE_PROVIDER;
+  if (fakeMode === 'scripted' || fakeMode === 'error' || fakeMode === 'burn') {
+    const { ScriptedFakeProvider } = await import('../llm/fake-provider.js');
+    return new ScriptedFakeProvider(fakeMode);
+  }
+
   const wanted = (id || process.env.DELTA_PROVIDER || '') as ProviderId | '';
   const candidates: ProviderId[] = wanted
     ? [wanted]

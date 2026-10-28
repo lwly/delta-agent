@@ -1,0 +1,13 @@
+{
+  "name": "@delta/e2e",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "F-45 E2E 测试体系：Web Playwright 套件（CLI 黄金路径见 ../e2e/cli/e2e-cli.mjs）",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  }
+}
