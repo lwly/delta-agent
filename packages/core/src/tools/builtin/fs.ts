@@ -13,7 +13,7 @@ const IGNORED_DIRS = new Set([
 
 export const readFileTool: AgentTool = {
   name: 'read_file',
-  description: 'Read a text file from the project, optionally by line range (1-based, inclusive).',
+  description: '读取项目中的文本文件，可按行范围读取（行号从 1 开始，含端点）。',
   schema: {
     type: 'object',
     properties: {
@@ -47,7 +47,7 @@ export const readFileTool: AgentTool = {
 
 export const writeFileTool: AgentTool = {
   name: 'write_file',
-  description: 'Create or overwrite a file inside the project with the given content.',
+  description: '在项目内创建或覆盖文件，写入给定内容。',
   schema: {
     type: 'object',
     properties: {
@@ -73,7 +73,7 @@ export const writeFileTool: AgentTool = {
 
 export const editFileTool: AgentTool = {
   name: 'edit_file',
-  description: 'Replace an exact string occurrence in a file. old_string must match uniquely.',
+  description: '替换文件中的一处精确字符串。old_string 必须在文件中唯一匹配。',
   schema: {
     type: 'object',
     properties: {
@@ -105,7 +105,7 @@ export const editFileTool: AgentTool = {
 
 export const listDirTool: AgentTool = {
   name: 'list_dir',
-  description: 'List a directory tree up to the given depth (default 2).',
+  description: '列出目录树，最多到指定深度（默认 2 层）。',
   schema: {
     type: 'object',
     properties: {
@@ -167,7 +167,7 @@ function globToRegex(pattern: string): RegExp {
 
 export const globSearchTool: AgentTool = {
   name: 'glob_search',
-  description: 'Find files matching a glob pattern (supports ** and *), rooted at project root.',
+  description: '按 glob 模式查找文件（支持 ** 和 *），以项目根为起点。',
   schema: {
     type: 'object',
     properties: {
@@ -210,7 +210,7 @@ const TEXT_EXT_SKIP = new Set([
 
 export const grepSearchTool: AgentTool = {
   name: 'grep_search',
-  description: 'Search file contents with a JavaScript regular expression. Returns "path:line: text" matches.',
+  description: '用 JavaScript 正则表达式搜索文件内容，返回 "路径:行号: 文本" 形式的匹配。',
   schema: {
     type: 'object',
     properties: {

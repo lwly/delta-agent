@@ -101,7 +101,7 @@ function metaOf(o: Outcome): Record<string, unknown> | undefined {
 export const runCommandTool: AgentTool = {
   name: 'run_command',
   description:
-    'Execute a shell command in the project directory. High-risk tool: requires user confirmation by default.',
+    '在项目目录中执行 shell 命令。高危工具：默认需要用户确认。',
   schema: {
     type: 'object',
     properties: {
@@ -137,7 +137,7 @@ function testsOk(o: Outcome): boolean {
 
 export const runTestsTool: AgentTool = {
   name: 'run_tests',
-  description: 'Detect and run the project test suite (npm/vitest/jest/pytest/cargo/go).',
+  description: '探测并运行项目测试套件（npm/vitest/jest/pytest/cargo/go）。',
   schema: {
     type: 'object',
     properties: {

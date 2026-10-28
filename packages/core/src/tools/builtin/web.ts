@@ -23,7 +23,7 @@ export function htmlToText(html: string): string {
 
 export const webFetchTool: AgentTool = {
   name: 'web_fetch',
-  description: 'Fetch a web page over HTTP(S) and return its textual content.',
+  description: '通过 HTTP(S) 抓取网页并返回其文本内容。',
   schema: {
     type: 'object',
     properties: {
@@ -67,7 +67,7 @@ export const webFetchTool: AgentTool = {
 export const todoWriteTool: AgentTool = {
   name: 'todo_write',
   description:
-    'Maintain the task checklist for the current task. Pass the full list each time; statuses: pending/in_progress/done.',
+    '维护当前任务的待办清单。每次传入完整列表；状态：pending/in_progress/done。',
   schema: {
     type: 'object',
     properties: {
@@ -103,7 +103,7 @@ export const todoWriteTool: AgentTool = {
 
 export const askUserTool: AgentTool = {
   name: 'ask_user',
-  description: 'Ask the user a clarifying question and block until they answer. Use sparingly.',
+  description: '向用户提出澄清性问题并阻塞等待回答。请节制使用。',
   schema: {
     type: 'object',
     properties: {

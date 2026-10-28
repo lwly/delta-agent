@@ -15,9 +15,9 @@ function scopeChain(ctx: ToolContext): string[] {
 export const saveMemoryTool: AgentTool = {
   name: 'save_memory',
   description:
-    'Save a long-term memory (user preference / fact / decision / pitfall / workflow). ' +
-    'Call when you learn something worth remembering across sessions. One sentence per memory; ' +
-    'self-assess importance (0-1) and confidence (0-1).',
+    '保存长期记忆（用户偏好 / 事实 / 决策 / 坑点 / 工作流）。' +
+    '当学到值得跨会话记住的内容时调用。每条记忆一句话；' +
+    '自行评估重要度（0-1）与置信度（0-1）。',
   schema: {
     type: 'object',
     properties: {
@@ -63,8 +63,8 @@ export const saveMemoryTool: AgentTool = {
 export const recallMemoryTool: AgentTool = {
   name: 'recall_memory',
   description:
-    'Search long-term memories relevant to a query (user preferences, past decisions, pitfalls). ' +
-    'Returns top matches with scores; use proactively when the user refers to past work.',
+    '按查询检索相关的长期记忆（用户偏好、历史决策、坑点）。' +
+    '返回得分最高的若干条匹配；当用户提及过往工作时请主动使用。',
   schema: {
     type: 'object',
     properties: {
