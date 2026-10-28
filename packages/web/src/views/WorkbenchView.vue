@@ -1439,8 +1439,9 @@ watch(
             <!-- Agent 提问 -->
             <div v-for="a in chat.pendingAsks" :key="a.requestId" class="approve-card ask">
               <div class="ac-head">❓ {{ a.question }}</div>
-              <div v-if="a.options?.length" class="ac-actions">
-                <button v-for="o in a.options" :key="o" class="btn" @click="chat.answerAsk(a.requestId, o)">{{ o }}</button>
+              <!-- 反馈：选项一行一个（长选项换行挤压可读性差），不用 flex-wrap 横排 -->
+              <div v-if="a.options?.length" class="ask-options">
+                <button v-for="o in a.options" :key="o" class="ask-option" @click="chat.answerAsk(a.requestId, o)">{{ o }}</button>
               </div>
               <input
                 class="ask-input"
@@ -2116,6 +2117,16 @@ watch(
   max-height: 160px; overflow: auto; margin: 6px 0; white-space: pre-wrap; word-break: break-word;
 }
 .ac-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+/* ask_user 选项：一行一个（左对齐整行可点，长文本不换列挤压） */
+.ask-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ask-option {
+  text-align: left; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--accent-border); background: var(--bg-elevated);
+  color: var(--text); font-size: 12.5px; line-height: 1.5; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ask-option:hover { background: var(--bg-hover); border-color: var(--accent); }
+.ask-option:active { background: var(--bg-active); }
 .plan-node { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
 .plan-node .nid { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: var(--mono); min-width: 30px; text-align: center; }
 .plan-node .goal { flex: 1; min-width: 200px; padding: 5px 9px; font-size: 12.5px; }
