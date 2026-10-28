@@ -13,6 +13,20 @@ delta-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核心
 - **CLI + Web 双形态**：终端里干活（Ink TUI），浏览器里管理项目、会话与模型配置（Vite + Vue）。
 - **工程化配套**：桌面通知（F-33）、项目引导（F-34）、成本报告（F-31）、evals 评测集运行。
 
+## 运行截图
+
+**Web 控制台工作台**——ReAct 推理中的工具调用卡（读取文件）与 Markdown 回答：
+
+![Web 控制台工作台](docs/screenshots/workbench-chat.png)
+
+**设置 → 功能**——系统集成的全部 Function（内置 16 个 + MCP 动态接入），含执行前确认标识：
+
+![设置·功能面板](docs/screenshots/settings-tools.png)
+
+**设置 → 用量**——会话预算配置与按项目 / 模型 / 会话三维度的费用统计：
+
+![设置·用量面板](docs/screenshots/settings-usage.png)
+
 ## 仓库结构（pnpm monorepo）
 
 ```
