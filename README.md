@@ -105,8 +105,15 @@ pnpm build        # 构建全部子包
 pnpm test         # 运行全部测试（core 使用 vitest）
 pnpm typecheck    # 类型检查（会先产出 shared/core 的 .d.ts，故全新 clone 也能直接跑）
 pnpm smoke        # 冒烟验证（web 冒烟：pnpm smoke:web）
+pnpm e2e          # E2E：CLI 黄金路径（退出码协议）+ Web Playwright 套件（零密钥，假 Provider）
 pnpm clean        # 清理构建产物
 ```
+
+> E2E 说明：`pnpm e2e` 先构建 core/web 产物，再依次跑 `e2e/cli/e2e-cli.mjs`（CLI 黄金路径，
+> 覆盖 F-29 退出码协议 0/1/2/3/4/5）与 `e2e/web`（Playwright 8 条 Web 核心路径）。全程使用
+> 脚本化假 Provider（`DELTA_FAKE_PROVIDER`，零网络零密钥）与隔离 HOME，首次运行会自动下载
+> Playwright Chromium（约 80MB，缓存于 `~/Library/Caches/ms-playwright`）。Web 套件也可单独
+> 运行：`pnpm --filter @delta/e2e test`。
 
 > 注：`@delta/shared`、`@delta/core` 的类型入口指向各自的 `dist/*.d.ts`，因此 tsc 需要它们先构建过；`pnpm typecheck` 已内置这一步（`build:deps`），单独跑某个包的 `typecheck` 前需先 `pnpm build:deps`。
 
