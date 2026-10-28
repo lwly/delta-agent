@@ -1818,12 +1818,15 @@ watch(
 .mode-tag.running {
   color: var(--green); background: var(--green-soft); font-weight: 600;
   display: inline-flex; align-items: center; gap: 4px;
+  /* 运行中动效：徽标底色随呼吸点同步明暗（比静态绿底更醒目） */
+  animation: tag-breathe 2.4s ease-in-out infinite;
 }
 .mode-tag.running::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: var(--green); animation: run-pulse 1.2s ease-in-out infinite;
 }
 @keyframes run-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(0.75); } }
+@keyframes tag-breathe { 0%, 100% { background: var(--green-soft); } 50% { background: var(--bg-hover); } }
 .mode-tag.paused { color: var(--orange); background: var(--orange-soft); }
 /* F-37：会话行 worktree 绑定标识 */
 .wt-badge { flex: none; font-size: 11px; line-height: 1; }
@@ -2186,10 +2189,24 @@ watch(
 .tool-chip:active { background: var(--bg-active); color: var(--text); }
 /* 运行中轻量降级：整体 opacity（按钮仍可点，保留紧急停止入口）+ 顶部细提示行 */
 .composer.degraded { opacity: 0.75; }
+/* 运行中提示行动效：呼吸圆点 + 流光扫过（用户反馈：静态文字看不出"活着"） */
 .composer-hint {
   font-size: 11px; color: var(--orange); background: var(--orange-soft);
   border-radius: 6px; padding: 4px 9px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+  position: relative; overflow: hidden;
 }
+.composer-hint::before {
+  content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--orange); animation: hint-breathe 1.2s ease-in-out infinite;
+}
+.composer-hint::after {
+  content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+  animation: hint-sweep 2.4s ease-in-out infinite;
+}
+@keyframes hint-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(0.7); } }
+@keyframes hint-sweep { 0% { left: -60%; } 55%, 100% { left: 120%; } }
 /* 工具栏 chip 禁用态（运行中置灰，title 已提示「停止后可继续」） */
 .tool-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .tool-chip:disabled:hover { background: transparent; color: var(--text-faint); }
