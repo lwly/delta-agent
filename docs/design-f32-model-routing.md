@@ -154,12 +154,14 @@ runReAct done ─▶ SessionHub
 
 ---
 
-## 8. 后续演进位（本期不实现）
+## 8. 演进位落地状态（F-42 收尾，2026-10-28）
 
-1. **按难度自动分类**：新增 `classify` 接入点（会话首输入 → 分类器选 execute 档模型），kind 体系与路由器零改动
-2. **Web 设置页**：设置中心增「模型路由」卡片，HTTP 层包 `getRouting/setRouting` 即可
-3. **usage 归因**：distill 调用上报带 `kind` 的 usage 行，F-31 报表增「辅助调用」分组
-4. **子代理模型路由**：`tools/builtin/task.ts` 的 `ctx.subagent.model` 可按 `subagent` kind 路由
+1. ~~**按难度自动分类**：新增 `classify` 接入点~~ —— **仍预留**（当前无独立 classify 调用点；Web 路由卡片允许配置，规则先行，调用点落地即生效）
+2. ~~**Web 设置页**~~ —— ✅ **已落地（F-42）**：设置页新增「路由」面板（`web/src/components/settings/RoutingPanel.vue`），HTTP 层 `GET/PUT /api/models/routing`（server/http.ts），读写与 provider CRUD 同源（`getRouting/setRouting`，同文件互不覆盖）
+3. ~~**usage 归因**~~ —— ✅ **已落地（F-42，summarize 维度）**：压缩摘要调用计入 usageTotal/预算并发归因 usage 事件（model = 路由目标），hub 逐轮落库可区分辅助调用；F-31 报表 byModel 分组自动生效
+4. ~~**子代理模型路由**~~ —— ✅ 已落地（2026-10-28 增量，见下节）
+
+**F-42 summarize 接入点实现口径**：`RunContext.summarizeRoute`（engine/react.ts）由 SessionHub `routeAux('summarize')` 与 headless-run 解析注入；压缩摘要（compressDeps.summarize）走 `summarizeRoute?.provider ?? ctx.provider` / `?.model ?? ctx.model`，未配置/目标不可用回退主模型（决议 #10 兜底不变）。distill 接线维持 §4.3 原样。
 
 ---
 
