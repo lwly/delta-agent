@@ -11,6 +11,8 @@ export const useWorkspaceStore = defineStore('workspace', {
     loading: false,
     /** PASI-9：运行中的会话 id（侧栏 ⏸/✕ 切换与删除门禁） */
     runningIds: [] as string[],
+    /** 有会话运行中的项目 id（侧栏项目点运行中动效；旧服务端无此字段时为空） */
+    runningProjectIds: [] as string[],
   }),
   actions: {
     async refreshProjects() {
@@ -19,7 +21,9 @@ export const useWorkspaceStore = defineStore('workspace', {
     /** PASI-9：拉取运行中的会话 id（失败保持上次状态，不阻塞侧栏） */
     async refreshRunning() {
       try {
-        this.runningIds = (await api.runningSessions()).ids;
+        const r = await api.runningSessions();
+        this.runningIds = r.ids;
+        this.runningProjectIds = r.projects ?? [];
       } catch {
         // 服务暂不可用时维持现状
       }

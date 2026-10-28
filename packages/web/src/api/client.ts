@@ -706,8 +706,9 @@ export const api = {
     request<{ mode: 'plan' | 'default' | 'yolo' }>('GET', `/api/sessions/${sessionId}/permission`),
   setPermission: (sessionId: string, mode: 'plan' | 'default' | 'yolo') =>
     request<{ ok: boolean; mode: 'plan' | 'default' | 'yolo' }>('PATCH', `/api/sessions/${sessionId}/permission`, { mode }),
-  // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁）
-  runningSessions: () => request<{ ids: string[] }>('GET', '/api/running-sessions'),
+  // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁）；
+  // projects = 有会话运行中的项目 id（旧服务端可能不返回，调用方需兼容 undefined）
+  runningSessions: () => request<{ ids: string[]; projects?: string[] }>('GET', '/api/running-sessions'),
 
   // F-37 git 分支切换 + worktree（session 作用域，与 /permission 同级同风格）
   gitState: (sessionId: string) => request<SessionGitState>('GET', `/api/sessions/${sessionId}/git`),

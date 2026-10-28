@@ -1124,7 +1124,7 @@ watch(
         <div v-for="p in ws.projects" :key="p.id" class="project-group">
           <div class="project-header" :class="{ active: p.id === ws.activeProjectId && !chat.sessionId }" tabindex="0" @click="selectProject(p.id)">
             <span class="project-caret" :class="{ open: expanded.has(p.id) }">▶</span>
-            <span class="project-dot" />
+            <span class="project-dot" :class="{ running: ws.runningProjectIds.includes(p.id) }" :title="ws.runningProjectIds.includes(p.id) ? '项目下有会话运行中' : undefined" />
             <input
               v-if="renamingProjectId === p.id"
               v-model="renameProjectText"
@@ -1749,6 +1749,13 @@ watch(
 .project-caret { font-size: 10px; color: var(--text-faint); transition: transform 0.15s; width: 10px; }
 .project-caret.open { transform: rotate(90deg); }
 .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+/* 项目点运行中动效：绿色涟漪扩散（与项目下任一会话的运行态联动，数据源 runningProjectIds） */
+.project-dot.running { animation: project-dot-pulse 1.6s ease-out infinite; }
+@keyframes project-dot-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(63, 185, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+}
 .project-name { font-weight: 600; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 会话计数徽章：浅色中性（bg-elevated + text-dim） */
 .project-count {

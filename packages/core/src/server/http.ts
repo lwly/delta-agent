@@ -277,9 +277,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         return json(res, 200, service.listProjects());
       }
-      // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁的数据源）
+      // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁的数据源）；
+      // projects = 有会话运行中的项目 id（侧栏项目点运行中动效的数据源）
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'running-sessions' && parts.length === 2) {
-        return json(res, 200, { ids: hub.runningSessionIds() });
+        return json(res, 200, { ids: hub.runningSessionIds(), projects: hub.runningProjectIds() });
       }
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         const body = await readBody(req);

@@ -425,4 +425,26 @@ describe('settings/budget 端点', () => {
       await fs.rm(home3, { recursive: true, force: true });
     }
   });
+
+  it('GET /api/running-sessions 返回 ids + projects（无运行会话时均为空数组）', async () => {
+    const hub4 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv4 = createWebServer({
+      service,
+      hub: hub4,
+      port: 0,
+      providers: new ProviderManager(path.join(tmp, 'm4.json')),
+    });
+    await new Promise<void>((r) => srv4.listen(0, '127.0.0.1', r));
+    const addr = srv4.address();
+    const base4 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    try {
+      const res = await fetch(`${base4}/api/running-sessions`);
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { ids: unknown; projects: unknown };
+      expect(Array.isArray(json.ids)).toBe(true);
+      expect(Array.isArray(json.projects)).toBe(true);
+    } finally {
+      srv4.close();
+    }
+  });
 });

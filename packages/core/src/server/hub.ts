@@ -245,6 +245,25 @@ export class SessionHub {
     return [...this.running.keys()];
   }
 
+  /**
+   * 当前有会话运行中的项目 id（去重）。
+   * 侧栏项目点「运行中动效」的数据源：非活跃项目的会话列表前端未加载，
+   * 由服务端归集（与 runningSessionIds 同一次僵尸清理，口径一致）。
+   */
+  runningProjectIds(): string[] {
+    const ids = this.runningSessionIds();
+    const projects = new Set<string>();
+    for (const id of ids) {
+      try {
+        const s = this.deps.service.getSession(id);
+        if (s) projects.add(s.project_id);
+      } catch {
+        // 单个会话查询失败不影响整体
+      }
+    }
+    return [...projects];
+  }
+
   /** 会话级权限模式：未单独设置时回退全局默认。 */
   getPermissionMode(sessionId: string): PermissionMode {
     return this.sessionPermissionModes.get(sessionId) ?? this.deps.permissionMode ?? 'default';
