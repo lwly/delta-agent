@@ -15,6 +15,8 @@ import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
 import { KNOWN_TASK_KINDS } from '../llm/router.js';
+import { WebSocketServer } from 'ws';
+import type { TerminalManager } from './terminal.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
 import { DEFAULT_SESSION_BUDGET } from '../context/budget.js';
@@ -87,6 +89,12 @@ export interface ServeOptions {
    * GET /api/logs 与 GET /api/logs/stream 返回 404（能力未装配口径，对齐 cronExecutor）。
    */
   runLog?: RunLog;
+  /**
+   * F-47 Web 内置终端管理器（serve 运行时注入；node-pty optionalDependencies）。
+   * 缺省不提供：GET /api/terminal/status 返回 available:false（能力未装配口径），
+   * POST /api/sessions/:id/terminal 返回 501，/ws/terminal 升级直接关闭。
+   */
+  terminal?: TerminalManager;
   /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
@@ -235,7 +243,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
     return store;
   };
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
     const parts = url.pathname.split('/').filter(Boolean);
     const method = req.method ?? 'GET';
@@ -789,6 +797,12 @@ export function createWebServer(opts: ServeOptions): http.Server {
           });
           return json(res, 200, { ok: true, session_id: forked.id, run: true });
         }
+        // F-47：为会话创建内嵌终端（pty cwd = 会话工作根，创建时固化）
+        if (method === 'POST' && parts[3] === 'terminal') {
+          if (!opts.terminal) return err(res, 501, '终端能力未装配（旧版 serve 或 node-pty 缺失）');
+          const r = await opts.terminal.create(sessionId);
+          return r.ok ? json(res, 200, { ok: true, terminal_id: r.terminalId, work_root: r.workRoot, shell: r.shell }) : json(res, 400, { ok: false, error: r.reason });
+        }
         if (method === 'POST' && parts[3] === 'confirm') {
           const body = await readBody(req);
           const ok = hub.confirm(String(body.requestId ?? ''), body.decision as ConfirmDecision);
@@ -890,8 +904,21 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
-      // ── models/routing（F-42：Web 设置页模型路由卡片，读写 ~/.delta/models.json routing 字段）──
-      // 与 providers CRUD 共用同一 ProviderManager（同文件读写互不覆盖），保存走 setRouting 既有校验
+      // ── terminal（F-47：能力状态 / 用户主动关闭终端）────────────────────────
+      if (parts[0] === 'api' && parts[1] === 'terminal') {
+        // GET /api/terminal/status —— 能力可用性（node-pty 可用 / 并发余量），UI 据此决定渲染或降级
+        if (method === 'GET' && parts[2] === 'status') {
+          if (!opts.terminal) return json(res, 200, { available: false, reason: '终端能力未装配', active: 0, max: 0 });
+          return json(res, 200, await opts.terminal.status());
+        }
+        // DELETE /api/terminal/:tid —— 用户主动关闭（杀 pty 进程并移除）
+        if (method === 'DELETE' && parts[2]) {
+          if (!opts.terminal) return err(res, 501, '终端能力未装配');
+          return json(res, 200, { ok: opts.terminal.close(parts[2]) });
+        }
+      }
+
+      // ── models/routing（F-42：Web 设置页模型路由卡片，读写 ~/.delta/models.json routing 字段）──      // 与 providers CRUD 共用同一 ProviderManager（同文件读写互不覆盖），保存走 setRouting 既有校验
       if (parts[0] === 'api' && parts[1] === 'models' && parts[2] === 'routing' && opts.providers) {
         const mgr = opts.providers;
         // GET /api/models/routing —— 当前路由配置（未配置返回缺省关闭态）
@@ -1276,4 +1303,36 @@ export function createWebServer(opts: ServeOptions): http.Server {
       return err(res, 500, (e as Error).message);
     }
   });
+
+  // ── F-47 Web 内置终端：WebSocket 升级（/ws/terminal?tid=&auth=）────────────
+  // 鉴权走 query 参数（浏览器 WS 无法附带自定义 header），复用恒定时间比较。
+  const wss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (url.pathname !== '/ws/terminal') {
+      socket.destroy();
+      return;
+    }
+    if (opts.authToken !== undefined) {
+      const got = url.searchParams.get('auth') ?? '';
+      if (typeof got !== 'string' || !tokenMatches(opts.authToken, got)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+    const tid = url.searchParams.get('tid') ?? '';
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const mgr = opts.terminal;
+      if (!mgr) {
+        ws.close(1011, 'terminal capability not configured');
+        return;
+      }
+      mgr.attach(tid, ws);
+      ws.on('message', (raw) => mgr.handleClientMessage(tid, String(raw)));
+      ws.on('close', () => mgr.detach(tid, ws));
+    });
+  });
+
+  return server;
 }

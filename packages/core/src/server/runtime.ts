@@ -24,6 +24,7 @@ import { autoOnboardProject } from '../onboarding/index.js';
 import { createSkillRuntime, SessionHub } from './hub.js';
 import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
+import { TerminalManager } from './terminal.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
@@ -152,6 +153,10 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   });
 
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
+  // F-47 Web 内置终端：node-pty 为 optionalDependencies——缺失/不可用时 status 端点明确降级
+  const terminal = new TerminalManager({
+    resolveWorkRoot: (sessionId) => hub.resolveSessionWorkRoot(sessionId),
+  });
   const port = opts.port ?? 7900;
   const server = createWebServer({
     service,
@@ -163,6 +168,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     ...(opts.authToken !== undefined ? { authToken: opts.authToken } : {}),
     ...(opts.cronHomeDir !== undefined ? { cronHomeDir: opts.cronHomeDir } : {}),
     runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
+    terminal, // F-47：/api/terminal/* + /ws/terminal
   });
 
   let disposed = false;
@@ -181,6 +187,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      terminal.killAll(); // F-47：serve 退出全杀 pty（防孤儿 shell 进程）
       server.close();
       await mcp.disconnectAll().finally(() => service.close());
     },

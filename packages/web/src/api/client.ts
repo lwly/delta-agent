@@ -208,6 +208,13 @@ async function request<T>(method: string, p: string, body?: unknown): Promise<T>
  * 必须经此函数（或 request()）发起请求。
  * token 为空（CLI serve / 浏览器形态）时原样透传 headers，不附加任何凭据。
  */
+/** F-47：终端 WebSocket URL（桌面宿主鉴权走 query 参数，浏览器 WS 无法附带自定义 header） */
+export function terminalWsUrl(terminalId: string): string {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const auth = authQuery();
+  return `${proto}//${location.host}/ws/terminal?tid=${encodeURIComponent(terminalId)}${auth ? '&' + auth.slice(1) : ''}`;
+}
+
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   return fetch(input, {
     ...init,
@@ -731,6 +738,16 @@ export const api = {
     request<{ items: Array<{ name: string; description: string; danger: 'safe' | 'confirm' }> }>(
       'GET', '/api/tools',
     ),
+
+  // F-47 Web 内置终端（node-pty 可选能力；不可用时 available:false 由 UI 降级）
+  terminalStatus: () =>
+    request<{ available: boolean; reason?: string; active: number; max: number }>('GET', '/api/terminal/status'),
+  createTerminal: (sessionId: string) =>
+    request<{ ok: boolean; terminal_id?: string; work_root?: string; shell?: string; error?: string }>(
+      'POST', `/api/sessions/${sessionId}/terminal`,
+    ),
+  closeTerminal: (terminalId: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/terminal/${encodeURIComponent(terminalId)}`),
 
   // F-42 模型路由（设置页「路由」面板：辅助任务 → 目标模型规则）
   routingGet: () =>

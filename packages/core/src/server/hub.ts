@@ -534,6 +534,14 @@ export class SessionHub {
     return this.deps.service.abortRun(sessionId);
   }
 
+  /** F-47：会话工作根解析（终端等能力复用 F-37 的 worktree 跟随语义）。 */
+  resolveSessionWorkRoot(sessionId: string): string | undefined {
+    const pair = this.sessionWithProject(sessionId);
+    if (!pair) return undefined;
+    if (!fs.existsSync(pair.project.root_path)) return undefined;
+    return resolveWorkRoot(pair.session, pair.project.root_path);
+  }
+
   /** 发起一轮对话：阻塞到引擎结束（事件经 publish 实时推送）。images = F-25 图片附件（已完成校验）。 */
   async send(sessionId: string, input: string, images?: MessageImage[]): Promise<void> {
     const prev = this.running.get(sessionId);

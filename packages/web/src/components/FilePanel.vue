@@ -4,12 +4,16 @@
 // 业务状态全部来自 stores/filePanel；本组件只持「拖拽中 / 局部菜单开合」这类瞬时 UI 状态。
 import { computed, onUnmounted, ref } from 'vue';
 import { useFilePanelStore, NO_SCOPE_HINT, type PanelTab } from '../stores/filePanel';
+import { useChatStore } from '../stores/chat';
 import { PANEL_DEFAULT_WIDTH } from '../utils/panelSize';
 import FileTree from './FileTree.vue';
 import FilePreview from './FilePreview.vue';
 import ChangesPanel from './ChangesPanel.vue';
 
 const panel = useFilePanelStore();
+// F-47：空态动作「打开终端」上抛（开关逻辑在工作台——面板保持纯展示）
+const emit = defineEmits<{ (e: 'open-terminal'): void }>();
+const chat = useChatStore();
 
 /** 标签条高度 / 面板宽度均为布局规格（PRD §5.6）：36px 标签条、320~720 宽度 */
 const resizing = ref(false);
@@ -145,6 +149,16 @@ function revealRoot(): void {
         </button>
         <button class="fp-action" type="button" @click="panel.openTab('files')">
           <span class="fp-action-ico">🗂</span>查看工作空间
+        </button>
+        <!-- F-47：打开终端改为内嵌面板（工作台底部），替代方案（系统文件管理器）保留 -->
+        <button
+          class="fp-action"
+          type="button"
+          :disabled="!chat.sessionId"
+          :title="chat.sessionId ? '打开内置终端（绑定当前会话工作根）' : '先打开会话'"
+          @click="emit('open-terminal')"
+        >
+          <span class="fp-action-ico">🖥</span>打开终端
         </button>
         <button class="fp-action" type="button" @click="panel.openTab('changes')">
           <span class="fp-action-ico">±</span>查看变更

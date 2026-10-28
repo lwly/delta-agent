@@ -25,6 +25,7 @@ import { useExpertsStore } from '../stores/experts';
 import type { ExpertListItem } from '../api/client';
 import RunStatusBar from '../components/RunStatusBar.vue';
 import FilePanel from '../components/FilePanel.vue';
+import TerminalPane from '../components/TerminalPane.vue';
 import { useFilePanelStore } from '../stores/filePanel';
 // 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
 import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
@@ -52,6 +53,8 @@ const removeTarget = ref<{ kind: 'project' | 'session'; id: string; name: string
 const removeConfirmName = ref('');
 const showTrash = ref(false);
 const showSearch = ref(false);
+// F-47：内置终端面板开关（依赖已打开的会话——pty 工作根跟随会话工作根）
+const showTerminal = ref(false);
 // ── F-39 专家 / 专家团 ──────────────────────────────────────────────
 const showExpertPanel = ref(false);
 const expertChipRef = ref<HTMLElement | null>(null);
@@ -1475,6 +1478,13 @@ watch(
         </div>
 
         <!-- 输入区（运行中整体轻量降级：opacity 0.75 + 顶部细提示行，不做遮挡，保留紧急停止入口） -->
+        <!-- F-47：内置终端面板（输入区上方；随会话切换重建——key 携带 sessionId/workRoot 由组件内部固化） -->
+        <TerminalPane
+          v-if="showTerminal && chat.sessionId"
+          :key="chat.sessionId"
+          :session-id="chat.sessionId"
+          @close="showTerminal = false"
+        />
         <div class="composer-wrap">
           <div class="composer" :class="{ resizing: composerResizing, degraded: chat.running }">
             <!-- 运行中顶部细提示行 -->
@@ -1488,6 +1498,14 @@ watch(
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 @ 后自动补全项目文件" @click="acTrigger('file')">@文件引用</button>
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 / 后自动补全可用技能" @click="acTrigger('skill')">/skill 技能</button>
                 <span class="tool-chip static" title="查看已配置的 MCP 扩展工具提示词">/mcp 扩展工具</span>
+                <!-- F-47：内置终端（会话工作根绑定；运行中不禁用——终端独立于 Agent 执行） -->
+                <button
+                  class="tool-chip"
+                  type="button"
+                  :disabled="!chat.sessionId"
+                  :title="chat.sessionId ? '打开内置终端（绑定当前会话工作根）' : '先打开会话'"
+                  @click="showTerminal = !showTerminal"
+                >🖥 终端</button>
                 <!-- F-39：召唤专家（切换 = 新建对话；运行中置灰） -->
                 <button
                   ref="expertChipRef"
@@ -1617,7 +1635,7 @@ watch(
     </main>
 
     <!-- ══════════ F-38 右侧文件面板（第三栏：侧栏 + 主区 + 面板） ══════════ -->
-    <FilePanel v-if="panel.open" />
+    <FilePanel v-if="panel.open" @open-terminal="showTerminal = true" />
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
