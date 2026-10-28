@@ -10,6 +10,9 @@ directories:
 files:
   - dist/**
   - package.json
+  # 托盘/窗口图标：resolveWindowIcon() 按相对 main.js 的 ../icons/icon.png 解析，
+  # 缺失会导致打包形态 Tray 不创建、关窗驻留静默退化为直接退出
+  - icons/icon.png
   # workspace 包整体复制时排掉本地测试残留（.gitignore 忽略项）：
   # .tmp-test/ 内含指向旧项目路径的悬空 evil-link，会让 NodeModuleCopyHelper stat 失败
   - "!**/.tmp-test/**"

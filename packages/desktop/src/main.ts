@@ -51,8 +51,9 @@ function resolveWebDistDir(): string | undefined {
 }
 
 /**
- * 窗口图标（win/linux 开发态任务栏；打包形态由 electron-builder 写入可执行文件资源，
- * 打包后 icons/ 不进 asar（files 仅 dist/**），解析失败静默回退默认图标）。
+ * 窗口/托盘图标：icons/icon.png 已随 electron-builder files 打进 asar，
+ * dev 与打包形态路径解析一致（同为相对 main.js 的 ../icons/icon.png）。
+ * 解析失败（图标文件缺失）静默回退，此时托盘不创建、关窗退回「关闭即退出」。
  */
 function resolveWindowIcon(): string | undefined {
   const iconPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../icons/icon.png');
