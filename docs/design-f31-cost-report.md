@@ -420,3 +420,43 @@ sequenceDiagram
 1. **hub 落库粒度行为变更（D5）**：存量数据中 hub 写入的 turn=0 整轮行在新报告里按「1 轮」计，与该任务真实轮数不符（历史口径问题，迁移不修复）；新数据三端一致。如需历史精确轮次，只能依赖 messages 表推导——本期不做，留待反馈。
 2. **plan-execute / multi-agent 主循环**：告警发出点位于 runReAct；编排模式（plan-execute/orchestrator）的节点执行内部复用 runReAct，子任务级告警会透传到父事件流。若编排主循环存在独立 budget 消费路径（当前 grep 仅 react.ts 一处），需在 T03 实现时复核一遍两个引擎文件。
 3. **项目名展示**：byProject 用 projects.name 直读；项目软删除后名称仍展示（无「（已删除）」标记）——如 Web 侧需要区分，属一行判断，实现时顺手处理即可，不阻塞。
+
+---
+
+## 11. 2026-10-28 增量：子代理配额 / 用量统一口径 / 预算降级续跑
+
+> 背景：会话预算累计口径包含子代理用量（F-26 回写父预算），但 done.usage 与 usage 落库只统计主循环，
+> 两侧数字差距可达 10 倍以上；且子代理各自继承完整会话预算（默认 200k），一次并行即可把父预算大幅突破
+> （实测 252%）；预算到 100% 直接硬停，任务被迫重发消息硬顶。
+
+### 11.1 方案 C —— 子代理配额（tools/builtin/task.ts + context/budget.ts）
+
+- `SUBAGENT_MAX_TOKENS = 60_000`：单个子代理 token 预算 = **min(父预算剩余, 60k)**；
+  无父预算实例的嵌入场景沿用 `budgetConfig` 但同样封顶 60k。
+- 父预算按序**预留**（`BudgetManager.reserveTokens/releaseTokens/remainingTokens`），
+  并行派生总量不超过父剩余，杜绝一次并行超卖；子代理结束后释放预留（实际用量已 record）。
+- 父预算剩余为 0 时 fail-fast（`subagent_budget_exhausted`），且先于委派副作用执行，
+  不产生悬挂的 `expert_delegate_start` 成员卡。
+- 子代理超限只终止该子代理（既有 `budget_exhausted` → `子代理预算耗尽` 路径），父代理继续。
+
+### 11.2 方案 B —— 用量统一口径（engine/react.ts）
+
+- `tool_result.meta.usage`（task 工具回传的子代理消耗）在引擎层并入 `usageTotal`，
+  并补发一条 `usage` 事件 → hub 逐轮落库，**done.usage / usage 表 / 预算累计三者同口径**。
+- 预算侧不重复 record（task 工具已回写父预算），无双计。
+- `done` 事件新增可选 `subagents` 字段 = 本次运行子代理派生次数，Web 端标注「含子代理 N 个」。
+
+### 11.3 方案 D —— 预算降级续跑（engine/react.ts + server/hub.ts + Web）
+
+- `RunContext.budgetDegrade`（**缺省 false**）：headless 退出码 4 / `budget_exhausted` 硬停协议完全不变；
+  hub（Web serve 链路）传 true。
+- 开启时 100% 不终止：发出一次 `budget_degraded` 事件（`summarize('degraded')` 文案）+ 注入一次性收敛提示，
+  随后**禁用 task 工具**、单轮 `maxTokens` 降到 1024，主循环继续到自然收敛（轮次/中断照旧封顶）。
+- Web：`budget_degraded` → RunStatusBar 展示「✚ 追加预算继续」（×2）/「×5」按钮 →
+  `POST /api/settings/budget/extend {multiply}`（现有上限 ×N 持久化，下一轮生效）→ 自动发送「继续」。
+
+### 11.4 验证
+
+- 单测：budget.test.ts（预留/释放/剩余）、task-tool.test.ts（60k 封顶 / 父剩余 / fail-fast / 释放）、
+  react.test.ts（降级行为 / 缺省硬停不回归 / 子代理用量聚合与 done.subagents）、
+  server.test.ts（extend 端点）；`pnpm typecheck`、`pnpm test`、`pnpm smoke:web` 通过。
