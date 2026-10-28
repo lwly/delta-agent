@@ -192,6 +192,21 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     // 回退主模型
   }
 
+  // F-42：压缩摘要（summarize kind）路由——命中规则时压缩摘要走小模型，用量按 aux model 归因；
+  // 规则缺失 / 目标 provider 构建失败 → undefined 回退主模型（与 subagent 路由降级语义一致）
+  let summarizeRoute: RunContext['summarizeRoute'];
+  try {
+    const r = new ModelRouter().resolve('summarize');
+    if (r) {
+      summarizeRoute = {
+        provider: r.provider ? await resolveProviderFromEnv(r.provider) : provider,
+        model: r.model,
+      };
+    }
+  } catch {
+    // 回退主模型
+  }
+
   // F-27 Hook 系统：加载用户级 + 项目级 hooks.json
   const hooks = HookManager.load(cwd);
 
@@ -238,6 +253,8 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       hooks,
     },
     budget,
+    // F-42：压缩摘要路由目标（undefined = 跟随主模型）
+    summarizeRoute,
     windowTokens: 200_000,
     tasks: service.tasks,
   };

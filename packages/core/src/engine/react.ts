@@ -46,6 +46,12 @@ export interface RunContext {
   budgetDegrade?: boolean;
   /** model context window in tokens (for compaction trigger) */
   windowTokens: number;
+  /**
+   * F-42：压缩摘要（summarize kind）的路由目标——命中 routing 规则时辅助调用走小模型。
+   * 由 SessionHub / headless 入口经 routeAux 解析后注入（含降级判定：解析失败不注入 = 跟随主模型）。
+   * 缺省 = 压缩摘要跟随会话主模型（决议 #10 原口径不变）。
+   */
+  summarizeRoute?: { provider: LLMProvider; model: string };
   /** retry limit for transient LLM failures */
   maxRetries?: number;
   /** M5: Plan/Multi-Agent 编排参数（agent-modes-design §3/§5） */
@@ -178,6 +184,11 @@ export async function* runReAct(
       }
 
       // ── auto compaction (80% trigger / 55% target) ──
+      // F-42：summarize 路由——命中 routing 规则时压缩摘要走目标模型，用量以 aux model 归因
+      // （usage 事件带 model → hub 逐轮落库可区分辅助调用）；未配置/不可用时跟随主模型（决议 #10 兜底）。
+      const auxProvider = ctx.summarizeRoute?.provider ?? ctx.provider;
+      const auxModel = ctx.summarizeRoute?.model ?? ctx.model;
+      const auxUsage: Usage = { inputTokens: 0, outputTokens: 0 };
       const compressDeps: CompressorDeps = {
         windowTokens: ctx.windowTokens,
         summarize: async (prev, transcript) => {
@@ -189,13 +200,17 @@ export async function* runReAct(
             },
           ];
           let text = '';
-          for await (const ev of ctx.provider.chat({
+          for await (const ev of auxProvider.chat({
             messages: sumMessages,
             tools: [],
-            model: ctx.model,
+            model: auxModel,
             maxTokens: 2048,
           })) {
             if (ev.type === 'text_delta') text += ev.text;
+            if (ev.type === 'usage') {
+              auxUsage.inputTokens += ev.input;
+              auxUsage.outputTokens += ev.output;
+            }
             if (ev.type === 'error') throw new Error(ev.message);
           }
           return text.trim() || prev;
@@ -210,6 +225,17 @@ export async function* runReAct(
         messages.push(...result.messages);
         prevSummary = result.summary;
         yield { type: 'compact_done', beforeTokens: before, afterTokens: result.afterTokens };
+        // F-42：压缩摘要用量单独归因（usage 事件带 aux model → hub 逐轮落库可区分辅助调用）；
+        // 计入 usageTotal（done.usage 与 headless 汇总一致）与预算（真实消耗，与子代理回写同口径）
+        if (auxUsage.inputTokens > 0 || auxUsage.outputTokens > 0) {
+          const auxCost = computeCostUsd(auxModel, auxUsage.inputTokens, auxUsage.outputTokens);
+          if (auxCost !== undefined) auxUsage.costUsd = auxCost;
+          ctx.budget.record(auxUsage);
+          usageTotal.inputTokens += auxUsage.inputTokens;
+          usageTotal.outputTokens += auxUsage.outputTokens;
+          usageTotal.costUsd = (usageTotal.costUsd ?? 0) + (auxUsage.costUsd ?? 0);
+          yield { type: 'usage', usage: auxUsage, model: auxModel };
+        }
       }
 
       // ── LLM round-trip (SSE, with retries, streaming deltas) ──

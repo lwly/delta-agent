@@ -631,6 +631,10 @@ export class SessionHub {
       const subRoute = await this.routeAux('subagent');
       const subagentModel = subRoute?.model ?? session.model ?? '';
 
+      // F-42：压缩摘要（summarize kind）路由——规则命中时压缩摘要走小模型，
+      // 用量按 aux model 归因落库；未配置 / 目标 provider 构建失败 → 跟随会话主模型
+      const summarizeRoute = await this.routeAux('summarize');
+
       // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
       // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）
       const expert: ExpertRecord | undefined = session.expert
@@ -740,6 +744,8 @@ export class SessionHub {
         budget,
         // 方案 D：Web 链路预算耗尽降级续跑（headless/cron 硬停协议不受影响）
         budgetDegrade: true,
+        // F-42：压缩摘要路由目标（undefined = 跟随主模型）
+        summarizeRoute,
         windowTokens: this.deps.windowTokens ?? 200_000,
         plan: this.deps.plan,
         tasks: service.tasks,

@@ -395,3 +395,74 @@ describe('runReAct', () => {
     expect(usages.some((u) => u.usage.inputTokens === 500 && u.usage.outputTokens === 100)).toBe(true);
   });
 });
+
+// ── F-42：压缩摘要路由（summarizeRoute）────────────────────────────────────
+
+/** 带 chat 请求捕获的 Mock（记录每次 chat 的请求，断言路由 model 用） */
+class CapturingProvider extends MockProvider {
+  readonly requests: ChatRequest[] = [];
+  async *chat(req: ChatRequest): AsyncIterable<StreamEvent> {
+    this.requests.push(req);
+    yield* super.chat(req);
+  }
+}
+
+describe('F-42 summarize routing', () => {
+  /** 7 条 user 大消息：保证 compactZone 非空，且总 token 超过小窗口阈值触发压缩 */
+  function bigHistory(): ChatMessage[] {
+    return Array.from({ length: 7 }, (_, i) => ({
+      role: 'user' as const,
+      content: `turn-${i} ${'x'.repeat(6000)}`,
+    }));
+  }
+
+  it('命中 summarizeRoute：压缩摘要走目标模型 + 归因 usage 事件 + done.usage 汇总', async () => {
+    const aux = new CapturingProvider([{ text: '压缩摘要', usage: { input: 123, output: 45 } }]);
+    const main = new CapturingProvider([{ text: '最终答案', usage: { input: 10, output: 2 } }]);
+    const events = await collect(
+      runReAct(
+        makeCtx(main, {
+          windowTokens: 1000,
+          summarizeRoute: { provider: aux, model: 'aux-model' },
+          toolContext: { ...makeCtx(main).toolContext, projectRoot: tmpRoot },
+        }),
+        bigHistory(),
+        'hi',
+      ),
+    );
+    // 压缩摘要请求打到 aux provider，且 model = 路由目标；主循环仍用主模型
+    expect(aux.requests).toHaveLength(1);
+    expect(aux.requests[0]!.model).toBe('aux-model');
+    expect(main.requests.every((r) => r.model === 'mock-model')).toBe(true);
+    // 归因 usage 事件（model = aux-model），hub 据此逐轮落库区分辅助调用
+    const usages = events.filter((e): e is Extract<AgentEvent, { type: 'usage' }> => e.type === 'usage');
+    const auxUsage = usages.find((u) => u.model === 'aux-model');
+    expect(auxUsage).toBeDefined();
+    expect(auxUsage!.usage.inputTokens).toBe(123);
+    expect(auxUsage!.usage.outputTokens).toBe(45);
+    // done.usage 覆盖主循环 + 压缩摘要（与 headless 汇总口径一致）
+    const done = events.find((e): e is Extract<AgentEvent, { type: 'done' }> => e.type === 'done')!;
+    expect(done.usage.inputTokens).toBe(133);
+    expect(done.usage.outputTokens).toBe(47);
+  });
+
+  it('未注入 summarizeRoute：压缩摘要跟随主模型（决议 #10 兜底，用量仍归因落库）', async () => {
+    const main = new CapturingProvider([
+      { text: '压缩摘要', usage: { input: 5, output: 1 } }, // 压缩摘要调用（主模型）
+      { text: '最终答案', usage: { input: 10, output: 2 } },
+    ]);
+    const events = await collect(
+      runReAct(
+        makeCtx(main, { windowTokens: 1000, toolContext: { ...makeCtx(main).toolContext, projectRoot: tmpRoot } }),
+        bigHistory(),
+        'hi',
+      ),
+    );
+    expect(main.requests[0]!.model).toBe('mock-model');
+    const usages = events.filter((e): e is Extract<AgentEvent, { type: 'usage' }> => e.type === 'usage');
+    // 所有 usage 事件 model 均为主模型（无跨模型归因）
+    expect(usages.every((u) => u.model === 'mock-model')).toBe(true);
+    const done = events.find((e): e is Extract<AgentEvent, { type: 'done' }> => e.type === 'done')!;
+    expect(done.usage.inputTokens).toBe(15);
+  });
+});

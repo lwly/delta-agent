@@ -14,6 +14,7 @@ import type { ConfirmDecision } from '@delta/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
+import { KNOWN_TASK_KINDS } from '../llm/router.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
 import { DEFAULT_SESSION_BUDGET } from '../context/budget.js';
@@ -861,6 +862,52 @@ export function createWebServer(opts: ServeOptions): http.Server {
             return json(res, 200, r);
           } catch (e) {
             return json(res, 200, { ok: false, models: [], detail: (e as Error).message });
+          }
+        }
+      }
+
+      // ── models/routing（F-42：Web 设置页模型路由卡片，读写 ~/.delta/models.json routing 字段）──
+      // 与 providers CRUD 共用同一 ProviderManager（同文件读写互不覆盖），保存走 setRouting 既有校验
+      if (parts[0] === 'api' && parts[1] === 'models' && parts[2] === 'routing' && opts.providers) {
+        const mgr = opts.providers;
+        // GET /api/models/routing —— 当前路由配置（未配置返回缺省关闭态）
+        if (method === 'GET' && parts.length === 3) {
+          return json(res, 200, {
+            knownKinds: KNOWN_TASK_KINDS,
+            routing: mgr.getRouting() ?? { enabled: false, rules: {} },
+          });
+        }
+        // PUT /api/models/routing —— 保存：body {enabled?, rules?}；rules 缺省沿用现值（仅切开关）
+        if (method === 'PUT' && parts.length === 3) {
+          const body = await readBody(req);
+          try {
+            const current = mgr.getRouting();
+            const rules =
+              body.rules !== undefined
+                ? (body.rules as Record<string, { provider?: string; model: string }>)
+                : current?.rules ?? {};
+            // provider 空/空白归一为 undefined（= 跟随会话主 Provider，与 resolve 口径一致）
+            const normalized: Record<string, { provider?: string; model: string }> = {};
+            for (const [kind, rule] of Object.entries(rules)) {
+              if (!rule || typeof rule !== 'object') continue;
+              // model 非字符串：原样透传，交 setRouting 既有校验抛「model 不能为空」
+              if (typeof rule.model !== 'string') {
+                normalized[kind] = rule as { model: string };
+                continue;
+              }
+              const model = rule.model.trim();
+              if (model === '') continue; // 空 model 规则直接丢弃（等效未配置）
+              const provider = typeof rule.provider === 'string' && rule.provider.trim() !== '' ? rule.provider.trim() : undefined;
+              normalized[kind] = provider ? { provider, model } : { model };
+            }
+            const enabled = typeof body.enabled === 'boolean' ? body.enabled : current?.enabled ?? false;
+            if (enabled && Object.keys(normalized).length === 0) {
+              return err(res, 400, '启用路由前请先配置至少一条规则');
+            }
+            mgr.setRouting({ enabled, rules: normalized });
+            return json(res, 200, { ok: true, routing: mgr.getRouting() });
+          } catch (e) {
+            return err(res, 400, (e as Error).message);
           }
         }
       }

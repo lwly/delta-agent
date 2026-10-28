@@ -726,6 +726,17 @@ export const api = {
       'GET', '/api/tools',
     ),
 
+  // F-42 模型路由（设置页「路由」面板：辅助任务 → 目标模型规则）
+  routingGet: () =>
+    request<{
+      knownKinds: string[];
+      routing: { enabled: boolean; rules: Record<string, { provider?: string; model: string }> };
+    }>('GET', '/api/models/routing'),
+  routingSet: (payload: { enabled: boolean; rules: Record<string, { provider?: string; model: string }> }) =>
+    request<{ ok: boolean; routing: { enabled: boolean; rules: Record<string, { provider?: string; model: string }> } }>(
+      'PUT', '/api/models/routing', payload,
+    ),
+
   // F-37 git 分支切换 + worktree（session 作用域，与 /permission 同级同风格）
   gitState: (sessionId: string) => request<SessionGitState>('GET', `/api/sessions/${sessionId}/git`),
   listBranches: (sessionId: string) =>
