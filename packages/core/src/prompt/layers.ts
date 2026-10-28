@@ -158,7 +158,7 @@ export class MemoryLayer implements PromptLayer {
   }
 }
 
-/** L7 会话动态信息：时间、CWD、模型信息（每轮更新） */
+/** L7 会话动态信息：时间、CWD、OS/Shell、模型信息（每轮更新） */
 export class SessionLayer implements PromptLayer {
   readonly id = 'session' as const;
   readonly title = '运行环境';
@@ -167,11 +167,23 @@ export class SessionLayer implements PromptLayer {
 
   build(ctx: AssembleContext): LayerValue {
     const s = ctx.session;
-    return [
+    const platform = process.platform;
+    const shell = platform === 'win32' ? 'PowerShell（pwsh）' : platform === 'darwin' ? 'zsh' : 'bash';
+    const lines = [
       `- 当前时间：${s.now.toISOString()}`,
       `- 工作目录：${s.cwd}`,
+      `- 操作系统 / Shell：${platform}，run_command 经 ${shell} 执行`,
       `- 当前模型：${s.model}（上下文窗口 ${s.contextWindow.toLocaleString()} tokens）`,
-    ].join('\n');
+    ];
+    if (platform === 'win32') {
+      // 反馈：模型在 Windows 上生成 grep/head/wc 等 Unix 管道导致命令全部失败
+      lines.push(
+        '- Windows 命令注意：环境里没有 grep / head / tail / wc / cat / find 等 Unix 工具。' +
+          '文本与文件检索优先使用内置 grep_search / read_file / glob_search 工具；' +
+          '确需 run_command 时用 PowerShell 原生写法（Select-String、Where-Object、Measure-Object、Get-Content），不要拼 Unix 管道',
+      );
+    }
+    return lines.join('\n');
   }
 }
 

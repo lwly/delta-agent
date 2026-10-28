@@ -84,7 +84,8 @@ describe('PromptBuilder 裁剪优先级', () => {
     const asm = new SplitPromptAssembler();
     const split = asm.assemble(makeCtx());
     const builder = new PromptBuilder({
-      budget: { dynamicTokens: 10, memoryTokens: 80 },
+      // memoryTokens 需容纳 session 段（含运行环境新增的 OS/Shell 行）+ 高分记忆，但容不下两条全部
+      budget: { dynamicTokens: 10, memoryTokens: 100 },
     });
     const r = builder.build(split, {
       memoryEntries: [
