@@ -386,7 +386,16 @@ export {
   type EmbeddingOptions,
 } from './llm/embeddings.js';
 
-export { McpManager, loadMcpConfig, type McpServerConfig } from './mcp/client.js';
+export {
+  McpManager,
+  loadMcpConfig,
+  readMcpConfigFile,
+  saveMcpConfig,
+  decryptMcpHeaders,
+  encryptMcpHeaders,
+  maskMcpHeaderValue,
+  type McpServerConfig,
+} from './mcp/client.js';
 
 export {
   HookManager,

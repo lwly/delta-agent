@@ -479,12 +479,14 @@ export interface SkillSaveInput {
 }
 
 export interface McpServerEntry {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
   timeoutMs?: number;
-  /** 保留字段（当前仅支持 stdio 传输），原样存取 */
+  /** streamable HTTP 端点（F-48）：与 command 二选一 */
   url?: string;
+  /** HTTP 鉴权头；值可为 enc:v1: 密文（服务端写入时加密），界面显示掩码 */
+  headers?: Record<string, string>;
 }
 
 export interface McpFileState {

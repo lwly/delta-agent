@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // 设置页·MCP 配置面板：全局（~/.delta/mcp.json）与项目级（<root>/.delta/mcp.json）
 // 两作用域的 mcpServers 增删改（整体保存覆盖对应文件）。项目级同名覆盖全局。
-// 如实标注：当前仅支持 stdio 传输；MCP 配置在 CLI 会话生效，Web 控制台会话尚未接入 MCP 桥。
+// F-48：支持 stdio 与 streamable HTTP（url + headers）两种传输；header 值落盘前
+// 由服务端加密（enc:v1:），界面显示掩码 ********，保存时未修改的掩码还原为原密文。
 import { computed, onMounted, ref, watch } from 'vue';
-import { api, type McpConfigResponse } from '../../api/client';
+import { api, type McpConfigResponse, type McpServerEntry } from '../../api/client';
 import { useWorkspaceStore } from '../../stores/workspace';
 
 const ws = useWorkspaceStore();
@@ -15,17 +16,23 @@ const data = ref<McpConfigResponse | null>(null);
 
 const scope = ref<'global' | 'project'>('global');
 
-/** 单行编辑模型（args/env 以文本承载，保存时解析） */
+/** 单行编辑模型（args/env/headers 以文本承载，保存时解析） */
 interface ServerRow {
   name: string;
+  transport: 'stdio' | 'http';
   command: string;
   argsText: string;
   envText: string;
+  url: string;
+  headersText: string;
+  /** 原始密文（headers 掩码还原用）：保存时 ******** → 原密文，明文交服务端加密 */
+  rawHeaders: Record<string, string>;
   timeoutMs: string;
 }
 const rows = ref<ServerRow[]>([]);
 const dirty = ref(false);
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
+const ENC_PREFIX = 'enc:v1:';
 
 const projectEnabled = computed(() => data.value?.projectEnabled ?? false);
 const activeProjectName = computed(
@@ -40,15 +47,23 @@ const scopeParseError = computed(() => {
   return scope.value === 'global' ? data.value.global.parseError ?? '' : data.value.project?.parseError ?? '';
 });
 
+function emptyRow(): ServerRow {
+  return { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '', headersText: '', rawHeaders: {}, timeoutMs: '' };
+}
+
 function rowsFromFile(): ServerRow[] {
   if (!data.value) return [];
   const state = scope.value === 'global' ? data.value.global : data.value.project;
   if (!state) return [];
   return Object.entries(state.servers).map(([name, cfg]) => ({
     name,
-    command: cfg.command,
+    transport: cfg.url ? 'http' : 'stdio',
+    command: cfg.command ?? '',
     argsText: (cfg.args ?? []).join('\n'),
     envText: Object.entries(cfg.env ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    url: cfg.url ?? '',
+    headersText: Object.entries(cfg.headers ?? {}).map(([k, v]) => `${k}=${v.startsWith(ENC_PREFIX) ? '********' : v}`).join('\n'),
+    rawHeaders: { ...(cfg.headers ?? {}) },
     timeoutMs: cfg.timeoutMs != null ? String(cfg.timeoutMs) : '',
   }));
 }
@@ -83,7 +98,7 @@ function switchScope(next: 'global' | 'project') {
 }
 
 function addRow() {
-  rows.value.push({ name: '', command: '', argsText: '', envText: '', timeoutMs: '' });
+  rows.value.push(emptyRow());
   dirty.value = true;
 }
 
@@ -102,7 +117,7 @@ function shadowedBy(name: string): boolean {
 async function save() {
   if (!dirty.value || loading.value) return;
   error.value = '';
-  const record: Record<string, { command: string; args?: string[]; env?: Record<string, string>; timeoutMs?: number }> = {};
+  const record: Record<string, McpServerEntry> = {};
   const seen = new Set<string>();
   for (const r of rows.value) {
     const name = r.name.trim();
@@ -115,24 +130,51 @@ async function save() {
       return;
     }
     seen.add(name);
-    if (!r.command.trim()) {
-      error.value = `服务器「${name}」缺少 command（stdio 启动命令）`;
-      return;
-    }
-    const entry: (typeof record)[string] = { command: r.command.trim() };
-    const args = r.argsText.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (args.length) entry.args = args;
-    const envLines = r.envText.split('\n').map((s) => s.trim()).filter(Boolean);
-    const env: Record<string, string> = {};
-    for (const line of envLines) {
-      const eq = line.indexOf('=');
-      if (eq <= 0) {
-        error.value = `服务器「${name}」env 行格式错误：「${line}」（应为 KEY=VALUE）`;
+    const entry: McpServerEntry = {};
+    if (r.transport === 'http') {
+      if (!r.url.trim()) {
+        error.value = `服务器「${name}」缺少 url（streamable HTTP 端点）`;
         return;
       }
-      env[line.slice(0, eq).trim()] = line.slice(eq + 1);
+      entry.url = r.url.trim();
+      // headers：每行 KEY=VALUE；******** 为未修改的掩码 → 还原原密文；明文交服务端加密落盘
+      const headerLines = r.headersText.split('\n').map((s) => s.trim()).filter(Boolean);
+      const headers: Record<string, string> = {};
+      for (const line of headerLines) {
+        const eq = line.indexOf('=');
+        if (eq <= 0) {
+          error.value = `服务器「${name}」headers 行格式错误：「${line}」（应为 KEY=VALUE）`;
+          return;
+        }
+        const k = line.slice(0, eq).trim();
+        const v = line.slice(eq + 1);
+        headers[k] = v === '********' ? (r.rawHeaders[k] ?? '') : v;
+        if (!headers[k]) {
+          error.value = `服务器「${name}」header「${k}」掩码无对应原值，请重新输入`;
+          return;
+        }
+      }
+      if (Object.keys(headers).length) entry.headers = headers;
+    } else {
+      if (!r.command.trim()) {
+        error.value = `服务器「${name}」缺少 command（stdio 启动命令）`;
+        return;
+      }
+      entry.command = r.command.trim();
+      const args = r.argsText.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (args.length) entry.args = args;
+      const envLines = r.envText.split('\n').map((s) => s.trim()).filter(Boolean);
+      const env: Record<string, string> = {};
+      for (const line of envLines) {
+        const eq = line.indexOf('=');
+        if (eq <= 0) {
+          error.value = `服务器「${name}」env 行格式错误：「${line}」（应为 KEY=VALUE）`;
+          return;
+        }
+        env[line.slice(0, eq).trim()] = line.slice(eq + 1);
+      }
+      if (Object.keys(env).length) entry.env = env;
     }
-    if (Object.keys(env).length) entry.env = env;
     if (r.timeoutMs.trim()) {
       const n = Number(r.timeoutMs);
       if (!Number.isFinite(n) || n <= 0) {
@@ -162,8 +204,7 @@ async function save() {
       <div>
         <h2 class="panel-title">MCP 服务器</h2>
         <p class="panel-sub">
-          配置 MCP 扩展工具（stdio 传输，<code>url</code> 字段保留）。
-          项目级同名覆盖全局；修改在<b>新会话</b>生效。
+          配置 MCP 扩展工具（stdio 或 streamable HTTP 传输）。项目级同名覆盖全局；修改在<b>新会话</b>生效。
         </p>
       </div>
       <div class="head-ops">
@@ -199,23 +240,44 @@ async function save() {
             <span class="fl">名称</span>
             <input v-model="r.name" placeholder="filesystem" @input="dirty = true" />
           </label>
-          <label class="field grow">
-            <span class="fl">command（stdio 启动命令）</span>
-            <input v-model="r.command" class="mono" placeholder="npx -y @modelcontextprotocol/server-filesystem /path" @input="dirty = true" />
+          <label class="field">
+            <span class="fl">传输</span>
+            <select v-model="r.transport" @change="dirty = true">
+              <option value="stdio">stdio（本地子进程）</option>
+              <option value="http">streamable HTTP（远程端点）</option>
+            </select>
           </label>
+          <template v-if="r.transport === 'stdio'">
+            <label class="field grow">
+              <span class="fl">command（stdio 启动命令）</span>
+              <input v-model="r.command" class="mono" placeholder="npx -y @modelcontextprotocol/server-filesystem /path" @input="dirty = true" />
+            </label>
+          </template>
+          <template v-else>
+            <label class="field grow">
+              <span class="fl">url（streamable HTTP 端点）</span>
+              <input v-model="r.url" class="mono" placeholder="https://example.com/mcp" @input="dirty = true" />
+            </label>
+          </template>
           <label class="field w80">
             <span class="fl">timeoutMs</span>
             <input v-model="r.timeoutMs" class="mono" placeholder="60000" @input="dirty = true" />
           </label>
         </div>
         <div class="row-grid">
-          <label class="field grow">
-            <span class="fl">args（每行一个参数）</span>
-            <textarea v-model="r.argsText" class="mono mini" rows="2" placeholder="-y&#10;@modelcontextprotocol/server-filesystem" @input="dirty = true" />
-          </label>
-          <label class="field grow">
-            <span class="fl">env（每行 KEY=VALUE）</span>
-            <textarea v-model="r.envText" class="mono mini" rows="2" placeholder="API_KEY=xxx" @input="dirty = true" />
+          <template v-if="r.transport === 'stdio'">
+            <label class="field grow">
+              <span class="fl">args（每行一个参数）</span>
+              <textarea v-model="r.argsText" class="mono mini" rows="2" placeholder="-y&#10;@modelcontextprotocol/server-filesystem" @input="dirty = true" />
+            </label>
+            <label class="field grow">
+              <span class="fl">env（每行 KEY=VALUE）</span>
+              <textarea v-model="r.envText" class="mono mini" rows="2" placeholder="API_KEY=xxx" @input="dirty = true" />
+            </label>
+          </template>
+          <label v-else class="field grow">
+            <span class="fl">headers（每行 KEY=VALUE；值保存后加密，显示为 ********）</span>
+            <textarea v-model="r.headersText" class="mono mini" rows="2" placeholder="Authorization=Bearer xxx" @input="dirty = true" />
           </label>
         </div>
         <div class="row-foot">
@@ -233,8 +295,8 @@ async function save() {
     </div>
 
     <p class="foot-note">
-      ⚠ 生效范围：MCP 配置当前由 CLI 运行（<code>delta</code> 命令行会话）加载；Web 控制台会话尚未接入 MCP
-      工具桥，此处修改对 Web 会话不生效。工具将以 <code>mcp__&lt;服务器&gt;__&lt;工具&gt;</code> 形式注册并默认逐次确认。
+      ⚠ 生效范围：工具将以 <code>mcp__&lt;服务器&gt;__&lt;工具&gt;</code> 形式注册并默认逐次确认；工具描述与结果按
+      untrusted 口径包裹后入上下文。streamable HTTP 的 header 值写入时加密存储（<code>enc:v1:</code>），界面仅显示掩码。
     </p>
   </section>
 </template>
@@ -283,6 +345,7 @@ async function save() {
 .field.w80 { width: 110px; min-width: 110px; }
 .fl { font-size: 11px; color: var(--text-dim); }
 .field input { height: 30px; padding: 0 9px; font-size: 12.5px; }
+.field select { height: 30px; padding: 0 6px; font-size: 12px; }
 .mono { font-family: var(--mono); }
 textarea.mini {
   font-size: 12px; line-height: 1.6; resize: vertical;

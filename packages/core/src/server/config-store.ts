@@ -13,6 +13,7 @@ import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import { defaultBuiltinSkillsDir, readSkillDir, type SkillLayer, type SkillMeta } from '../skills/loader.js';
 import { FILES, projectConfigDir, userConfigDir } from '../paths.js';
+import { encryptMcpHeaders } from '../mcp/client.js';
 
 /** 合法 Skill / MCP server 名称：字母数字开头，允许 - _ ，2–64 字符 */
 export function validateConfigName(name: string): string | null {
@@ -139,12 +140,14 @@ export async function listLayerSkills(dir: string, layer: SkillLayer): Promise<{
 // ── MCP 配置（mcp.json 读写）────────────────────────────────────────────────
 
 export interface McpServerEntry {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
   timeoutMs?: number;
-  /** 保留字段（M2 不支持 SSE 透传），原样存取 */
+  /** streamable HTTP 端点（F-48）：与 command 二选一 */
   url?: string;
+  /** F-48 HTTP 鉴权头；写入时明文值统一加密为 enc:v1: 密文 */
+  headers?: Record<string, string>;
 }
 
 export interface McpFileState {
@@ -199,7 +202,8 @@ export async function readMcpConfigs(layers: SkillLayers): Promise<McpConfigSnap
   return { global, project, merged };
 }
 
-/** 校验待写入的 mcpServers 形状：每项必须有非空 command（url 为保留字段，原样通过） */
+/** 校验待写入的 mcpServers 形状：command（stdio）与 url（streamable HTTP）二选一；
+ *  header 明文值写入前统一加密（F-48：明文不落盘）。 */
 export function validateMcpServers(servers: unknown): Record<string, McpServerEntry> {
   if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) {
     throw new Error('mcpServers 必须是对象');
@@ -210,25 +214,37 @@ export function validateMcpServers(servers: unknown): Record<string, McpServerEn
     if (invalid) throw new Error(`服务器「${name}」：${invalid}`);
     if (typeof raw !== 'object' || raw === null) throw new Error(`服务器「${name}」：配置必须是对象`);
     const cfg = raw as Record<string, unknown>;
-    if (typeof cfg.command !== 'string' || cfg.command.trim() === '') {
-      throw new Error(`服务器「${name}」：command 必填（stdio 传输）`);
+    const hasCommand = typeof cfg.command === 'string' && cfg.command.trim() !== '';
+    const hasUrl = typeof cfg.url === 'string' && cfg.url.trim() !== '';
+    if (hasCommand === hasUrl) {
+      throw new Error(`服务器「${name}」：command（stdio）与 url（streamable HTTP）必须二选一`);
     }
-    const entry: McpServerEntry = { command: cfg.command.trim() };
-    if (Array.isArray(cfg.args)) {
+    const entry: McpServerEntry = hasCommand
+      ? { command: (cfg.command as string).trim() }
+      : { url: (cfg.url as string).trim() };
+    if (hasCommand && Array.isArray(cfg.args)) {
       entry.args = cfg.args.map((a) => String(a));
-    } else if (cfg.args !== undefined) {
+    } else if (hasCommand && cfg.args !== undefined && !Array.isArray(cfg.args)) {
       throw new Error(`服务器「${name}」：args 必须是字符串数组`);
     }
-    if (cfg.env !== undefined) {
+    if (hasCommand && cfg.env !== undefined) {
       if (typeof cfg.env !== 'object' || cfg.env === null) throw new Error(`服务器「${name}」：env 必须是对象`);
       entry.env = Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v)]));
+    }
+    if (cfg.headers !== undefined) {
+      if (typeof cfg.headers !== 'object' || cfg.headers === null || Array.isArray(cfg.headers)) {
+        throw new Error(`服务器「${name}」：headers 必须是对象`);
+      }
+      if (hasCommand) throw new Error(`服务器「${name}」：headers 仅 streamable HTTP（url）传输支持`);
+      entry.headers = encryptMcpHeaders(
+        Object.fromEntries(Object.entries(cfg.headers).map(([k, v]) => [k, String(v)])),
+      );
     }
     if (cfg.timeoutMs !== undefined && cfg.timeoutMs !== null) {
       const n = Number(cfg.timeoutMs);
       if (!Number.isFinite(n) || n <= 0) throw new Error(`服务器「${name}」：timeoutMs 必须是正数`);
       entry.timeoutMs = Math.round(n);
     }
-    if (typeof cfg.url === 'string' && cfg.url.trim() !== '') entry.url = cfg.url.trim();
     out[name] = entry;
   }
   return out;

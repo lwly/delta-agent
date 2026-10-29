@@ -51,6 +51,15 @@ import {
   sandboxPullCommand,
   sandboxGcCommand,
 } from './sandbox.js';
+import {
+  mcpListCommand,
+  mcpAddCommand,
+  mcpRemoveCommand,
+  mcpResourcesCommand,
+  mcpResourceReadCommand,
+  mcpPromptsCommand,
+  mcpPromptShowCommand,
+} from './mcp.js';
 import { evalsListCommand, evalsRunCommand, type EvalsOptions } from './evals.js';
 import {
   notifyDisableCommand,
@@ -999,6 +1008,11 @@ function collectImages(val: string, prev: string[] = []): string[] {
   return [...prev, val];
 }
 
+/** F-48：--env / --header / --arg 可重复参数收集。 */
+function collectRepeatable(val: string, prev: string[] = []): string[] {
+  return [...prev, val];
+}
+
 program
   .command('run')
   .description('非交互运行一次任务（F-29 Headless/SDK）：供 CI 流水线与脚本集成。退出码：0 成功 / 1 配置错误 / 2 引擎错误 / 3 达最大轮次 / 4 预算耗尽 / 5 中断')
@@ -1107,9 +1121,59 @@ worktree
     void worktreePruneCommand();
   });
 
+// ── delta mcp：F-48 MCP 配置与 resources/prompts 显式通道 ────────────────
+
+const mcp = program
+  .command('mcp')
+  .description('MCP 服务器配置（stdio / streamable HTTP）与 resources/prompts 显式读取');
+
+mcp
+  .command('list')
+  .description('列出已配置的 MCP 服务器（全局与项目级合并视图；header 值一律掩码不回显）')
+  .action(() => mcpListCommand());
+
+mcp
+  .command('add <name>')
+  .description('添加服务器：stdio 用 --command；streamable HTTP 用 --transport http --url [--header K=V]（header 值加密落盘）')
+  .option('--transport <mode>', '传输类型：stdio（默认）| http', 'stdio')
+  .option('--command <cmd>', 'stdio 启动命令（含参数，如 "npx -y @modelcontextprotocol/server-filesystem /tmp"）')
+  .option('--url <url>', 'streamable HTTP 端点 URL')
+  .option('--env <key=value>', 'stdio 子进程环境变量（可重复）', collectRepeatable, [])
+  .option('--header <key=value>', 'HTTP 请求头（可重复；值加密存储，展示仅掩码）', collectRepeatable, [])
+  .option('--timeout-ms <ms>', '工具调用超时（毫秒，默认 60000）')
+  .option('--project', '写入项目级 .delta/mcp.json（默认全局 ~/.delta/mcp.json）', false)
+  .action((name: string, opts: Parameters<typeof mcpAddCommand>[1]) => mcpAddCommand(name, opts));
+
+mcp
+  .command('remove <name>')
+  .description('从指定作用域的 mcp.json 移除服务器')
+  .option('--project', '操作项目级 .delta/mcp.json（默认全局）', false)
+  .action((name: string, opts: { project?: boolean }) => mcpRemoveCommand(name, opts));
+
+mcp
+  .command('resources <server>')
+  .description('列出服务器暴露的 resources（仅清单；显式读取不自动轮询）')
+  .action((server: string) => mcpResourcesCommand(server));
+
+mcp
+  .command('resource-read <server> <uri>')
+  .description('显式读取一个 resource 并打印（内容 untrusted 包裹，等价 @ 引用语义）')
+  .action((server: string, uri: string) => mcpResourceReadCommand(server, uri));
+
+mcp
+  .command('prompts <server>')
+  .description('列出服务器暴露的 prompt 模板')
+  .action((server: string) => mcpPromptsCommand(server));
+
+mcp
+  .command('prompt-show <server> <name>')
+  .description('取 prompt 模板并装配为消息文本（--arg key=value 可重复）')
+  .option('--arg <key=value>', '模板参数（可重复）', collectRepeatable, [])
+  .action((server: string, name: string, opts: { arg?: string[] }) => mcpPromptShowCommand(server, name, opts));
+
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'help', 'export']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

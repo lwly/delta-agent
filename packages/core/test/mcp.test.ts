@@ -117,9 +117,9 @@ describe('McpManager tool bridging', () => {
     expect(timedOut.content).toContain('timed out');
   });
 
-  it('connect rejects SSE-only configs in M2', async () => {
+  it('connect rejects configs without command or url (F-48)', async () => {
     const mgr = new McpManager();
-    await expect(mgr.connect('web', { command: '', url: 'http://x/sse' })).rejects.toThrow('stdio');
+    await expect(mgr.connect('bad', { command: '' })).rejects.toThrow('command（stdio）或 url（streamable HTTP）');
   });
 });
 
@@ -147,5 +147,22 @@ describe('loadMcpConfig', () => {
   it('skips servers without a command and tolerates missing files', () => {
     const cfg = loadMcpConfig(path.join(tmpRoot, 'nope'));
     expect(cfg).toEqual({});
+  });
+
+  it('accepts streamable HTTP (url) entries (F-48)', async () => {
+    const projectDir = path.join(tmpRoot, '.delta');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          remote: { url: 'https://example.com/mcp', headers: { Authorization: 'enc:v1:zzz' } },
+          broken: { args: ['x'] },
+        },
+      }),
+    );
+    const cfg = loadMcpConfig(tmpRoot);
+    expect(cfg['remote']).toMatchObject({ url: 'https://example.com/mcp' });
+    expect(cfg['broken']).toBeUndefined();
   });
 });
