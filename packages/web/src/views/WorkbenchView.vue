@@ -472,6 +472,8 @@ async function openSession(id: string) {
   error.value = '';
   try {
     await chat.open(id);
+    // 子路由（定时任务 /cron、运行日志 /logs）下点会话/新建对话：切回工作台主区，否则 router-view 仍占主区
+    if (isSubRoute.value) void router.push('/');
   } catch (e) {
     error.value = (e as Error).message;
   }
