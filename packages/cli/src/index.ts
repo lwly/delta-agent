@@ -45,6 +45,7 @@ import {
 } from './expert.js';
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
+import { doctorCommand } from './doctor.js';
 import {
   sandboxStatusCommand,
   sandboxEnableCommand,
@@ -488,6 +489,16 @@ program
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: UsageCommandOptions) => {
     await usageCommand(opts);
+  });
+
+// ── delta doctor：F-51 环境自检 ─────────────────────────────────────────
+
+program
+  .command('doctor')
+  .description('环境自检：版本/Node/系统/配置目录/Provider 配置/会话库/连通性，问题附「下一步」指令')
+  .option('--offline', '跳过 Provider 连通性网络请求（CI / 离线环境）', false)
+  .action(async (opts: { offline?: boolean }) => {
+    await doctorCommand({ offline: opts.offline });
   });
 
 // ── delta export：F-49 会话分享导出（自包含 HTML / Markdown）────────────
@@ -1199,7 +1210,7 @@ mcp
 
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update', 'doctor']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

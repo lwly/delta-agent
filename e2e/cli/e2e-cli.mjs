@@ -130,6 +130,18 @@ if (process.platform !== 'win32') {
   check('轮次耗尽退出码 3', r.code === 3, `code=${r.code} stderr=${r.stderr.slice(0, 200)}`);
 }
 
+// ── ⑦ F-51 AC-51-4：全新环境 doctor 冒烟（隔离 HOME；--offline 零网络） ──────
+// 覆盖「全新 Windows VM：安装 → doctor → headless run」链路中的 doctor 环节，
+// 与 CI windows-installer job 的 SEA 二进制 doctor 冒烟互补。
+{
+  const fresh = runCli(['doctor', '--offline']);
+  check('doctor（全新环境）退出码 0', fresh.code === 0, `code=${fresh.code} stderr=${fresh.stderr.slice(0, 200)}`);
+  check('doctor 报告含版本/Node/配置目录项', /版本/.test(fresh.stdout) && /Node/.test(fresh.stdout) && /配置目录/.test(fresh.stdout));
+  check('doctor 全新环境结论为全部通过', /全部通过/.test(fresh.stdout));
+  // 隔离 HOME 未配置 Provider（--offline 跳过连通项）：配置项应为提示，且整体无失败标记
+  check('doctor 无 Provider 时为提示而非失败', /Provider 配置：未配置/.test(fresh.stdout) && !/✘/.test(fresh.stdout));
+}
+
 await fsp.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
 console.log(failed === 0 ? '\n✔ CLI E2E 全部通过' : `\n✘ ${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);

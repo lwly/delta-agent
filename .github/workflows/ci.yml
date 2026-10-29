@@ -133,3 +133,50 @@ jobs:
           name: e2e-artifacts-${{ matrix.os }}
           path: e2e/test-results/
           if-no-files-found: ignore
+
+  # F-51 AC-51-3：Windows SEA 构建 → NSIS 安装器工件 + 安装冒烟（--version / doctor --offline）
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SEA binary (win32-x64)
+        run: node scripts/build-sea.mjs
+
+      - name: Smoke (SEA binary)
+        shell: pwsh
+        run: |
+          & .\build\delta-win32-x64.exe --version
+          $env:DELTA_HOME = "$env:RUNNER_TEMP\delta-home"
+          New-Item -ItemType Directory -Force "$env:DELTA_HOME" | Out-Null
+          # doctor 以隔离 HOME 跑（无 Provider 配置 → info，不出网络请求）
+          $env:USERPROFILE = $env:DELTA_HOME
+          & .\build\delta-win32-x64.exe doctor --offline
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          & "C:\Program Files (x86)\NSIS\makensis.exe" scripts\installer-windows.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Test-Path build\delta-win32-x64-installer.exe
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-win32-x64-installer
+          path: build/delta-win32-x64-installer.exe
+          if-no-files-found: error
