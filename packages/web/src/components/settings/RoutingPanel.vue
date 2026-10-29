@@ -22,6 +22,14 @@ const newKind = ref('');
 const newModel = ref('');
 const newProvider = ref('');
 
+// 任务类型下拉菜单（自定义实现：datalist 无法自定义选项显示文本）
+const kindMenuOpen = ref(false);
+
+function pickKind(k: string) {
+  newKind.value = k;
+  kindMenuOpen.value = false;
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
@@ -134,10 +142,21 @@ const KIND_LABELS: Record<string, string> = {
     <div v-if="ruleEntries().length === 0" class="empty">（暂无规则——所有辅助调用跟随会话主模型）</div>
 
     <div class="add-row">
-      <input v-model="newKind" class="add-kind" list="known-kinds" placeholder="任务类型（如 summarize）" />
-      <datalist id="known-kinds">
-        <option v-for="k in knownKinds" :key="k" :value="k" />
-      </datalist>
+      <div class="add-kind-wrap">
+        <input
+          v-model="newKind"
+          class="add-kind"
+          placeholder="任务类型（如 summarize）"
+          @focus="kindMenuOpen = true"
+          @blur="kindMenuOpen = false"
+        />
+        <ul v-if="kindMenuOpen && knownKinds.length" class="kind-menu">
+          <li v-for="k in knownKinds" :key="k" @mousedown.prevent="pickKind(k)">
+            <span class="kind-menu-label">{{ KIND_LABELS[k] ?? '自定义任务类型' }}</span>
+            <span class="kind-menu-id">{{ k }}</span>
+          </li>
+        </ul>
+      </div>
       <input v-model="newModel" class="add-model" placeholder="目标模型 id" />
       <select v-model="newProvider" class="add-provider">
         <option value="">（跟随主 Provider）</option>
@@ -188,7 +207,22 @@ h4 { font-size: 13.5px; margin-bottom: 6px; }
   padding: 6px 9px; border-radius: 7px; border: 1px solid var(--border);
   background: var(--bg); color: var(--text); font-size: 12.5px; min-width: 0;
 }
-.add-kind { flex: none; width: 200px; }
+.add-kind-wrap { position: relative; flex: none; width: 200px; }
+.add-kind { width: 100%; }
+.kind-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 10;
+  min-width: 100%; width: max-content; max-width: 320px;
+  margin: 0; padding: 4px; list-style: none;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.kind-menu li {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+}
+.kind-menu li:hover { background: var(--bg-hover); }
+.kind-menu-label { font-size: 12px; color: var(--text); white-space: nowrap; }
+.kind-menu-id { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
 .add-model { flex: 1; }
 .add-provider { flex: none; width: 180px; }
 </style>
