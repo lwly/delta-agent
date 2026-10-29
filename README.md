@@ -125,6 +125,7 @@ delta [options]                     # 启动交互式 TUI 会话
 | `delta memory` | 管理 L2 长期动态记忆 |
 | `delta sandbox status/enable/disable/pull/gc` | 沙箱运维（Seatbelt / Docker） |
 | `delta notify status/enable/disable/test` | 桌面通知（macOS / Windows） |
+| `delta market list/search/install/remove/source` | F-52 Skills/MCP 市场：内置清单 + 订阅源（`~/.delta/registry.json`）浏览与一键安装；含脚本的 Skill 强制逐脚本确认（`--yes` 放行）；MCP 安装先连通测试通过才写入 |
 
 另有 `usage`（费用统计）、`evals`（评测集）、onboarding（项目引导）等子命令，详见 `docs/PRD.md` 与各功能设计文档。
 
@@ -171,6 +172,7 @@ pnpm --filter @delta/cli build
 |------|------|
 | `~/.delta/models.json` | 模型 Provider 配置，API Key 以 AES-256-GCM 加密存储（文件权限 0600） |
 | `~/.delta/agent.db` | 会话、消息、使用量等 SQLite 数据 |
+| `~/.delta/registry.json` | F-52 市场订阅源（Skill/MCP registry 清单） |
 | `<项目>/.delta/` | 项目级配置（`mcp.json` / `hooks.json` / `sandbox.json` / 评测基线等） |
 
 接入模型只需一条命令，密钥只经环境变量或参数传入，不落代码：
