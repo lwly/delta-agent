@@ -29,6 +29,7 @@ import TerminalPane from '../components/TerminalPane.vue';
 import { useFilePanelStore } from '../stores/filePanel';
 // 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
 import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
+import { resolveSelectedModel } from '../utils/modelChoice';
 
 const ws = useWorkspaceStore();
 const chat = useChatStore();
@@ -321,7 +322,7 @@ async function newSession(mode?: string, expert?: string): Promise<string | null
     const s = await ws.createSession({
       title: `新对话 ${new Date().toLocaleString('zh-CN')}`,
       mode: mode ?? modeChoice.value,
-      model: preferredModel.value || undefined,
+      model: selectedModel.value || undefined,
       ...(expert ? { expert } : {}),
     });
     await openSession(s.id);
@@ -474,6 +475,11 @@ const modelOptions = computed(() => {
   if (cur && !opts.some((o) => o.value === cur)) opts.unshift({ value: cur, label: cur });
   return opts;
 });
+
+// 下拉选中值：会话模型 > 已记录偏好 > 列表第一项（新会话未选模型时默认选中第一个，不显示空白）
+const selectedModel = computed(() =>
+  resolveSelectedModel(chat.sessionMeta?.model, preferredModel.value, modelOptions.value.map((o) => o.value)),
+);
 
 function onModelChange(ev: Event) {
   const v = (ev.target as HTMLSelectElement).value;
@@ -1614,7 +1620,7 @@ watch(
             </div>
             <!-- 底部操作区：模型选择（右下角，对齐 WorkBuddy）+ 暂停/停止/发送 -->
             <div class="composer-actions">
-              <select class="composer-model" :value="chat.sessionMeta.model || preferredModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
+              <select class="composer-model" :value="selectedModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
                 <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta.model || '默认模型' }}</option>
                 <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
               </select>
