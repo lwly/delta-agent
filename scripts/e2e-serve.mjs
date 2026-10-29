@@ -43,6 +43,10 @@ const server = createWebServer({
   port,
   host: '127.0.0.1',
   webDistDir: fs.existsSync(path.join(webDist, 'index.html')) ? webDist : undefined,
+  // 隔离 HOME：用户级 skills / registry.json / mcp.json / models.json 全部落临时目录，
+  // 防止 e2e 的安装类用例（F-52 市场面板）污染真实 ~/.delta
+  skillsHomeDir: tmp,
+  configHomeDir: tmp,
 });
 await new Promise((r) => server.listen(port, '127.0.0.1', r));
 console.log(`E2E_SERVE_READY ${port}`);

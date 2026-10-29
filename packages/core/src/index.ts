@@ -514,6 +514,44 @@ export {
 } from './skills/hub.js';
 export { loadSkillTool, unloadSkillTool } from './tools/builtin/skill.js';
 export type { SkillRuntime } from './tools/types.js';
+// F-52 Skills/MCP 市场：registry 订阅源 + 内置清单 + 安装链路
+export {
+  userRegistryConfigPath,
+  readMarketSources,
+  writeMarketSources,
+  validateMarketSources,
+  type MarketSourceConfig,
+  type MarketSourceKind,
+  type MarketSourcesReadResult,
+} from './market/registry.js';
+export {
+  builtinSkillEntries,
+  builtinMcpEntries,
+  findBuiltinMarketEntry,
+  BUILTIN_MCP_ENTRIES,
+  type MarketEntry,
+  type MarketScript,
+  type McpMarketEntry,
+} from './market/catalog.js';
+export {
+  listMarketSnapshot,
+  findMarketEntry,
+  fetchMarketSourceEntries,
+  installMarketSkill,
+  installMarketMcp,
+  testMcpConnectivity,
+  removeMarketItem,
+  wrapMarketPreview,
+  validateScriptName,
+  MCP_PROBE_TIMEOUT_MS,
+  type MarketOptions,
+  type MarketSnapshot,
+  type MarketItemView,
+  type MarketSourceStatus,
+  type InstallSkillResult,
+  type InstallMcpResult,
+  type McpProbeResult,
+} from './market/install.js';
 // F-25 多模态：图片附件加载/校验/计价
 export {
   ALLOWED_IMAGE_TYPES,

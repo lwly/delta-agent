@@ -273,10 +273,10 @@ export function loadMcpConfig(projectRoot?: string): Record<string, McpServerCon
   return merged;
 }
 
-/** 读取单个作用域的 mcp.json（不做合并；供 delta mcp add/remove 精确读写目标文件）。 */
-export function readMcpConfigFile(opts: { scope: 'global' | 'project'; projectRoot?: string }): Record<string, McpServerConfig> {
+/** 读取单个作用域的 mcp.json（不做合并；供 delta mcp add/remove 精确读写目标文件）。homeDir 可注入隔离。 */
+export function readMcpConfigFile(opts: { scope: 'global' | 'project'; projectRoot?: string; homeDir?: string }): Record<string, McpServerConfig> {
   const file = opts.scope === 'global'
-    ? path.join(userConfigDir(), FILES.mcp)
+    ? path.join(userConfigDir(opts.homeDir), FILES.mcp)
     : (() => {
         if (!opts.projectRoot) throw new Error('项目级 MCP 配置需要项目根目录');
         return path.join(projectConfigDir(opts.projectRoot), FILES.mcp);
@@ -296,13 +296,13 @@ export function readMcpConfigFile(opts: { scope: 'global' | 'project'; projectRo
   return out;
 }
 
-/** 写入某作用域的 mcp.json（覆盖该文件）。scope=project 时需提供 projectRoot。 */
+/** 写入某作用域的 mcp.json（覆盖该文件）。scope=project 时需提供 projectRoot。homeDir 可注入隔离。 */
 export function saveMcpConfig(
   servers: Record<string, McpServerConfig>,
-  opts: { scope: 'global' | 'project'; projectRoot?: string },
+  opts: { scope: 'global' | 'project'; projectRoot?: string; homeDir?: string },
 ): string {
   const file = opts.scope === 'global'
-    ? path.join(userConfigDir(), FILES.mcp)
+    ? path.join(userConfigDir(opts.homeDir), FILES.mcp)
     : (() => {
         if (!opts.projectRoot) throw new Error('项目级 MCP 配置需要项目根目录');
         return path.join(projectConfigDir(opts.projectRoot), FILES.mcp);

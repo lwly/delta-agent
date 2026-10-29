@@ -59,6 +59,17 @@ import {
   validateHubSources,
   writeHubSources,
 } from './skill-hub.js';
+// F-52 市场端点（registry 订阅源 + Skill/MCP 安装链路）
+import {
+  findMarketEntry,
+  installMarketMcp,
+  installMarketSkill,
+  listMarketSnapshot,
+  removeMarketItem,
+  wrapMarketPreview,
+  type MarketEntry,
+} from '../market/install.js';
+import { readMarketSources, validateMarketSources, writeMarketSources } from '../market/registry.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -594,6 +605,132 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
         try {
           const file = await writeHubSources(configHome, validated);
+          return json(res, 200, { ok: true, path: file });
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
+        }
+      }
+
+      // ── F-52 市场（registry 订阅源 + Skill/MCP 一键安装）──────────────────
+      // GET /api/market?projectId=<id> —— 合并快照（内置 + registry.json 订阅源）+ 来源状态 + 已装检测
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'market' && parts.length === 2) {
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (projectId && !projectRoot) return err(res, 404, 'project not found');
+        try {
+          const snapshot = await listMarketSnapshot({ homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) });
+          // 扁平化（与 /api/skill-hub 口径一致）：entry 字段 + source + installedIn 平铺
+          const items = snapshot.items.map((i) => ({ ...i.entry, source: i.source, installedIn: i.installedIn }));
+          return json(res, 200, { ...snapshot, items });
+        } catch (e) {
+          return err(res, 500, (e as Error).message);
+        }
+      }
+
+      // GET /api/market/item?kind=&source=&name=&projectId= —— 完整条目；远程条目附 untrusted 预览
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'market' && parts[2] === 'item' && parts.length === 3) {
+        const kind = url.searchParams.get('kind');
+        if (kind !== 'skill' && kind !== 'mcp') return err(res, 400, 'kind 必须是 skill 或 mcp');
+        const source = url.searchParams.get('source') ?? 'builtin';
+        const name = url.searchParams.get('name') ?? '';
+        if (!name) return err(res, 400, 'name is required');
+        try {
+          const entry = await findMarketEntry({ homeDir: configHome }, kind, source, name);
+          if (!entry) return err(res, 404, `市场条目不存在：${source}/${name}（订阅源拉取失败或已下架）`);
+          const preview = source === 'builtin' ? undefined : wrapMarketPreview(entry, source);
+          return json(res, 200, { entry, ...(preview ? { preview } : {}) });
+        } catch (e) {
+          return err(res, 502, (e as Error).message);
+        }
+      }
+
+      // POST /api/market/install —— 安装 Skill（scripts 未确认 → 409 + 清单）或 MCP（测试通过才写入）
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'market' && parts[2] === 'install' && parts.length === 3) {
+        const body = await readBody(req);
+        const kind = body.kind;
+        if (kind !== 'skill' && kind !== 'mcp') return err(res, 400, 'kind 必须是 skill 或 mcp');
+        const scope = String(body.scope ?? 'user');
+        const projectId = body.projectId ? String(body.projectId) : undefined;
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        const layers = { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) };
+        try {
+          const entry = await findMarketEntry(
+            { homeDir: configHome, ...(projectRoot ? { projectRoot } : {}) },
+            kind,
+            String(body.source ?? 'builtin'),
+            String(body.name ?? '').trim(),
+          );
+          if (!entry) return err(res, 404, `市场条目不存在：${body.source ?? 'builtin'}/${body.name}（订阅源拉取失败或已下架）`);
+          if (kind === 'skill') {
+            if (scope !== 'user' && scope !== 'project') return err(res, 400, 'scope 必须是 user 或 project');
+            const r = await installMarketSkill(entry as MarketEntry & { kind: 'skill' }, {
+              layers,
+              scope,
+              force: Boolean(body.force),
+              confirmScripts: Boolean(body.confirmScripts),
+            });
+            if (r.status === 'scripts_required') {
+              return json(res, 409, { status: r.status, scripts: r.scripts });
+            }
+            return json(res, 200, { ok: true, name: entry.name, path: r.path, scriptsWritten: r.scriptsWritten ?? [] });
+          }
+          // MCP：scope=global 写全局 mcp.json，scope=project 写项目级
+          if (scope !== 'global' && scope !== 'project') return err(res, 400, 'MCP 安装 scope 必须是 global 或 project');
+          if (scope === 'project' && !projectRoot) return err(res, 404, 'project not found');
+          const r = await installMarketMcp(entry as MarketEntry & { kind: 'mcp' }, {
+            homeDir: configHome,
+            projectRoot,
+            scope,
+          });
+          if (r.status === 'connect_failed') {
+            return err(res, 502, r.error ?? '连通性测试失败');
+          }
+          return json(res, 200, { ok: true, name: entry.name, path: r.path, toolCount: r.toolCount });
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // DELETE /api/market/item?kind=&name=&scope=&projectId= —— 卸载（内置 Skill 拒绝）
+      if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'market' && parts[2] === 'item' && parts.length === 3) {
+        const kind = url.searchParams.get('kind');
+        if (kind !== 'skill' && kind !== 'mcp') return err(res, 400, 'kind 必须是 skill 或 mcp');
+        const name = url.searchParams.get('name') ?? '';
+        const scope = url.searchParams.get('scope') ?? 'user';
+        const projectId = url.searchParams.get('projectId');
+        const projectRoot = projectId ? service.getProject(projectId)?.root_path : undefined;
+        if (projectId && !projectRoot) return err(res, 404, 'project not found');
+        try {
+          if (kind === 'skill' && (url.searchParams.get('source') ?? '') === 'builtin') {
+            return err(res, 403, '内置 Skill 不可卸载');
+          }
+          const r = await removeMarketItem(kind, name, scope as 'user' | 'project' | 'global', {
+            homeDir: configHome,
+            ...(projectRoot ? { projectRoot } : {}),
+          });
+          return json(res, 200, { ok: true, ...r });
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+      }
+
+      // GET /api/market/sources —— registry.json 订阅源（含旧 skill-hub.json 兼容回退标记）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'market' && parts[2] === 'sources' && parts.length === 3) {
+        const { sources, legacy, error } = await readMarketSources(configHome);
+        return json(res, 200, { sources, ...(legacy ? { legacy } : {}), ...(error ? { error } : {}) });
+      }
+
+      // PUT /api/market/sources —— 整体覆盖写入 registry.json 订阅源（写入前形状校验）
+      if (method === 'PUT' && parts[0] === 'api' && parts[1] === 'market' && parts[2] === 'sources' && parts.length === 3) {
+        const body = await readBody(req);
+        let validated;
+        try {
+          validated = validateMarketSources(body.sources);
+        } catch (e) {
+          return err(res, 400, (e as Error).message);
+        }
+        try {
+          const file = await writeMarketSources(configHome, validated);
           return json(res, 200, { ok: true, path: file });
         } catch (e) {
           return err(res, 500, (e as Error).message);

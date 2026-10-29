@@ -53,8 +53,10 @@ export const FILES = {
   hooks: 'hooks.json',
   /** cron 任务清单 */
   cron: 'cron.json',
-  /** Skill Hub 源配置 */
+  /** Skill Hub 源配置（旧版，F-52 起市场源配置迁移至 registry.json，读取时兼容） */
   skillHub: 'skill-hub.json',
+  /** F-52 市场订阅源配置（skills/mcp 统一） */
+  registry: 'registry.json',
   /** 项目引导状态 */
   onboarding: 'onboarding.json',
   /** 项目静态记忆 */

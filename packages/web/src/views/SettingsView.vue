@@ -8,7 +8,7 @@ import MemoryPanel from '../components/settings/MemoryPanel.vue';
 import ProvidersPanel from '../components/settings/ProvidersPanel.vue';
 import UsagePanel from '../components/settings/UsagePanel.vue';
 import SkillsPanel from '../components/settings/SkillsPanel.vue';
-import SkillHubPanel from '../components/settings/SkillHubPanel.vue';
+import MarketPanel from '../components/settings/MarketPanel.vue';
 import McpPanel from '../components/settings/McpPanel.vue';
 import ExpertsPanel from '../components/settings/ExpertsPanel.vue';
 import ToolsPanel from '../components/settings/ToolsPanel.vue';
@@ -23,7 +23,7 @@ const SECTIONS = [
   { key: 'providers', ico: '⚙️', label: '配置' },
   { key: 'routing', ico: '🧭', label: '路由' },
   { key: 'skills', ico: '🧩', label: 'Skills' },
-  { key: 'hub', ico: '🛒', label: 'Skill Hub' },
+  { key: 'market', ico: '🛒', label: '市场' },
   { key: 'mcp', ico: '🔌', label: 'MCP' },
   { key: 'tools', ico: '🛠️', label: '功能' },
   { key: 'experts', ico: '🧑‍💼', label: '专家' },
@@ -32,9 +32,10 @@ const SECTIONS = [
 
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
-/** 当前选中分区（query.tab 非法值回退为 memory） */
+/** 当前选中分区（query.tab 非法值回退为 memory；旧 ?tab=hub 映射到 market） */
 const activeTab = computed<SectionKey>(() => {
   const t = route.query.tab;
+  if (t === 'hub') return 'market';
   if (typeof t === 'string' && SECTIONS.some((s) => s.key === t)) return t as SectionKey;
   return 'memory';
 });
@@ -75,7 +76,7 @@ function switchTab(key: SectionKey) {
         <ProvidersPanel v-else-if="activeTab === 'providers'" />
         <RoutingPanel v-else-if="activeTab === 'routing'" />
         <SkillsPanel v-else-if="activeTab === 'skills'" />
-        <SkillHubPanel v-else-if="activeTab === 'hub'" />
+        <MarketPanel v-else-if="activeTab === 'market'" />
         <McpPanel v-else-if="activeTab === 'mcp'" />
         <ToolsPanel v-else-if="activeTab === 'tools'" />
         <ExpertsPanel v-else-if="activeTab === 'experts'" />

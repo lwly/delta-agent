@@ -142,6 +142,62 @@ if (process.platform !== 'win32') {
   check('doctor 无 Provider 时为提示而非失败', /Provider 配置：未配置/.test(fresh.stdout) && !/✘/.test(fresh.stdout));
 }
 
+// ── ⑧ F-52 AC-52-5：市场闭环（本地 registry 服务：list → search → install → 加载 → remove）──
+// registry 用子进程托管（node -e）：与 CLI 子进程同为兄弟进程，兼容沙箱/CI 网络环境
+{
+  const serverScript = `const http=require('node:http');const data=${JSON.stringify(JSON.stringify({
+    skills: [
+      { name: 'deploy-check', description: 'E2E 部署检查技能', body: '# 部署检查步骤', triggers: ['deploy'],
+        scripts: [{ name: 'check.sh', content: '#!/bin/sh\necho ok' }] },
+      { name: 'plain-e2e', description: 'E2E 无脚本技能', body: '# 直接安装' },
+    ],
+  }))};const s=http.createServer((q,r)=>{r.writeHead(200,{'content-type':'application/json'});r.end(data)});s.listen(0,'127.0.0.1',()=>console.log('PORT',s.address().port));setTimeout(()=>process.exit(0),120000)`;
+  const regProc = spawn(process.execPath, ['-e', serverScript], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const regUrl = await new Promise((resolve, reject) => {
+    let buf = '';
+    const timer = setTimeout(() => reject(new Error('registry 服务启动超时')), 10_000);
+    regProc.stdout.on('data', (d) => {
+      buf += d.toString();
+      const m = buf.match(/PORT (\d+)/);
+      if (m) { clearTimeout(timer); resolve(`http://127.0.0.1:${m[1]}/registry.json`); }
+    });
+  });
+
+  // source add + list（订阅源条目可见，内置条目同时在列）
+  const add = runCli(['market', 'source', 'add', 'e2e', regUrl, '--kind', 'skills']);
+  check('market source add 成功', add.code === 0, `code=${add.code} stderr=${add.stderr.slice(0, 200)}`);
+  const list = runCli(['market', 'list']);
+  check('market list 含内置 code-review 与订阅源条目', list.code === 0 && /code-review/.test(list.stdout) && /plain-e2e/.test(list.stdout));
+  const search = runCli(['market', 'search', 'E2E']);
+  check('market search 命中订阅源条目', /plain-e2e/.test(search.stdout) && /deploy-check/.test(search.stdout));
+
+  // install：无脚本直接装 → skill list 可见（三层加载器发现，AC-52-2「三层覆盖自动生效」）
+  const inst = runCli(['market', 'install', 'plain-e2e']);
+  check('market install（无脚本）成功', inst.code === 0, `code=${inst.code} stderr=${inst.stderr.slice(0, 200)}`);
+  const loaded = runCli(['skill', 'list']);
+  check('安装后 skill list 可见（加载链路）', /plain-e2e/.test(loaded.stdout));
+
+  // install：含 scripts 未确认 → 拒绝（退出码 1，逐脚本展示）；--yes 放行
+  const blocked = runCli(['market', 'install', 'deploy-check']);
+  check('含脚本安装未确认被拒', blocked.code === 1 && /check\.sh/.test(blocked.stderr) && /--yes/.test(blocked.stderr));
+  const allowed = runCli(['market', 'install', 'deploy-check', '--yes']);
+  check('含脚本安装 --yes 放行并落盘脚本', allowed.code === 0 && /check\.sh/.test(allowed.stdout));
+  const scriptOnDisk = fs.existsSync(path.join(home, '.delta', 'skills', 'deploy-check', 'scripts', 'check.sh'));
+  check('脚本随包写入 scripts/', scriptOnDisk);
+
+  // plan 权限模式拒绝安装（AC-52-3）
+  const planRefused = runCli(['market', 'install', 'plain-e2e', '--project', '--permission', 'plan']);
+  check('plan 权限模式拒绝安装', planRefused.code === 1 && /plan 权限模式/.test(planRefused.stderr));
+
+  // remove：卸载后 skill list 不再显示
+  const rm = runCli(['market', 'remove', 'plain-e2e']);
+  check('market remove 成功', rm.code === 0, `code=${rm.code} stderr=${rm.stderr.slice(0, 200)}`);
+  const afterRm = runCli(['skill', 'list']);
+  check('卸载后 skill list 不再显示', !/plain-e2e/.test(afterRm.stdout));
+
+  regProc.kill('SIGKILL');
+}
+
 await fsp.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
 console.log(failed === 0 ? '\n✔ CLI E2E 全部通过' : `\n✘ ${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);

@@ -78,6 +78,15 @@ import {
   skillSearchCommand,
 } from './skill.js';
 import {
+  marketInstallCommand,
+  marketListCommand,
+  marketRemoveCommand,
+  marketSearchCommand,
+  marketSourceAddCommand,
+  marketSourceListCommand,
+  marketSourceRemoveCommand,
+} from './market.js';
+import {
   onboardingStatusCommand,
   onboardingRunCommand,
   onboardingConfirmCommand,
@@ -1208,9 +1217,76 @@ mcp
   .option('--arg <key=value>', '模板参数（可重复）', collectRepeatable, [])
   .action((server: string, name: string, opts: { arg?: string[] }) => mcpPromptShowCommand(server, name, opts));
 
+// ── delta market：F-52 Skills/MCP 市场最小闭环 ───────────────────────────
+
+const market = program
+  .command('market')
+  .description('Skills/MCP 市场：内置清单 + 订阅源（~/.delta/registry.json）浏览与一键安装');
+
+market
+  .command('list')
+  .description('列出市场合并清单（内置 + 订阅源；离线回退仅内置）')
+  .option('--source <name>', '只看指定订阅源')
+  .action((opts: { source?: string }) => {
+    void marketListCommand(opts);
+  });
+
+market
+  .command('search <query...>')
+  .description('关键词过滤市场清单')
+  .action((query: string[]) => {
+    void marketSearchCommand(query);
+  });
+
+market
+  .command('install <name>')
+  .description('安装 Skill（含 scripts 强制逐脚本确认）或 MCP Server（连通测试通过才写入）')
+  .option('--kind <kind>', '条目类型：skill | mcp（同名歧义时必填）')
+  .option('--source <name>', '指定订阅源（缺省 builtin → 订阅源顺序查找）')
+  .option('--project', '安装到项目层（Skill：.delta/skills/；MCP：.delta/mcp.json）', false)
+  .option('--force', '目标已存在时覆盖安装', false)
+  .option('--yes', '确认安装含脚本的 Skill（逐脚本确认后的显式放行）', false)
+  .option('--permission <mode>', '权限模式：plan 拒绝安装（只读语义），default/yolo 允许', 'default')
+  .action((name: string, opts: { kind?: string; source?: string; project?: boolean; force?: boolean; yes?: boolean; permission?: string }) => {
+    void marketInstallCommand(name, opts);
+  });
+
+market
+  .command('remove <name>')
+  .description('卸载已装 Skill（user/project 层）或 MCP Server（对应作用域 mcp.json）')
+  .option('--kind <kind>', '条目类型：skill | mcp')
+  .option('--project', '操作项目层而非用户层/全局', false)
+  .action((name: string, opts: { kind?: string; project?: boolean }) => {
+    void marketRemoveCommand(name, opts);
+  });
+
+const marketSource = market.command('source').description('管理 ~/.delta/registry.json 订阅源');
+
+marketSource
+  .command('list')
+  .description('查看订阅源清单')
+  .action(() => {
+    void marketSourceListCommand();
+  });
+
+marketSource
+  .command('add <name> <url>')
+  .description('新增订阅源（--kind skills|mcp，默认 skills）')
+  .option('--kind <kind>', '源类型：skills | mcp', 'skills')
+  .action((name: string, url: string, opts: { kind?: string }) => {
+    void marketSourceAddCommand(name, url, opts.kind ?? 'skills');
+  });
+
+marketSource
+  .command('remove <name>')
+  .description('删除订阅源')
+  .action((name: string) => {
+    void marketSourceRemoveCommand(name);
+  });
+
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update', 'doctor']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update', 'doctor', 'market']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

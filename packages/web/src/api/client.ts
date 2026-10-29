@@ -554,6 +554,70 @@ export interface HubInstallInput {
   url?: string;
 }
 
+// ── F-52 市场（registry 订阅源 + Skill/MCP 一键安装）────────────────────────
+
+/** 市场条目：skill（HubEntry 结构 + 可选 scripts）或 mcp（配置草案） */
+export type MarketEntryView =
+  | (HubEntryView & { kind: 'skill'; scripts?: { name: string; content: string }[] })
+  | {
+      kind: 'mcp';
+      name: string;
+      description: string;
+      category: string;
+      version: string;
+      author: string;
+      draft: { command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> };
+      source: string;
+      installedIn: { user?: boolean; project?: boolean; builtin?: boolean; global?: boolean };
+    };
+
+/** 市场快照条目视图（GET /api/market items 元素：entry + source + installedIn 平铺） */
+export type MarketItemView = MarketEntryView;
+
+/** 市场订阅源状态（GET /api/market sources 元素） */
+export interface MarketSourceStatus {
+  name: string;
+  url: string;
+  kind: 'skills' | 'mcp';
+  status: 'ok' | 'error';
+  error?: string;
+  count: number;
+}
+
+export interface MarketSnapshotResponse {
+  items: MarketItemView[];
+  sources: MarketSourceStatus[];
+  /** 数据来自旧 skill-hub.json 兼容回退（registry.json 尚未创建） */
+  legacySources?: boolean;
+  errors: string[];
+}
+
+/** 市场订阅源配置（registry.json sources 元素） */
+export interface MarketSourceConfig {
+  name: string;
+  url: string;
+  kind: 'skills' | 'mcp';
+}
+
+/** GET /api/market/item 响应：完整条目 + 远程条目的 untrusted 预览 */
+export interface MarketItemResponse {
+  entry: MarketEntryView;
+  preview?: { description: string; body?: string };
+}
+
+/** POST /api/market/install Skill 响应：scripts_required（未确认）或 ok（已装） */
+export type MarketInstallResponse =
+  | { ok: true; name: string; path: string; scriptsWritten: string[] }
+  | { status: 'scripts_required'; scripts: { name: string; content: string }[] };
+
+/** POST /api/market/install MCP 响应 */
+export interface MarketInstallMcpResponse {
+  ok: true;
+  name: string;
+  path: string;
+  toolCount: number;
+}
+
 // ── F-38 项目文件浏览器 + 变更文件面板（字段 snake_case，与 core REST 契约逐字对齐）──
 
 /** 面板作用域：有会话走会话工作根（含 worktree），无会话回落项目根 */
@@ -940,6 +1004,47 @@ export const api = {
   hubSources: () => request<{ sources: HubSourceConfig[]; error?: string }>('GET', '/api/skill-hub/sources'),
   hubSaveSources: (sources: HubSourceConfig[]) =>
     request<{ ok: boolean; path: string }>('PUT', '/api/skill-hub/sources', { sources }),
+
+  // ── F-52 市场（registry 订阅源 + Skill/MCP 一键安装；设置页市场面板）────────
+  marketList: (projectId?: string) =>
+    request<MarketSnapshotResponse>(
+      'GET',
+      `/api/market${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+    ),
+  marketItem: (kind: 'skill' | 'mcp', source: string, name: string, projectId?: string) => {
+    const q = new URLSearchParams({ kind, source, name });
+    if (projectId) q.set('projectId', projectId);
+    return request<MarketItemResponse>('GET', `/api/market/item?${q.toString()}`);
+  },
+  /** 安装：Skill scripts 未确认时服务端返回 409 + scripts 清单（request 会丢体，走 apiFetch 直读） */
+  marketInstall: async (
+    input: {
+      kind: 'skill' | 'mcp';
+      source: string;
+      name: string;
+      scope: 'user' | 'project' | 'global';
+      confirmScripts?: boolean;
+      force?: boolean;
+      projectId?: string;
+    },
+  ): Promise<{ httpStatus: number; body: Record<string, unknown> }> => {
+    const res = await apiFetch('/api/market/install', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return { httpStatus: res.status, body };
+  },
+  marketRemove: (kind: 'skill' | 'mcp', name: string, scope: 'user' | 'project' | 'global', projectId?: string) => {
+    const q = new URLSearchParams({ kind, name, scope });
+    if (projectId) q.set('projectId', projectId);
+    return request<{ ok: boolean; path: string }>('DELETE', `/api/market/item?${q.toString()}`);
+  },
+  marketSources: () =>
+    request<{ sources: MarketSourceConfig[]; legacy?: boolean; error?: string }>('GET', '/api/market/sources'),
+  marketSaveSources: (sources: MarketSourceConfig[]) =>
+    request<{ ok: boolean; path: string }>('PUT', '/api/market/sources', { sources }),
 
   // ── F-38 文件浏览器 + 变更面板（只读；path 一律工作根相对路径）──────────────
   browseTree: (scope: BrowseScope, path = '') =>
