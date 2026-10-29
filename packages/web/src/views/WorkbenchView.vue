@@ -1129,8 +1129,6 @@ watch(
       <div class="side-section">
         <nav class="side-nav">
           <router-link class="nav-item" to="/cron"><span class="ni-ico">⏰</span>定时任务</router-link>
-          <!-- F-41 运行日志（/logs 子路由；serve 内存环形缓冲 + SSE 实时） -->
-          <router-link class="nav-item" to="/logs"><span class="ni-ico">📜</span>运行日志</router-link>
         </nav>
         <div class="sidebar-actions">
           <button class="btn-sm" @click="showNewProject = true">＋ 新项目</button>
@@ -1223,6 +1221,8 @@ watch(
             <span class="footer-val link" tabindex="0" title="回收站" @click="showTrash = true">🗑 回收站 · {{ ws.trash.length }} 项</span>
             <span class="footer-sep">·</span>
             <span :title="'平台信息：' + platform">{{ platform }}</span>
+            <!-- F-41 运行日志：角落图标入口（/logs 子路由；serve 内存环形缓冲 + SSE 实时） -->
+            <router-link class="footer-icon" to="/logs" title="运行日志">📜</router-link>
           </div>
         </div>
       </div>
@@ -1894,6 +1894,10 @@ watch(
 .footer-secondary { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-faint); flex-wrap: wrap; }
 .footer-secondary .footer-val { color: var(--text-faint); font-family: inherit; }
 .footer-secondary .footer-sep { opacity: 0.5; }
+/* 运行日志：状态栏右角小图标入口（hover 提亮，激活态强调色） */
+.footer-secondary .footer-icon { margin-left: auto; font-size: 13px; line-height: 1; text-decoration: none; opacity: 0.75; transition: opacity 0.12s; }
+.footer-secondary .footer-icon:hover { opacity: 1; }
+.footer-secondary .footer-icon.router-link-active { opacity: 1; }
 
 /* ══════════ 主区域 ══════════ */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
