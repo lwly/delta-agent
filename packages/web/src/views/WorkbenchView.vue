@@ -50,8 +50,8 @@ onUnmounted(() => bgTasks.watch(null));
 const route = useRoute();
 const router = useRouter();
 
-/** 是否处于定时任务子路由：主区渲染 <router-view>，对话流/输入区不渲染 */
-const isCronRoute = computed(() => route.path.startsWith('/cron'));
+/** 是否处于工作台子路由（定时任务 /cron、运行日志 /logs）：主区渲染 <router-view>，对话流/输入区不渲染 */
+const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/logs'));
 
 // ── 侧边栏状态 ──────────────────────────────────────────────
 const expanded = ref<Set<string>>(new Set());
@@ -1254,8 +1254,8 @@ watch(
 
     <!-- ══════════ 主区域 ══════════ -->
     <main class="main">
-      <!-- 定时任务子路由：主区整块交给 CronView（侧栏常驻），对话流 / 输入区不渲染 -->
-      <router-view v-if="isCronRoute" />
+      <!-- 工作台子路由（/cron 定时任务、/logs 运行日志）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
+      <router-view v-if="isSubRoute" />
       <template v-else>
         <!-- 空态 hero：图标 / 产品名 / 价值主张 / 主行动 + 快捷键提示 / 次级入口 / 三特性卡 -->
         <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
