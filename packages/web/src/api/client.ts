@@ -652,6 +652,23 @@ export interface LogEntryView {
   message: string;
 }
 
+// ── F-54 会话内后台任务（输入区上方任务条；字段与 core BackgroundTaskView 同构）──
+
+export type BackgroundTaskStatus = 'running' | 'done' | 'failed' | 'killed';
+
+export interface BackgroundTaskView {
+  id: string;
+  session_id: string;
+  command: string;
+  /** 模型给的短描述（缺省 = 命令前 60 字符） */
+  description: string;
+  /** 开始时间（ms epoch，服务端口径；已运行时长由前端现算） */
+  started_at: number;
+  finished_at: number | null;
+  status: BackgroundTaskStatus;
+  exit_code: number | null;
+}
+
 /** browse 端点的作用域前缀（session 主 / project 回落） */
 const browseBase = (scope: BrowseScope): string =>
   scope.kind === 'session' ? `/api/sessions/${scope.id}` : `/api/projects/${scope.id}`;
@@ -873,6 +890,12 @@ export const api = {
 
   // F-41 运行日志（尾读；实时流走 subscribeLogs）
   logsTail: (limit = 200) => request<{ items: LogEntryView[] }>('GET', `/api/logs?limit=${limit}`),
+
+  // F-54 会话内后台任务（列表 running 在前；DELETE 终止运行中任务）
+  backgroundTasks: (sessionId: string) =>
+    request<BackgroundTaskView[]>('GET', `/api/sessions/${sessionId}/background-tasks`),
+  killBackgroundTask: (sessionId: string, taskId: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/sessions/${sessionId}/background-tasks/${encodeURIComponent(taskId)}`),
 
   // skills / mcp 配置中心（设置页面板）
   skillDetails: (projectId?: string) =>

@@ -25,6 +25,7 @@ import { createSkillRuntime, SessionHub } from './hub.js';
 import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
 import { TerminalManager } from './terminal.js';
+import { BackgroundTaskManager } from '../session/background-tasks.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
@@ -135,6 +136,9 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     if (!o.ok) logError(`⚠ hook ${o.hook.event}(${o.hook.command}) 异常：${o.reason ?? o.stderr.trim().slice(0, 200)}`);
   });
 
+  // F-54 会话内后台任务（hub 与 http 共用同一实例；dispose 全杀防孤儿进程）
+  const backgroundTasks = new BackgroundTaskManager();
+
   const hub = new SessionHub({
     service,
     registry,
@@ -150,6 +154,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     notify: opts.notify ?? noopNotifier,
     // F-41 运行日志：hub 埋点（任务开始/工具调用/完成/异常）
     runLog,
+    // F-54 会话内后台任务：工具层（run_in_background/task_output）与 HTTP 端点共用同一实例
+    backgroundTasks: backgroundTasks,
   });
 
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
@@ -169,6 +175,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     ...(opts.cronHomeDir !== undefined ? { cronHomeDir: opts.cronHomeDir } : {}),
     runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
     terminal, // F-47：/api/terminal/* + /ws/terminal
+    backgroundTasks, // F-54：/api/sessions/:id/background-tasks
   });
 
   let disposed = false;
@@ -188,6 +195,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
       if (disposed) return;
       disposed = true;
       terminal.killAll(); // F-47：serve 退出全杀 pty（防孤儿 shell 进程）
+      backgroundTasks.killAll(); // F-54：serve 退出全杀后台任务（防孤儿命令进程）
       server.close();
       await mcp.disconnectAll().finally(() => service.close());
     },

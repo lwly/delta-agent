@@ -70,10 +70,11 @@ describe('restrictRegistry', () => {
 });
 
 describe('BUILTIN_TOOL_COUNT', () => {
-  it('与 TOOL_CAPABILITY 键数一致且为 16（task 已计入）', () => {
-    expect(BUILTIN_TOOL_COUNT).toBe(16);
-    expect(Object.keys(TOOL_CAPABILITY)).toHaveLength(16);
+  it('与 TOOL_CAPABILITY 键数一致且为 17（task / task_output 已计入）', () => {
+    expect(BUILTIN_TOOL_COUNT).toBe(17);
+    expect(Object.keys(TOOL_CAPABILITY)).toHaveLength(17);
     expect(TOOL_CAPABILITY['task']).toBe('read');
+    expect(TOOL_CAPABILITY['task_output']).toBe('read');
   });
 });
 

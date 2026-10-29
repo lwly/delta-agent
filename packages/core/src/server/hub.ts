@@ -104,6 +104,12 @@ export interface SessionHubDeps {
   notify?: Notifier;
   /** F-41 运行日志 sink（缺省不记录；serve 运行时注入 RunLog，埋点见 design-f41 §4） */
   runLog?: RunLogSink;
+  /**
+   * F-54 会话内后台任务管理器（run_command 的 run_in_background / task_output 依赖，
+   * 与 GET/DELETE /api/sessions/:id/background-tasks 共用同一实例）。
+   * 缺省不注入：后台执行明确报错引导回同步执行（对齐 task_unavailable 口径）。
+   */
+  backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -741,6 +747,8 @@ export class SessionHub {
           },
           todos: [],
           skills: this.deps.skills,
+          // F-54 会话内后台任务（run_in_background / task_output；缺省 undefined = 能力未装配）
+          backgroundTasks: this.deps.backgroundTasks,
           // F-27 Hook 系统：工具执行挂钩（PreToolUse 可阻断 / PostToolUse 记录）
           hooks: this.deps.hooks,
           // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写本运行预算）

@@ -129,7 +129,7 @@ describe('GET /api/experts/:name', () => {
     const r = await get('/api/experts/alpha');
     expect(r.expertType).toBe('agent');
     expect(r.tools).toEqual(['read_file', 'list_dir', 'ghost_tool']);
-    expect(r.tool_stats).toMatchObject({ restricted: 2, total: 16, unrestricted: false });
+    expect(r.tool_stats).toMatchObject({ restricted: 2, total: 17, unrestricted: false });
     expect(r.prompt_preview).toContain('专家正文');
     expect(JSON.stringify(r)).not.toContain('/.delta/experts');
   });

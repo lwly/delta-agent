@@ -113,6 +113,11 @@ export interface ToolContext {
   sandbox?: import('../sandbox/executor.js').SandboxExecutor;
   /** F-39：专家团运行时（仅 team 专家会话注入） */
   expertTeam?: ExpertTeamRuntime;
+  /**
+   * F-54 会话内后台任务管理器（run_command 的 run_in_background 与 task_output 依赖）。
+   * 缺省（TUI/headless 未注入）= 后台执行明确报错，引导回同步执行。
+   */
+  backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
   /** F-39：事件发射器（task 工具发 expert_delegate_* 用；缺省 = 不发事件） */
   emit?: (ev: import('@delta/shared').AgentEvent) => void;
 }

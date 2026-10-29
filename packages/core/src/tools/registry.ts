@@ -15,7 +15,7 @@ import { readSnapshot } from '../session/changes.js';
 import {
   readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
 } from './builtin/fs.js';
-import { runCommandTool, runTestsTool } from './builtin/exec.js';
+import { runCommandTool, runTestsTool, taskOutputTool } from './builtin/exec.js';
 import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
 import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
 import { saveMemoryTool, recallMemoryTool } from './builtin/memory.js';
@@ -60,7 +60,7 @@ export class ToolRegistry {
   registerBuiltins(): void {
     for (const t of [
       readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
-      runCommandTool, runTestsTool, webFetchTool, todoWriteTool, askUserTool,
+      runCommandTool, runTestsTool, taskOutputTool, webFetchTool, todoWriteTool, askUserTool,
       loadSkillTool, unloadSkillTool,
       saveMemoryTool, recallMemoryTool,
       taskTool,

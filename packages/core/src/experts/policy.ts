@@ -11,7 +11,7 @@ import { estimateTextTokens } from '../context/tokens.js';
 import type { SkillRuntime } from '../tools/types.js';
 
 /** 内置工具数（= ToolRegistry.registerBuiltins 的工具条数；与 TOOL_CAPABILITY 键数一致，见单测） */
-export const BUILTIN_TOOL_COUNT = 16;
+export const BUILTIN_TOOL_COUNT = 17;
 
 /** 单会话预置技能上限（个）与累计 token 上限 */
 export const EXPERT_SKILLS_MAX_COUNT = 3;

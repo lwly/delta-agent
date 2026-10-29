@@ -27,6 +27,8 @@ export const TOOL_CAPABILITY: Record<string, ToolCapability> = {
   recall_memory: 'read',
   // 派生只读子代理：工具本身无写副作用（子代理的写权限由它自己的 PermissionState 判定）
   task: 'read',
+  // F-54 后台任务状态/输出查询：纯只读
+  task_output: 'read',
   // 写状态
   write_file: 'write',
   edit_file: 'write',

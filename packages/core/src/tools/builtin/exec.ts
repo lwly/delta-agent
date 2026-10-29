@@ -96,18 +96,64 @@ function metaOf(o: Outcome): Record<string, unknown> | undefined {
   return o.meta ? { sandbox: o.meta } : undefined;
 }
 
+// ── F-54 后台执行 + task_output ────────────────────────────────────────────
+
+/** task_output 返回给模型的输出尾上限（与 MAX_CMD_OUTPUT 同量级） */
+const TASK_OUTPUT_CLIP = 10_000;
+
+export const taskOutputTool: AgentTool = {
+  name: 'task_output',
+  description:
+    '查询后台任务（run_command 的 run_in_background 启动）的状态与输出尾。' +
+    '返回 status（running/done/failed/killed）、exit_code 与已收集输出；' +
+    '任务尚在运行时输出为部分内容，可稍后再次查询。',
+  schema: {
+    type: 'object',
+    properties: {
+      task_id: { type: 'string', description: 'run_command 后台启动时返回的任务 id（bg_*）' },
+    },
+    required: ['task_id'],
+  },
+  danger: 'safe',
+  async execute(args, ctx) {
+    const id = String(args.task_id ?? '').trim();
+    if (!id) return fail('缺少 task_id 参数');
+    if (!ctx.backgroundTasks) {
+      return fail('task_output 不可用：当前运行环境未注入后台任务管理器', 'background_tasks_unavailable');
+    }
+    const r = ctx.backgroundTasks.getOutput(id);
+    if (!r) return fail(`未知后台任务：${id}`, 'unknown_task');
+    const output = r.output.length > TASK_OUTPUT_CLIP ? `...[truncated]\n${r.output.slice(-TASK_OUTPUT_CLIP)}` : r.output;
+    const statusText =
+      r.status === 'running'
+        ? '运行中（输出为部分内容，可稍后再次查询）'
+        : `已结束（${r.status}，exit code: ${r.exit_code ?? 'n/a'}）`;
+    return ok(`[${id}] ${statusText}\n${output}`);
+  },
+};
+
 // ── run_command ────────────────────────────────────────────────────────────
 
 export const runCommandTool: AgentTool = {
   name: 'run_command',
   description:
-    '在项目目录中执行 shell 命令。高危工具：默认需要用户确认。',
+    '在项目目录中执行 shell 命令。高危工具：默认需要用户确认。' +
+    '长耗时命令（安装依赖、构建、dev server 等）可传 run_in_background=true 转后台执行：' +
+    '立即返回任务 id，用 task_output 工具查询状态与输出。',
   schema: {
     type: 'object',
     properties: {
       command: { type: 'string' },
       cwd: { type: 'string', description: 'relative directory to run in (default project root)' },
       timeout: { type: 'number', description: 'timeout in ms (default 120000, max 600000)' },
+      run_in_background: {
+        type: 'boolean',
+        description: 'true = 后台执行：立即返回任务 id（bg_*），不等待命令完成（忽略 timeout）',
+      },
+      description: {
+        type: 'string',
+        description: '后台任务的短描述（3-8 词，Web 任务条展示用；如「安装依赖」）',
+      },
     },
     required: ['command'],
   },
@@ -117,6 +163,21 @@ export const runCommandTool: AgentTool = {
     if (!command.trim()) return fail('command is empty');
     // 路径沙箱是第一道闸（容器只挂 /workspace 是第二道），逃逸在此拒绝、不产生任何 docker 调用
     const cwd = await resolveInSandbox(ctx.projectRoot, String(args.cwd ?? '.'));
+    // F-54 后台执行：确认通过后立即 spawn 返回 id；不走沙箱后端（v1 限制，设计 §5）
+    if (args.run_in_background === true) {
+      if (ctx.sandbox) {
+        return fail('沙箱模式下暂不支持后台执行（run_in_background），请同步运行或关闭沙箱', 'background_unsupported_in_sandbox');
+      }
+      if (!ctx.backgroundTasks) {
+        return fail('后台执行不可用：当前运行环境未注入后台任务管理器，请同步运行', 'background_tasks_unavailable');
+      }
+      const id = ctx.backgroundTasks.start(ctx.sessionId ?? '', command, cwd, String(args.description ?? ''));
+      return ok(
+        `后台任务已启动：${id}\n描述：${String(args.description ?? '') || command.slice(0, 60)}\n` +
+          '命令在后台运行，本轮继续其它工作即可；稍后用 task_output 工具（task_id=该 id）查询状态与输出。',
+        { background_task_id: id },
+      );
+    }
     const timeout = Math.min(600_000, Number(args.timeout ?? ctx.defaultTimeoutMs ?? DEFAULT_CMD_TIMEOUT_MS));
     const outcome = await execViaBackend(command, cwd, timeout, ctx);
     const f = formatOutcome(outcome);

@@ -97,6 +97,11 @@ export interface ServeOptions {
    */
   terminal?: TerminalManager;
   /**
+   * F-54 会话内后台任务管理器（serve 运行时注入，与 hub deps 共用同一实例）。
+   * 缺省不提供：GET/DELETE /api/sessions/:id/background-tasks* 返回 501（能力未装配口径）。
+   */
+  backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
    * 或 `?auth=` 查询参数，值恒等才放行，否则 401。
@@ -764,6 +769,17 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const newBranch = body.newBranch ? String(body.newBranch) : undefined;
           if (hub.isRunning(sessionId)) return err(res, 409, '会话运行中，请先停止或等待任务结束后再切换工作区');
           return json(res, 200, await hub.setWorktree(sessionId, enabled, { branch, newBranch }));
+        }
+        // ── F-54 会话内后台任务（列表 / 终止；能力未装配 501，对齐 terminal 口径）──
+        if (parts[3] === 'background-tasks') {
+          if (!opts.backgroundTasks) return err(res, 501, '后台任务能力未装配');
+          if (method === 'GET' && parts.length === 4) {
+            return json(res, 200, opts.backgroundTasks.list(sessionId));
+          }
+          if (method === 'DELETE' && parts.length === 5) {
+            const killed = opts.backgroundTasks.kill(sessionId, decodeURIComponent(parts[4]!));
+            return killed ? json(res, 200, { ok: true }) : err(res, 404, '任务不存在或已结束');
+          }
         }
         // 发起一轮对话：后台运行，事件走 SSE
         if (method === 'POST' && parts[3] === 'messages') {
