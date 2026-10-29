@@ -71,6 +71,36 @@ node packages/cli/dist/index.js models add my-gateway -k <API_KEY> --base-url ht
 node packages/cli/dist/index.js
 ```
 
+## Windows 安装（F-51）
+
+一条命令安装闭环：PowerShell 脚本自动装 Node（可选）→ npm 全局安装 → 验证 `delta --version`。
+
+```powershell
+# 在线安装（默认 npm 渠道 @delta/cli）
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+
+# 指定本地 tgz / 目录安装（离线包 / CI 工件场景）
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Package .\delta-cli-0.1.0.tgz
+
+# 内网镜像场景
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Registry http://npm.internal.local/
+```
+
+脚本行为：
+
+- Node 缺失或 < 20 时自动安装 LTS（依次尝试 winget → chocolatey → 官网 MSI 静默安装）；`-NoNodeInstall` 可禁用自动安装。
+- npm 全局 bin 目录不在 PATH 时自动追加到用户 PATH（无需重启）。
+- 退出码：0 成功 / 2 Node 缺失 / 3 npm 安装失败 / 4 验证失败。
+
+另外两个安装途径：
+
+- **NSIS 安装器**：CI（`windows-installer` job）用 `scripts/build-sea.mjs` 产出 SEA 单文件 `delta-win32-x64.exe`，再经 `scripts/installer-windows.nsi` 打出 `delta-win32-x64-installer.exe` 工件（按用户安装，免管理员权限，自动配置 PATH，带卸载器）。
+- **安装后自检**：`delta doctor` 体检版本 / Node / 系统 / 配置目录 / Provider 配置 / 会话库完整性 / 连通性，每项问题附「下一步」指令；`--offline` 跳过网络请求。
+
+```powershell
+delta doctor
+```
+
 ## 常用命令
 
 根命令 `delta`（开发阶段为 `node packages/cli/dist/index.js`）：
