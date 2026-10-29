@@ -111,7 +111,7 @@ router.ts           /logs 子路由（workbench children，对齐 /cron）
 api/client.ts       LogEntryView + api.logsTail(limit)
 api/sse.ts          subscribeLogs(onEntry)（EventSource，对齐 subscribeSession）
 views/LogsView.vue  日志页：进入 tail 拉取 + SSE 追加；级别 chips 过滤 / 文本过滤 / 自动滚动开关 / 复制
-WorkbenchView.vue   侧栏 nav「📜 运行日志」（对齐 ⏰ 定时任务入口）
+WorkbenchView.vue   底部状态栏右角「📜」图标入口（/logs， hover 提亮 / 激活态高亮）
 ```
 
 - 日志着色：error 红 / warn 黄（沿用 theme.css 语义色 token）；
