@@ -157,6 +157,9 @@ onBeforeUnmount(() => {
 .term-pane {
   display: flex; flex-direction: column; min-height: 0;
   height: 300px; flex: none;
+  /* xterm canvas 有固定像素内在宽度，会反向撑宽内容自适应的 .right-col（右侧空白条）：
+     inline-size 封隔使其不参与列宽计算，宽度跟随文件面板列 */
+  min-width: 0; contain: inline-size;
   border-top: 1px solid var(--border); background: #11151c;
 }
 .term-head {
@@ -176,5 +179,5 @@ onBeforeUnmount(() => {
 .term-btn:hover { background: var(--bg-hover); color: var(--text); }
 .term-fallback { padding: 18px; font-size: 12.5px; color: var(--text-dim); }
 .term-fallback .dim { color: var(--text-faint); margin-top: 6px; }
-.term-host { flex: 1; min-height: 0; padding: 4px 8px; }
+.term-host { flex: 1; min-height: 0; min-width: 0; padding: 4px 8px; overflow: hidden; }
 </style>
