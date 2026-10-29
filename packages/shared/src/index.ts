@@ -51,6 +51,13 @@ export interface ChatMessage {
    * 实时来自 tool_result.meta.agent_name；回放由 content 前缀解析后回填。
    */
   agentName?: string;
+  /**
+   * F-53：服务端摘要化标记（仅消息分页端点下发）。
+   * true = content 已截断（tool 大输出不随页传输），全文走 /messages/:seq/content 懒加载。
+   */
+  contentTruncated?: boolean;
+  /** F-53：摘要化前的完整内容长度（字符；摘要化标记的展示口径） */
+  contentLength?: number;
 }
 
 export interface Usage {

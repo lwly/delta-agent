@@ -20,6 +20,12 @@ interface Props {
   sandboxMeta?: { mode: string; network?: string; ms?: number; degraded?: boolean } | null;
   /** F-39：专家团成员显示名（「由 X 执行」角标；实时 = meta.agent_name，回放 = content 前缀解析） */
   agentName?: string | null;
+  /** F-53：服务端摘要化标记（true = content 已截断，可按需加载全文） */
+  contentTruncated?: boolean;
+  /** F-53：摘要化前的完整内容长度（字符；按钮展示口径） */
+  contentLength?: number;
+  /** F-53：结果消息落库 seq（加载全文回填的定位键） */
+  resultSeq?: number | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -28,7 +34,28 @@ const props = withDefaults(defineProps<Props>(), {
   seq: null,
   sandboxMeta: null,
   agentName: null,
+  contentTruncated: false,
+  contentLength: undefined,
+  resultSeq: null,
 });
+
+/** F-53（AC-53-4）：大输出懒加载 —— 点击向父层请求按 seq 拉全文，回填后自动转为全文态 */
+const emit = defineEmits<{ (e: 'load-full'): void }>();
+const requestingFull = ref(false);
+function requestFull() {
+  if (requestingFull.value) return;
+  requestingFull.value = true;
+  emit('load-full');
+}
+watch(
+  () => props.contentTruncated,
+  (v) => {
+    if (!v && requestingFull.value) {
+      requestingFull.value = false;
+      showAll.value = true; // 全文已回填：直接展开呈现
+    }
+  },
+);
 
 /** 展开态：默认收起（头部 + 主参数摘要行已够扫读，点头部或 ▶ 展开）；
  *  失败卡片例外——默认展开，失败原因需立刻可见 */
@@ -198,9 +225,13 @@ function copyOut() {
         <!-- 全文仅在 showAll 时渲染；摘要态末尾标注总字符数 -->
         <pre v-if="showAll" class="tcard-out full">{{ content }}</pre>
         <pre v-else class="tcard-out">{{ resultSummary }}<span v-if="truncated" class="tcard-ellipsis">…
-… 共 {{ content.length }} 字符</span></pre>
+… 共 {{ contentLength ?? content.length }} 字符</span></pre>
         <div class="tcard-ops">
-          <button v-if="truncated" class="tmini" type="button" @click="showAll = !showAll">
+          <!-- F-53：服务端摘要化 → 展开动作是按需拉全文（本地无全文可切） -->
+          <button v-if="contentTruncated" class="tmini" type="button" :disabled="requestingFull" @click="requestFull">
+            {{ requestingFull ? '加载中…' : `加载完整输出（共 ${contentLength ?? content.length} 字符）` }}
+          </button>
+          <button v-else-if="truncated" class="tmini" type="button" @click="showAll = !showAll">
             {{ showAll ? '收起' : '展开全部' }}
           </button>
           <button class="tmini" type="button" @click="copyOut">{{ copiedOut ? '已复制 ✓' : '复制输出' }}</button>

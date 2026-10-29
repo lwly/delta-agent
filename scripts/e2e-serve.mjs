@@ -31,7 +31,23 @@ await fsp.writeFile(path.join(projectRoot, 'README.md'), '# e2e 项目\n');
 
 const svc = new SessionService(path.join(tmp, 'db.sqlite'));
 // 启动即注册 e2e 项目（Web 测试经 API 列表复用，避免测试侧构造 root 路径）
-svc.ensureProject(projectRoot);
+const project = svc.ensureProject(projectRoot);
+
+// F-53（AC-53-1）：性能预算用例的大会话种子。E2E_SEED_MESSAGES>0 时预置一个
+// 独立会话（默认标题「性能基准会话」），交替 user/assistant + 每 10 条一条 6KB tool 输出。
+const seedCount = Number(process.env.E2E_SEED_MESSAGES ?? 0);
+if (seedCount > 0) {
+  const seedSession = svc.createSession(project.id, {
+    title: process.env.E2E_SEED_SESSION_TITLE ?? '性能基准会话',
+  });
+  const big = 'x'.repeat(6000);
+  for (let i = 1; i <= seedCount; i++) {
+    svc.appendMessage(seedSession.id, { role: 'user', content: `seed-${i}` });
+    if (i % 2 === 0) svc.appendMessage(seedSession.id, { role: 'assistant', content: `ack-${i}` });
+    if (i % 10 === 0) svc.appendMessage(seedSession.id, { role: 'tool', content: big, toolCallId: `seed-call-${i}` });
+  }
+  console.log(`E2E_SEED_READY session=${seedSession.id} messages=${seedCount}`);
+}
 const hub = new SessionHub({
   service: svc,
   registry: new ToolRegistry(),

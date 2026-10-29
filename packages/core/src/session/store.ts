@@ -183,6 +183,35 @@ export class SessionStore {
       .all(projectId) as SessionRow[];
   }
 
+  /**
+   * F-53 会话列表游标分页（updated_at DESC, id DESC 复合排序）。
+   * before = 上一页末条游标（`${updated_at}|${id}`，同毫秒并列不丢页）。
+   */
+  listSessionsPage(
+    projectId: string,
+    opts: { before?: string; limit: number },
+  ): { sessions: SessionRow[]; has_more: boolean; next_cursor: string | null } {
+    const limit = Math.max(1, Math.min(200, Math.floor(opts.limit)));
+    const sep = opts.before?.lastIndexOf('|') ?? -1;
+    const beforeAt = sep > 0 ? opts.before!.slice(0, sep) : undefined;
+    const beforeId = sep > 0 ? opts.before!.slice(sep + 1) : undefined;
+    const sql = beforeAt
+      ? `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL
+         AND (updated_at < ? OR (updated_at = ? AND id < ?)) ORDER BY updated_at DESC, id DESC LIMIT ?`
+      : `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL
+         ORDER BY updated_at DESC, id DESC LIMIT ?`;
+    const args = beforeAt ? [projectId, beforeAt, beforeAt, beforeId, limit + 1] : [projectId, limit + 1];
+    const rows = this.db.prepare(sql).all(...args) as SessionRow[];
+    const has_more = rows.length > limit;
+    const sessions = has_more ? rows.slice(0, limit) : rows;
+    const last = sessions[sessions.length - 1];
+    return {
+      sessions,
+      has_more,
+      next_cursor: has_more && last ? `${last.updated_at}|${last.id}` : null,
+    };
+  }
+
   /** F-39：团队专家绑定要求 mode=react（空会话就地改绑时校正）。 */
   setSessionMode(id: string, mode: string): void {
     this.db.prepare('UPDATE sessions SET mode = ?, updated_at = ? WHERE id = ?').run(mode, new Date().toISOString(), id);
@@ -360,6 +389,53 @@ export class SessionStore {
       .prepare('SELECT seq, content_json, created_at FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
       .all(sessionId, afterSeq, limit) as Array<{ seq: number; content_json: string; created_at: string }>;
     return rows.map((r) => ({ seq: r.seq, message: JSON.parse(r.content_json) as ChatMessage, at: r.created_at }));
+  }
+
+  /**
+   * F-53 消息历史游标分页（AC-53-3）：
+   * - 无 before/after：取最近 limit 条（升序返回），首屏只拉最近一屏
+   * - before=N：取 seq < N 的紧邻上一页（向上翻历史）
+   * - after=N：取 seq > N 的增量（done 后按服务端落库校准）
+   * 返回升序页 + has_more + next_before（向上继续拉的游标）。
+   */
+  getMessagesPage(
+    sessionId: string,
+    opts: { before?: number; after?: number; limit: number },
+  ): { items: Array<{ seq: number; message: ChatMessage }>; has_more: boolean; next_before: number | null } {
+    const limit = Math.max(1, Math.min(500, Math.floor(opts.limit)));
+    let rows: Array<{ seq: number; content_json: string }>;
+    if (opts.before != null) {
+      rows = this.db
+        .prepare('SELECT seq, content_json FROM messages WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?')
+        .all(sessionId, opts.before, limit + 1) as Array<{ seq: number; content_json: string }>;
+    } else if (opts.after != null) {
+      rows = this.db
+        .prepare('SELECT seq, content_json FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
+        .all(sessionId, opts.after, limit + 1) as Array<{ seq: number; content_json: string }>;
+    } else {
+      rows = this.db
+        .prepare('SELECT seq, content_json FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?')
+        .all(sessionId, limit + 1) as Array<{ seq: number; content_json: string }>;
+    }
+    const has_more = rows.length > limit;
+    rows = rows.slice(0, limit); // 裁掉 has_more 探针行（DESC 模式=最新 limit 条；ASC 模式=最旧 limit 条）
+    if (opts.before != null || opts.after == null) rows.reverse(); // 统一升序返回
+    const items = rows.map((r) => ({ seq: r.seq, message: JSON.parse(r.content_json) as ChatMessage }));
+    return {
+      items,
+      has_more,
+      // next_before：向上翻页游标 = 本页最小 seq（after 增量模式无向上游标语义）
+      next_before: items.length > 0 ? items[0]!.seq : null,
+    };
+  }
+
+  /** F-53 懒加载：按 seq 取单条消息全文（tool_result 大字段按需拉取，AC-53-4）。 */
+  getMessageBySeq(sessionId: string, seq: number): { seq: number; message: ChatMessage } | undefined {
+    const r = this.db
+      .prepare('SELECT seq, content_json FROM messages WHERE session_id = ? AND seq = ?')
+      .get(sessionId, seq) as { seq: number; content_json: string } | undefined;
+    if (!r) return undefined;
+    return { seq: r.seq, message: JSON.parse(r.content_json) as ChatMessage };
   }
 
   /**

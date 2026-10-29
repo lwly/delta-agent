@@ -11,6 +11,10 @@ import {
 import { subscribeSession } from '../api/sse';
 
 /** 对话运行时状态：SSE 事件 → 渲染消息流 + 待确认/待回答卡片 */
+
+/** F-53：首屏/翻页每屏消息条数（AC-53-3 首屏只拉最近一屏） */
+const MESSAGE_PAGE_SIZE = 50;
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     sessionId: '' as string,
@@ -23,6 +27,20 @@ export const useChatStore = defineStore('chat', {
       expertType?: string | null;
     },
     messages: [] as ChatMessage[],
+    // ── F-53 增量拉取状态（AC-53-3）──────────────────────────────────────
+    /** 服务端已知最大 seq（done 增量校准的 after 游标） */
+    lastSeq: 0,
+    /** store 内最旧消息的 seq（向上翻页 before 游标） */
+    oldestSeq: 0,
+    /** 服务端还有更早消息未拉取 */
+    hasMoreOlder: false,
+    /** 正在拉取更早消息（防重入） */
+    loadingOlder: false,
+    /**
+     * 前缀锚定数：messages[0..anchoredCount) 来自服务端分页（带 seq），
+     * 之后是 SSE/本地推入的未锚定消息（done 时被服务端增量整体替换）。
+     */
+    anchoredCount: 0,
     streamingText: '',
     running: false,
     /** PASI-9：会话处于暂停态（上一轮执行被暂停；发送消息即恢复） */
@@ -77,15 +95,22 @@ export const useChatStore = defineStore('chat', {
     async open(sessionId: string) {
       this.close();
       this.sessionId = sessionId;
-      const detail = await api.getSession(sessionId);
+      // F-53（AC-53-3）：元信息 + 最近一屏历史分两次拉，不再整体拉全量消息
+      const meta = await api.getSessionMeta(sessionId);
       // 会话切换竞态防御：await 期间用户可能已切到其他会话，过期响应不得覆盖当前状态
       if (this.sessionId !== sessionId) return;
       this.sessionMeta = {
-        title: detail.session.title,
-        mode: detail.session.mode,
-        model: detail.session.model,
+        title: meta.session.title,
+        mode: meta.session.mode,
+        model: meta.session.model,
       };
-      this.messages = detail.messages;
+      const page = await api.getSessionMessages(sessionId, { limit: MESSAGE_PAGE_SIZE });
+      if (this.sessionId !== sessionId) return;
+      this.messages = page.messages;
+      this.anchoredCount = page.messages.length;
+      this.lastSeq = page.messages.length > 0 ? page.messages[page.messages.length - 1]!.seq ?? 0 : 0;
+      this.oldestSeq = page.messages.length > 0 ? page.messages[0]!.seq ?? 0 : 0;
+      this.hasMoreOlder = page.has_more;
       this.streamingText = '';
       this.running = false;
       // UI 本地状态随会话切换重置（序号 / 计时 / 停止标志 / 思考文本均属会话作用域）
@@ -97,7 +122,7 @@ export const useChatStore = defineStore('chat', {
       this.toolSeq = 0;
       this.thinkingText = '';
       // PASI-9：打开会话时同步暂停态（status 落库值）
-      this.paused = detail.session.status === 'paused';
+      this.paused = meta.session.status === 'paused';
       // 会话级权限模式（失败保持默认，不阻塞会话打开）
       try {
         this.permissionMode = (await api.getPermission(sessionId)).mode;
@@ -138,6 +163,11 @@ export const useChatStore = defineStore('chat', {
       this.expertMissing = false;
       this.delegations = [];
       this.messages = [];
+      this.lastSeq = 0;
+      this.oldestSeq = 0;
+      this.hasMoreOlder = false;
+      this.loadingOlder = false;
+      this.anchoredCount = 0;
       this.streamingText = '';
       // 切换/关闭会话必须清空上一会话的全部 UI 状态：notices 渲染在对话区内，
       // 不清空会把旧会话的 token 统计 / 预算告警 / 错误提示带入新会话
@@ -379,11 +409,12 @@ export const useChatStore = defineStore('chat', {
             this.notice(`本任务 token：${this.lastUsage.inputTokens} 入 / ${this.lastUsage.outputTokens} 出${sub}`);
           }
           this.stopped = false;
-          // 以服务端落库为准重拉一次（期间会话已切换则丢弃过期响应，防止旧会话消息覆盖新会话）。
+          // F-53 增量校准（AC-53-3）：以 after=lastSeq 只拉落库新增，替代全量重拉。
           // 本地 UI 字段（ts/thinking/durationMs/toolSeq/ok）按 role+content 回带：
           // 数据仍来自本地真实记录，仅避免「运行结束瞬间时间戳/耗时消失」的回退观感
+          const sid = this.sessionId;
           const carry = new Map<string, Partial<ChatMessage>>();
-          for (const m of this.messages) {
+          for (const m of this.messages.slice(this.anchoredCount)) {
             const extras: Partial<ChatMessage> = {};
             if (m.ts != null) extras.ts = m.ts;
             if (m.thinking) extras.thinking = m.thinking;
@@ -392,13 +423,27 @@ export const useChatStore = defineStore('chat', {
             if (m.ok != null) extras.ok = m.ok;
             if (Object.keys(extras).length > 0) carry.set(`${m.role}\u0000${m.content}`, extras);
           }
-          const sid = this.sessionId;
-          const detail = await api.getSession(sid);
+          // after 游标分页循环拉全（单轮大量消息时超 500 条上限也能拉齐）
+          const fetched: ChatMessage[] = [];
+          let after = this.lastSeq;
+          for (let guard = 0; guard < 50; guard++) {
+            const r = await api.getSessionMessages(sid, { after, limit: 500 });
+            fetched.push(...r.messages);
+            if (!r.has_more || r.messages.length === 0) break;
+            after = r.messages[r.messages.length - 1]!.seq ?? after;
+          }
           if (this.sessionId === sid) {
-            this.messages = detail.messages.map((m) => {
-              const ex = carry.get(`${m.role}\u0000${m.content}`);
-              return ex ? { ...m, ...ex } : m;
-            });
+            const prefix = this.messages.slice(0, this.anchoredCount);
+            this.messages = [
+              ...prefix,
+              ...fetched.map((m) => {
+                const ex = carry.get(`${m.role}\u0000${m.content}`);
+                return ex ? { ...m, ...ex } : m;
+              }),
+            ];
+            this.anchoredCount = this.messages.length;
+            const lastFetched = fetched[fetched.length - 1];
+            if (lastFetched?.seq != null) this.lastSeq = lastFetched.seq;
           }
           break;
         }
@@ -421,6 +466,38 @@ export const useChatStore = defineStore('chat', {
       } catch (e) {
         this.notice(`✘ ${(e as Error).message}`);
         this.messages.pop();
+      }
+    },
+    /** F-53（AC-53-3）：向上翻页拉取更早一屏消息（前缀插入，调用方负责滚动锚定）。 */
+    async loadOlder(): Promise<boolean> {
+      if (!this.sessionId || !this.hasMoreOlder || this.loadingOlder) return false;
+      const sid = this.sessionId;
+      this.loadingOlder = true;
+      try {
+        const page = await api.getSessionMessages(sid, { before: this.oldestSeq, limit: MESSAGE_PAGE_SIZE });
+        if (this.sessionId !== sid) return false; // 会话已切换，丢弃过期响应
+        if (page.messages.length > 0) {
+          this.messages = [...page.messages, ...this.messages];
+          this.anchoredCount += page.messages.length;
+          this.oldestSeq = page.messages[0]!.seq ?? this.oldestSeq;
+        }
+        this.hasMoreOlder = page.has_more;
+        return page.messages.length > 0;
+      } catch {
+        return false;
+      } finally {
+        this.loadingOlder = false;
+      }
+    },
+    /** F-53（AC-53-4）：按 seq 拉取 tool 消息全文并原位回填（contentTruncated → false）。 */
+    async expandToolContent(seq: number): Promise<void> {
+      if (!this.sessionId) return;
+      try {
+        const r = await api.getMessageContent(this.sessionId, seq);
+        const idx = this.messages.findIndex((m) => m.seq === seq);
+        if (idx !== -1) this.messages[idx] = { ...r.message, seq };
+      } catch {
+        // 拉取失败保留摘要态（卡片内已有提示口径）
       }
     },
     /** 按 id 回填确认决策（队列中移除对应卡片；id 不存在说明已被清理，忽略） */

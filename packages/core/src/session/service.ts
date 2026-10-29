@@ -157,6 +157,14 @@ export class SessionService {
     return this.store.listSessions(projectId);
   }
 
+  /** F-53：会话列表游标分页（AC-53-2）。 */
+  listSessionsPage(
+    projectId: string,
+    opts: { before?: string; limit: number },
+  ): { sessions: SessionRow[]; has_more: boolean; next_cursor: string | null } {
+    return this.store.listSessionsPage(projectId, opts);
+  }
+
   appendMessage(sessionId: string, m: ChatMessage): void {
     const id = this.store.appendMessage(sessionId, m);
     this.search.indexMessage(id, sessionId, m.role, m.content); // F-17 同步全文索引
@@ -183,6 +191,22 @@ export class SessionService {
 
   getHistory(sessionId: string): ChatMessage[] {
     return this.store.getMessages(sessionId);
+  }
+
+  /** F-53：消息历史游标分页（AC-53-3；before 向上翻页 / after 增量校准）。 */
+  getMessagesPage(
+    sessionId: string,
+    opts: { before?: number; after?: number; limit: number },
+  ): { items: Array<{ seq: number; message: ChatMessage }>; has_more: boolean; next_before: number | null } {
+    if (!this.store.getSession(sessionId)) throw new Error('session not found');
+    return this.store.getMessagesPage(sessionId, opts);
+  }
+
+  /** F-53：按 seq 取单条消息全文（tool_result 大字段懒加载，AC-53-4）。 */
+  getMessageBySeq(sessionId: string, seq: number): { seq: number; message: ChatMessage } {
+    const r = this.store.getMessageBySeq(sessionId, seq);
+    if (!r) throw new Error('message not found');
+    return r;
   }
 
   /**

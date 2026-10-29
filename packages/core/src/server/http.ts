@@ -10,7 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import type { ConfirmDecision } from '@delta/shared';
+import type { ChatMessage, ConfirmDecision } from '@delta/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import type { ProviderManager } from '../llm/manager.js';
@@ -167,6 +167,27 @@ async function collectProjectFiles(root: string, q: string, maxEntries = MAX_FIL
   };
   await walk(root, 0);
   return out.sort();
+}
+
+/**
+ * F-53 消息分页摘要化（AC-53-4）：tool 消息超大输出不随页整体传输，
+ * 只下发头部 + 截断标记（contentTruncated/contentLength），全文由客户端按需拉取。
+ */
+const TOOL_RESULT_INLINE_LIMIT = 4000;
+const TOOL_RESULT_INLINE_HEAD = 1200;
+
+function summarizeToolContent(item: { seq: number; message: ChatMessage }): { seq: number; message: ChatMessage } {
+  const m = item.message;
+  if (m.role !== 'tool' || m.content.length <= TOOL_RESULT_INLINE_LIMIT) return item;
+  return {
+    seq: item.seq,
+    message: {
+      ...m,
+      content: `${m.content.slice(0, TOOL_RESULT_INLINE_HEAD)}\n…[已摘要化：完整输出共 ${m.content.length} 字符，工具卡内可加载全文]`,
+      contentTruncated: true,
+      contentLength: m.content.length,
+    },
+  };
 }
 
 const MIME: Record<string, string> = {
@@ -802,6 +823,12 @@ export function createWebServer(opts: ServeOptions): http.Server {
         return json(res, 200, s);
       }
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'sessions') {
+        // F-53：带 limit 走游标分页（AC-53-2）；不带保持全量旧口径（旧客户端兼容）
+        const limitParam = url.searchParams.get('limit');
+        if (limitParam != null) {
+          const before = url.searchParams.get('before');
+          return json(res, 200, service.listSessionsPage(parts[2]!, { ...(before ? { before } : {}), limit: Number(limitParam) || 50 }));
+        }
         return json(res, 200, service.listSessions(parts[2]!));
       }
       if (parts[0] === 'api' && parts[1] === 'sessions' && parts[2]) {
@@ -811,6 +838,40 @@ export function createWebServer(opts: ServeOptions): http.Server {
           const s = service.getSession(sessionId);
           if (!s) return err(res, 404, 'session not found');
           return json(res, 200, { session: s, messages: service.getHistory(sessionId) });
+        }
+        // F-53：仅会话元信息（Web 首屏历史走 messages 分页端点，不再整体拉全量）
+        if (method === 'GET' && parts.length === 4 && parts[3] === 'meta') {
+          const s = service.getSession(sessionId);
+          if (!s) return err(res, 404, 'session not found');
+          return json(res, 200, { session: s });
+        }
+        // ── F-53 消息历史游标分页（AC-53-3）：首屏只拉最近一屏；before 向上翻页 / after 增量校准 ──
+        if (method === 'GET' && parts[3] === 'messages' && parts.length === 4) {
+          if (!service.getSession(sessionId)) return err(res, 404, 'session not found');
+          const limitRaw = Number(url.searchParams.get('limit'));
+          const beforeRaw = url.searchParams.get('before');
+          const afterRaw = url.searchParams.get('after');
+          const page = service.getMessagesPage(sessionId, {
+            limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 50,
+            ...(beforeRaw != null ? { before: Number(beforeRaw) } : {}),
+            ...(afterRaw != null ? { after: Number(afterRaw) } : {}),
+          });
+          return json(res, 200, {
+            messages: page.items.map(summarizeToolContent),
+            has_more: page.has_more,
+            next_before: page.next_before,
+          });
+        }
+        // ── F-53 tool_result 大字段懒加载：按 seq 取单条消息全文（AC-53-4）──
+        if (method === 'GET' && parts[3] === 'messages' && parts.length === 6 && parts[5] === 'content') {
+          if (!service.getSession(sessionId)) return err(res, 404, 'session not found');
+          const seq = Number(parts[4]);
+          if (!Number.isInteger(seq)) return err(res, 400, 'seq must be an integer');
+          try {
+            return json(res, 200, service.getMessageBySeq(sessionId, seq));
+          } catch (e) {
+            return err(res, 404, (e as Error).message);
+          }
         }
         if (method === 'PATCH' && parts.length === 3) {
           const body = await readBody(req);
@@ -1453,17 +1514,31 @@ export function createWebServer(opts: ServeOptions): http.Server {
         return json(res, 200, service.searchSessions(url.searchParams.get('q') ?? ''));
       }
 
-      // ── 静态资源（Vue 构建产物，SPA fallback）─────────────────────────────
+      // ── 静态资源（Vue 构建产物，SPA fallback；F-53：优先回预压缩 .gz，AC-53-5）──
       if (opts.webDistDir && (method === 'GET' || method === 'HEAD') && !parts[0]?.startsWith('api')) {
         const rel = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
         const file = path.resolve(opts.webDistDir, rel);
         if (file.startsWith(path.resolve(opts.webDistDir)) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-          res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+          const type = MIME[path.extname(file)] ?? 'application/octet-stream';
+          const acceptGzip = String(req.headers['accept-encoding'] ?? '').includes('gzip');
+          const gzFile = `${file}.gz`;
+          if (acceptGzip && fs.existsSync(gzFile) && fs.statSync(gzFile).isFile()) {
+            res.writeHead(200, { 'content-type': type, 'content-encoding': 'gzip', vary: 'Accept-Encoding' });
+            fs.createReadStream(gzFile).pipe(res);
+            return;
+          }
+          res.writeHead(200, { 'content-type': type, vary: 'Accept-Encoding' });
           fs.createReadStream(file).pipe(res);
           return;
         }
         const index = path.join(opts.webDistDir, 'index.html');
         if (fs.existsSync(index)) {
+          const indexGz = `${index}.gz`;
+          if (String(req.headers['accept-encoding'] ?? '').includes('gzip') && fs.existsSync(indexGz)) {
+            res.writeHead(200, { 'content-type': MIME['.html']!, 'content-encoding': 'gzip', vary: 'Accept-Encoding' });
+            fs.createReadStream(indexGz).pipe(res);
+            return;
+          }
           res.writeHead(200, { 'content-type': MIME['.html']! });
           fs.createReadStream(index).pipe(res);
           return;

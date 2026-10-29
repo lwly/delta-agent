@@ -720,6 +720,13 @@ interface ToolCardProps {
   seq?: number;
   sandboxMeta?: ChatMessage['sandboxMeta'];
   agentName?: string | null;
+  // ── F-53 大输出懒加载（AC-53-4）──
+  /** 结果消息落库 seq（展开全文的数据源；SSE 实时消息无） */
+  resultSeq?: number | null;
+  /** 服务端摘要化标记：true = content 已截断，可点「加载完整输出」 */
+  contentTruncated?: boolean;
+  /** 摘要化前的完整内容长度（字符） */
+  contentLength?: number;
 }
 function toolCardOf(id: string, name: string, argsJson: string): ToolCardProps {
   const res = resultMap.value.get(id);
@@ -735,6 +742,9 @@ function toolCardOf(id: string, name: string, argsJson: string): ToolCardProps {
     seq: callInfoMap.value.get(id)?.seq,
     sandboxMeta: res?.sandboxMeta,
     agentName: res ? agentLabelOf(res) : null,
+    resultSeq: res?.seq ?? null,
+    contentTruncated: res?.contentTruncated,
+    contentLength: res?.contentLength,
   };
 }
 /** 助手消息上的调用 → 完整工具卡（结果未到 = 运行中态） */
@@ -756,7 +766,14 @@ function orphanCard(m: ChatMessage): ToolCardProps {
     seq: info?.seq ?? m.toolSeq,
     sandboxMeta: m.sandboxMeta,
     agentName: agentLabelOf(m),
+    resultSeq: m.seq ?? null,
+    contentTruncated: m.contentTruncated,
+    contentLength: m.contentLength,
   };
+}
+/** F-53：工具卡「加载完整输出」→ 按 resultSeq 拉全文原位回填（AC-53-4） */
+function onLoadFullResult(card: ToolCardProps) {
+  if (card.resultSeq != null) void chat.expandToolContent(card.resultSeq);
 }
 
 /** 消息时间戳显示（仅 SSE 实时到达的消息有 ts，HH:mm 口径） */
@@ -814,9 +831,51 @@ function onChatScroll() {
   const el = listRef.value;
   if (!el) return;
   showJump.value = el.scrollHeight - el.scrollTop - el.clientHeight > 200;
+  // F-53：侧栏式触底不适用对话区；向上滚动到顶不自动翻页（显式按钮，避免锚定抖动）
 }
 function jumpToBottom() {
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight, behavior: 'smooth' });
+}
+
+// ── F-53（AC-53-2）：侧栏会话列表触底加载更早会话 ───────────────────────────
+const sidebarScrollEl = ref<HTMLElement | null>(null);
+function onSidebarScroll() {
+  const el = sidebarScrollEl.value;
+  if (!el) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) void ws.loadMoreSessions();
+}
+
+// ── F-53 窗口化渲染（AC-53-1）：消息流只渲染最近 WINDOW 条，更早的折叠为
+// 「载入更早消息」入口；配合首屏只拉 50 条 + loadOlder 前缀加载，
+// 5000+ 条会话的常驻 DOM 有界（上界 ≈ WINDOW + 单次展开步长），滚动/跳转不卡。
+const RENDER_WINDOW = 120;
+const RENDER_WINDOW_STEP = 80;
+const windowExtra = ref(0);
+const visibleMessages = computed(() => {
+  const all = chat.messages;
+  const total = RENDER_WINDOW + windowExtra.value;
+  return all.length <= total ? all : all.slice(all.length - total);
+});
+const hiddenCount = computed(() => chat.messages.length - visibleMessages.value.length);
+
+/** 前缀插入/窗口扩大后按 scrollHeight 差值补偿 scrollTop（保持视口停在原消息上，无跳动） */
+let pendingScrollAdjust: number | null = null;
+async function loadOlderMessages() {
+  const el = listRef.value;
+  if (hiddenCount.value > 0) {
+    // 已加载未渲染：先扩大渲染窗口（纯本地，瞬时）
+    const beforeHeight = el?.scrollHeight ?? 0;
+    windowExtra.value += RENDER_WINDOW_STEP;
+    await nextTick();
+    if (el) el.scrollTop += el.scrollHeight - beforeHeight;
+    return;
+  }
+  if (!chat.hasMoreOlder) return;
+  // 服务端还有更早消息：前缀拉取；scrollTop 补偿由 messages watcher 消费 pendingScrollAdjust
+  const beforeHeight = el?.scrollHeight ?? 0;
+  await chat.loadOlder();
+  await nextTick();
+  if (el) pendingScrollAdjust = el.scrollHeight - beforeHeight;
 }
 
 /** 状态条「继续」：聚焦输入区并提示发送续跑（store.send 恢复语义，输入为空时不盲目发送） */
@@ -1125,12 +1184,19 @@ function acTrigger(kind: 'file' | 'skill') {
   });
 }
 
-// 消息增长 / 流式输出时滚到底部；运行结束后刷新今日 token 与待确认记忆角标
+// 消息增长 / 流式输出时滚到底部；F-53：loadOlder 前缀插入改为 scrollTop 补偿（不跳底）
 watch(
   () => [chat.messages.length, chat.streamingText],
   async () => {
     await nextTick();
-    listRef.value?.scrollTo({ top: listRef.value.scrollHeight });
+    const el = listRef.value;
+    if (!el) return;
+    if (pendingScrollAdjust != null) {
+      el.scrollTop += pendingScrollAdjust;
+      pendingScrollAdjust = null;
+      return;
+    }
+    el.scrollTo({ top: el.scrollHeight });
   },
 );
 watch(
@@ -1175,8 +1241,8 @@ watch(
         </div>
       </div>
 
-      <!-- 会话列表区：小节标题 + 项目 × 会话树 -->
-      <div class="sidebar-scroll">
+      <!-- 会话列表区：小节标题 + 项目 × 会话树（F-53：触底加载更早会话） -->
+      <div ref="sidebarScrollEl" class="sidebar-scroll" @scroll.passive="onSidebarScroll">
         <div class="section-title">会话</div>
         <p v-if="error" class="error">✘ {{ error }}</p>
         <div v-for="p in ws.projects" :key="p.id" class="project-group">
@@ -1231,6 +1297,10 @@ watch(
               <button v-else class="item-del" title="删除会话（软删除）" @click.stop="askRemoveSession(s)">✕</button>
             </div>
             <div v-if="ws.sessions.length === 0" class="session-empty">（暂无会话，点「＋ 新对话」开始）</div>
+            <!-- F-53：会话分页加载状态 -->
+            <div v-if="ws.sessionsHasMore || ws.loadingMoreSessions" class="session-empty">
+              {{ ws.loadingMoreSessions ? '加载中…' : '↓ 滚动加载更早会话' }}
+            </div>
           </div>
         </div>
         <p v-if="ws.projects.length === 0" class="session-empty" style="padding: 10px 8px">
@@ -1337,8 +1407,14 @@ watch(
         <div class="chat-area">
           <div ref="listRef" class="chat-scroll" @scroll.passive="onChatScroll">
           <div class="chat-inner">
-            <!-- 用户消息 -->
-            <div v-for="(m, i) in chat.messages" :key="i">
+            <!-- F-53 载入更早消息（窗口折叠 + 前缀分页，AC-53-1/3） -->
+            <div v-if="hiddenCount > 0 || chat.hasMoreOlder" class="load-older-row">
+              <button class="btn-sm" :disabled="chat.loadingOlder" @click="loadOlderMessages">
+                {{ chat.loadingOlder ? '加载中…' : hiddenCount > 0 ? `载入更早消息（已折叠 ${hiddenCount} 条）` : '载入更早消息' }}
+              </button>
+            </div>
+            <!-- F-53：渲染窗口内消息；绝对下标 = i + hiddenCount（编辑/分叉按 chat.messages 定位） -->
+            <div v-for="(m, i) in visibleMessages" :key="m.seq ?? `local-${i}`">
               <div v-if="m.role === 'user'" class="msg msg-user">
                 <span class="avatar user">👤</span>
                 <div class="ai-col">
@@ -1348,7 +1424,7 @@ watch(
                     <span v-if="m.ts" class="meta-ts">{{ fmtTs(m.ts) }}</span>
                   </div>
                   <!-- 编辑态：原文填入文本框，可改后重发 -->
-                  <div v-if="editingIdx === i" class="bubble edit-box">
+                  <div v-if="editingIdx === i + hiddenCount" class="bubble edit-box">
                     <textarea
                       v-model="editText"
                       class="edit-input"
@@ -1369,9 +1445,9 @@ watch(
                     <div class="msg-text">{{ m.content }}</div>
                     <div class="msg-ops">
                       <button class="uop ico" title="复制原文" @click="copyText(m.content)">📋</button>
-                      <button class="uop ico" title="编辑后重发" :disabled="chat.running" @click="startEdit(i, m)">✏️</button>
+                      <button class="uop ico" title="编辑后重发" :disabled="chat.running" @click="startEdit(i + hiddenCount, m)">✏️</button>
                       <button class="uop ico" title="原样重发" :disabled="chat.running" @click="resend(m)">🔁</button>
-                      <button class="uop ico" title="从此重跑（分叉新会话，原会话不动）" :disabled="chat.running" @click="forkFrom(i)">🔀</button>
+                      <button class="uop ico" title="从此重跑（分叉新会话，原会话不动）" :disabled="chat.running" @click="forkFrom(i + hiddenCount)">🔀</button>
                     </div>
                   </div>
                 </div>
@@ -1396,9 +1472,9 @@ watch(
                   <div v-if="m.content" class="msg-ops">
                     <button class="uop ico" title="复制回复" @click="copyText(m.content)">📋</button>
                   </div>
-                  <!-- 工具调用卡（调用 + 结果按 callId 合并；结果未到 = 运行中态） -->
+                  <!-- 工具调用卡（调用 + 结果按 callId 合并；结果未到 = 运行中态；F-53 大输出懒加载） -->
                   <template v-for="c in cardsFor(m)" :key="c.callId">
-                    <ToolCallCard v-bind="c" />
+                    <ToolCallCard v-bind="c" @load-full="onLoadFullResult(c)" />
                   </template>
                 </div>
               </div>
@@ -1409,7 +1485,7 @@ watch(
                   <span class="role-tag tool">⚙ TOOL</span>
                   <span v-if="m.ts" class="meta-ts">{{ fmtTs(m.ts) }}</span>
                 </div>
-                <ToolCallCard v-bind="orphanCard(m)" />
+                <ToolCallCard v-bind="orphanCard(m)" @load-full="onLoadFullResult(orphanCard(m))" />
               </div>
             </div>
 
@@ -2030,6 +2106,8 @@ watch(
 .chat-area { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 0; }
 .chat-inner { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+/* F-53 载入更早消息入口：居中弱化按钮，不与消息流抢视觉 */
+.load-older-row { display: flex; justify-content: center; padding: 6px 0 10px; }
 .jump-btn {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
   padding: 7px 16px; border-radius: 999px; border: 1px solid var(--border-strong);

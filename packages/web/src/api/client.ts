@@ -30,6 +30,20 @@ export interface SessionRow {
   expert_type: string | null;
 }
 
+/** F-53：会话列表分页响应（AC-53-2） */
+export interface SessionPage {
+  sessions: SessionRow[];
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+/** F-53：消息历史分页响应（message 已展开合并 seq，AC-53-3） */
+export interface MessagePage {
+  messages: ChatMessage[];
+  has_more: boolean;
+  next_before: number | null;
+}
+
 // ── F-39 专家 / 专家团（与 core ExpertListItem / 详情 DTO 同构）────────────
 
 export interface LocalizedText {
@@ -155,6 +169,13 @@ export interface ChatMessage {
   toolSeq?: number;
   /** UI-本地：tool_result 事件 ok 原值（落库不含 ok，重拉后由 store 回带） */
   ok?: boolean;
+  // ── F-53 消息分页端点协议字段 ──
+  /** 服务端落库序号（仅消息分页端点下发；SSE 实时消息无此字段） */
+  seq?: number;
+  /** 服务端摘要化标记：true = content 已截断，全文走 getMessageContent 懒加载 */
+  contentTruncated?: boolean;
+  /** 摘要化前的完整内容长度（字符） */
+  contentLength?: number;
 }
 
 export interface TrashItem {
@@ -761,6 +782,13 @@ export const api = {
 
   // sessions
   listSessions: (projectId: string) => request<SessionRow[]>('GET', `/api/projects/${projectId}/sessions`),
+  // F-53 会话列表游标分页（AC-53-2）
+  listSessionsPage: (projectId: string, opts?: { limit?: number; before?: string }) => {
+    const q = new URLSearchParams();
+    q.set('limit', String(opts?.limit ?? 50));
+    if (opts?.before) q.set('before', opts.before);
+    return request<SessionPage>('GET', `/api/projects/${projectId}/sessions?${q.toString()}`);
+  },
   createSession: (projectId: string, opts?: { title?: string; model?: string; mode?: string; expert?: string }) =>
     request<SessionRow>('POST', `/api/projects/${projectId}/sessions`, opts),
   // F-39 专家库（列表不含 body/头像内容；头像按 name 拉取后前端缓存）
@@ -798,6 +826,25 @@ export const api = {
     request<{ ok: boolean; name: string; warnings: string[] }>('POST', '/api/experts/import', { b64, layer, force }),
   exportExpertUrl: (name: string) => `/api/experts/${encodeURIComponent(name)}/export${authQuery()}`,
   getSession: (id: string) => request<{ session: SessionRow; messages: ChatMessage[] }>('GET', `/api/sessions/${id}`),
+  // F-53：仅会话元信息（不带 messages；首屏历史走 getSessionMessages 游标分页，AC-53-3）
+  getSessionMeta: (id: string) => request<{ session: SessionRow }>('GET', `/api/sessions/${id}/meta`),
+  // F-53：消息历史游标分页（无参 = 最近一屏；before 向上翻页；after 增量校准）
+  getSessionMessages: async (id: string, opts?: { limit?: number; before?: number; after?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.limit != null) q.set('limit', String(opts.limit));
+    if (opts?.before != null) q.set('before', String(opts.before));
+    if (opts?.after != null) q.set('after', String(opts.after));
+    const qs = q.toString();
+    const r = await request<{ messages: Array<{ seq: number; message: ChatMessage }>; has_more: boolean; next_before: number | null }>(
+      'GET',
+      `/api/sessions/${id}/messages${qs ? `?${qs}` : ''}`,
+    );
+    // seq 展平进消息对象：store 侧统一按 ChatMessage{seq} 消费
+    return { messages: r.messages.map((it) => ({ ...it.message, seq: it.seq })), has_more: r.has_more, next_before: r.next_before } satisfies MessagePage;
+  },
+  // F-53：tool_result 大字段懒加载（按 seq 取单条消息全文，AC-53-4）
+  getMessageContent: (id: string, seq: number) =>
+    request<{ seq: number; message: ChatMessage }>('GET', `/api/sessions/${id}/messages/${seq}/content`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
   // F-46 会话分叉：copy-on-write 复制 [0, after_index) 前缀 → 新会话；run=true 以 content 触发重跑
   forkSession: (id: string, afterIndex: number, opts?: { content?: string; run?: boolean }) =>
