@@ -150,12 +150,12 @@ function revealRoot(): void {
         <button class="fp-action" type="button" @click="panel.openTab('files')">
           <span class="fp-action-ico">🗂</span>查看工作空间
         </button>
-        <!-- F-47：打开终端改为内嵌面板（工作台底部），替代方案（系统文件管理器）保留 -->
+        <!-- F-47：打开终端停靠在本面板下方（右侧栏底部），开关逻辑在工作台 -->
         <button
           class="fp-action"
           type="button"
           :disabled="!chat.sessionId"
-          :title="chat.sessionId ? '打开内置终端（绑定当前会话工作根）' : '先打开会话'"
+          :title="chat.sessionId ? '打开内置终端（停靠右侧栏底部，绑定当前会话工作根）' : '先打开会话'"
           @click="emit('open-terminal')"
         >
           <span class="fp-action-ico">🖥</span>打开终端

@@ -66,8 +66,18 @@ const removeTarget = ref<{ kind: 'project' | 'session'; id: string; name: string
 const removeConfirmName = ref('');
 const showTrash = ref(false);
 const showSearch = ref(false);
-// F-47：内置终端面板开关（依赖已打开的会话——pty 工作根跟随会话工作根）
+// F-47：内置终端面板开关（依赖已打开的会话——pty 工作根跟随会话工作根）。
+// 位置调整：终端停靠在右侧栏底部（文件面板下方），不再占据聊天输入区上方。
 const showTerminal = ref(false);
+/** 打开终端：停靠在右侧栏底部，右侧栏未展开时自动展开（终端可视区域跟随面板） */
+function openTerminal(): void {
+  showTerminal.value = true;
+  if (!panel.open) panel.setOpen(true);
+}
+function toggleTerminal(): void {
+  if (showTerminal.value) showTerminal.value = false;
+  else openTerminal();
+}
 // ── F-39 专家 / 专家团 ──────────────────────────────────────────────
 const showExpertPanel = ref(false);
 const expertChipRef = ref<HTMLElement | null>(null);
@@ -1502,13 +1512,6 @@ watch(
         </div>
 
         <!-- 输入区（运行中整体轻量降级：opacity 0.75 + 顶部细提示行，不做遮挡，保留紧急停止入口） -->
-        <!-- F-47：内置终端面板（输入区上方；随会话切换重建——key 携带 sessionId/workRoot 由组件内部固化） -->
-        <TerminalPane
-          v-if="showTerminal && chat.sessionId"
-          :key="chat.sessionId"
-          :session-id="chat.sessionId"
-          @close="showTerminal = false"
-        />
         <!-- F-54 后台任务条：有运行中任务时显示，展开可停止/删除 -->
         <BackgroundTasksBar />
         <div class="composer-wrap">
@@ -1524,13 +1527,13 @@ watch(
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 @ 后自动补全项目文件" @click="acTrigger('file')">@文件引用</button>
                 <button class="tool-chip" type="button" :disabled="chat.running" title="插入 / 后自动补全可用技能" @click="acTrigger('skill')">/skill 技能</button>
                 <span class="tool-chip static" title="查看已配置的 MCP 扩展工具提示词">/mcp 扩展工具</span>
-                <!-- F-47：内置终端（会话工作根绑定；运行中不禁用——终端独立于 Agent 执行） -->
+                <!-- F-47：内置终端（停靠右侧栏底部；会话工作根绑定；运行中不禁用——终端独立于 Agent 执行） -->
                 <button
                   class="tool-chip"
                   type="button"
                   :disabled="!chat.sessionId"
-                  :title="chat.sessionId ? '打开内置终端（绑定当前会话工作根）' : '先打开会话'"
-                  @click="showTerminal = !showTerminal"
+                  :title="chat.sessionId ? '打开内置终端（停靠右侧栏底部，绑定当前会话工作根）' : '先打开会话'"
+                  @click="toggleTerminal"
                 >🖥 终端</button>
                 <!-- F-39：召唤专家（切换 = 新建对话；运行中置灰） -->
                 <button
@@ -1660,8 +1663,17 @@ watch(
       </template>
     </main>
 
-    <!-- ══════════ F-38 右侧文件面板（第三栏：侧栏 + 主区 + 面板） ══════════ -->
-    <FilePanel v-if="panel.open" @open-terminal="showTerminal = true" />
+    <!-- ══════════ F-38 右侧栏（第三栏）：文件面板在上，F-47 内置终端停靠其下 ══════════
+         终端开启但面板收起时列容器仍渲染（只显示终端）；随会话切换重建——key 携带 sessionId -->
+    <div v-if="panel.open || showTerminal" class="right-col">
+      <FilePanel v-if="panel.open" @open-terminal="openTerminal" />
+      <TerminalPane
+        v-if="showTerminal && chat.sessionId"
+        :key="chat.sessionId"
+        :session-id="chat.sessionId"
+        @close="showTerminal = false"
+      />
+    </div>
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
@@ -1726,6 +1738,11 @@ watch(
 
 <style scoped>
 .app { display: flex; height: 100vh; position: relative; }
+/* F-47 右侧栏列容器：文件面板占满剩余高度，内置终端 300px 停靠其下。
+   宽度跟随文件面板的行内 width；仅终端（面板收起）时兜底最小宽度 */
+.right-col { display: flex; flex-direction: column; height: 100%; flex: 0 0 auto; min-width: 360px; }
+.right-col:has(.file-panel) { min-width: 0; }
+.right-col .file-panel { flex: 1 1 0; height: auto; min-height: 0; }
 /* F-38：面板展开时主区最小宽度 480px（PRD F-38-1）；窄屏覆盖式面板不挤压主区 */
 .app.panel-open .main { min-width: 480px; }
 
