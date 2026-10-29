@@ -64,6 +64,20 @@ async function forkFrom(r: RunSummary) {
   }
 }
 
+/** F-49 会话导出：下载自包含 HTML/Markdown 只读快照（纯本地生成，默认脱敏） */
+const exporting = ref<'html' | 'md' | ''>('');
+async function exportSession(format: 'html' | 'md') {
+  error.value = '';
+  exporting.value = format;
+  try {
+    await api.exportSession(sessionId.value, format);
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    exporting.value = '';
+  }
+}
+
 function stepIcon(s: RunStep): string {
   if (s.type === 'user') return '👤';
   if (s.type === 'assistant') return '🤖';
@@ -90,6 +104,15 @@ onMounted(loadRuns);
       <h2>会话回放</h2>
       <span class="muted">{{ sessionTitle }}</span>
       <router-link class="back" :to="`/chat/${sessionId}`">← 返回对话</router-link>
+      <!-- F-49 会话导出 -->
+      <span class="export-row">
+        <button class="export-btn" :disabled="exporting !== ''" title="下载自包含只读 HTML（纯本地生成，默认脱敏）" @click="exportSession('html')">
+          {{ exporting === 'html' ? '导出中…' : '⬇ 导出 HTML' }}
+        </button>
+        <button class="export-btn" :disabled="exporting !== ''" title="下载 Markdown（纯本地生成，默认脱敏）" @click="exportSession('md')">
+          {{ exporting === 'md' ? '导出中…' : '⬇ 导出 MD' }}
+        </button>
+      </span>
     </div>
     <p v-if="error" class="error">✘ {{ error }}</p>
 
@@ -168,6 +191,10 @@ h2 { margin: 0; font-size: 18px; }
 .muted { color: var(--text-faint); font-size: 13px; }
 .back { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
 .back:hover { text-decoration: underline; }
+.export-row { display: inline-flex; gap: 6px; }
+.export-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border, #d0d0d0); border-radius: 6px; background: transparent; cursor: pointer; }
+.export-btn:disabled { opacity: .5; cursor: default; }
+.export-btn:hover:not(:disabled) { background: var(--accent-weak, #eef4ff); }
 .error { color: var(--red); }
 .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 14px; flex: 1; min-height: 0; }
 .runs { border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow-y: auto; background: var(--bg-panel); }

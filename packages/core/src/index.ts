@@ -286,6 +286,16 @@ export { detectShell, cmdAdapter, runWithShell, type ShellAdapter } from './engi
 
 export { SessionStore, type SessionRow, type ProjectRow, type TrashItem } from './session/store.js';
 export {
+  exportSession,
+  EXPORT_PAGE_SIZE,
+  type ExportFormat,
+  type ExportMeta,
+  type ExportOptions,
+  type ExportRedaction,
+  type ExportUsage,
+  type ExportUsageRow,
+} from './session/export.js';
+export {
   MIGRATIONS,
   LATEST_SCHEMA_VERSION,
   currentSchemaVersion,

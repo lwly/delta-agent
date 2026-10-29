@@ -801,6 +801,21 @@ export const api = {
   listRuns: (sessionId: string) => request<RunSummary[]>('GET', `/api/sessions/${sessionId}/runs`),
   getRunTimeline: (sessionId: string, index: number) =>
     request<RunTimeline>('GET', `/api/sessions/${sessionId}/runs/${index}`),
+  // F-49 会话导出：拉取自包含 HTML/MD 文件并触发浏览器下载（桌面宿主鉴权必须走 apiFetch）
+  exportSession: async (sessionId: string, format: 'html' | 'md'): Promise<void> => {
+    const res = await apiFetch(`/api/sessions/${sessionId}/export?format=${format}`);
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(j.error ?? `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `delta-export-${sessionId}.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 
   // memory（F-06a 记忆面板）
   listMemory: (scope?: string, kind?: string, status?: string) => {

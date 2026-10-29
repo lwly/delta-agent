@@ -19,6 +19,7 @@ import { WebSocketServer } from 'ws';
 import type { TerminalManager } from './terminal.js';
 import { normalizeIncomingImages, ImageError } from '../media/images.js';
 import { normalizeRange, usageReportToJson } from '../session/usage.js';
+import { exportSession, type ExportFormat } from '../session/export.js';
 import { DEFAULT_SESSION_BUDGET } from '../context/budget.js';
 import { readBudgetSetting, writeBudgetSetting } from './settings-store.js';
 import { discoverSkills } from '../skills/loader.js';
@@ -710,6 +711,25 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (method === 'GET' && parts[3] === 'runs' && parts[4] !== undefined) {
           const timeline = service.getRunTimeline(sessionId, Number(parts[4]));
           return timeline ? json(res, 200, timeline) : err(res, 404, 'run not found');
+        }
+        // F-49 会话导出：自包含 HTML/Markdown 文件（纯本地生成，默认脱敏；流式写出）
+        // 脱敏告警写进文档尾部注记（计数遍历后才知道，响应头此时已不可再改）
+        if (method === 'GET' && parts[3] === 'export' && parts.length === 4) {
+          const format = url.searchParams.get('format');
+          if (format !== 'html' && format !== 'md') return err(res, 400, '非法导出格式：仅支持 html | md');
+          if (!service.getSession(sessionId)) return err(res, 404, 'session not found');
+          const mime = format === 'html' ? 'text/html; charset=utf-8' : 'text/markdown; charset=utf-8';
+          res.writeHead(200, {
+            'content-type': mime,
+            'content-disposition': `attachment; filename="delta-export-${sessionId}.${format}"`,
+          });
+          try {
+            await exportSession(service, sessionId, { format: format as ExportFormat }, (chunk) => res.write(chunk));
+          } catch (e) {
+            // 头已写出，无法改状态码：截断流并以错误注释收尾
+            res.write(format === 'html' ? `<!-- export error: ${(e as Error).message} -->` : `\n\nexport error: ${(e as Error).message}\n`);
+          }
+          return res.end();
         }
         // ── F-37 git 分支切换 + worktree 会话级隔离（4 端点，/permission 同级同风格）──
         // GET /api/sessions/:id/git —— 底栏状态（SessionGitState）

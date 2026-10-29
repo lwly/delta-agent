@@ -352,6 +352,17 @@ export class SessionStore {
   }
 
   /**
+   * F-49 会话导出：按 seq 分页读取带时间戳的消息（afterSeq 之后 limit 条，升序）。
+   * 导出器逐页消费，避免大会话一次性整体载入内存（AC-49-5）。
+   */
+  getMessagesDetailedPage(sessionId: string, afterSeq: number, limit: number): Array<{ seq: number; message: ChatMessage; at: string }> {
+    const rows = this.db
+      .prepare('SELECT seq, content_json, created_at FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
+      .all(sessionId, afterSeq, limit) as Array<{ seq: number; content_json: string; created_at: string }>;
+    return rows.map((r) => ({ seq: r.seq, message: JSON.parse(r.content_json) as ChatMessage, at: r.created_at }));
+  }
+
+  /**
    * F-46 会话分叉（copy-on-write）：把 [0, afterIndex) 的消息前缀深复制到新会话，原会话只读不动。
    * 分叉点必须是 user 消息（其内容作为新会话的首条输入，由调用方触发重跑）。
    * 模式/模型/专家绑定继承源会话；预算/权限/todos/usage 为新会话初始值（重跑语义）。

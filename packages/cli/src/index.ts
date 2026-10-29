@@ -27,6 +27,7 @@ import {
   resolveToolAllow,
   restrictRegistry,
   toTeamRuntime,
+  exportSession,
   type ExpertRecord,
 } from '@delta/core';
 import { App } from './ui/app.js';
@@ -471,6 +472,52 @@ program
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
   .action(async (opts: UsageCommandOptions) => {
     await usageCommand(opts);
+  });
+
+// ── delta export：F-49 会话分享导出（自包含 HTML / Markdown）────────────
+
+program
+  .command('export')
+  .description('导出会话为自包含只读 HTML / Markdown 文件（纯本地生成；默认脱敏配置类字段并告警）')
+  .argument('<sessionId>', '会话 ID')
+  .option('--format <format>', '导出格式：html | md（默认 html）', 'html')
+  .option('--out <file>', '输出文件（缺省 ./delta-export-<sessionId>.<ext>）')
+  .option('--no-redact', '关闭默认脱敏（不推荐）')
+  .option('--database <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
+  .action(async (sessionId: string, opts: { format: string; out?: string; redact: boolean; database?: string }) => {
+    if (opts.format !== 'html' && opts.format !== 'md') {
+      console.error(`✘ 非法导出格式：${opts.format}（可选 html | md）`);
+      process.exitCode = 1;
+      return;
+    }
+    const service = new SessionService(opts.database);
+    try {
+      const out =
+        opts.out ?? path.resolve(`delta-export-${sessionId}.${opts.format}`);
+      // AC-49-5：按块写入文件流，大会话不在内存中拼整篇文档
+      const stream = fs.createWriteStream(out, { encoding: 'utf8' });
+      const meta = await exportSession(
+        service,
+        sessionId,
+        { format: opts.format, redact: opts.redact },
+        (chunk) => stream.write(chunk),
+      );
+      await new Promise<void>((resolve, reject) => {
+        stream.end(resolve);
+        stream.on('error', reject);
+      });
+      console.log(`✔ 已导出 ${meta.messageCount} 条消息 / ${meta.runCount} 个任务 → ${out}`);
+      if (meta.redactions.length) {
+        const total = meta.redactions.reduce((sum, r) => sum + r.count, 0);
+        console.error(`⚠ 默认脱敏已剔除 ${total} 处配置类字段：${meta.redactions.map((r) => `${r.kind}×${r.count}`).join('、')}`);
+      }
+    } catch (e) {
+      const msg = (e as Error).message;
+      console.error(msg === 'session not found' ? `✘ 会话不存在：${sessionId}` : `✘ 导出失败：${msg}`);
+      process.exitCode = msg === 'session not found' ? 1 : 2;
+    } finally {
+      service.close();
+    }
   });
 
 // ── delta migrate：F-35 Schema 版本迁移 ─────────────────────────────────
@@ -1062,7 +1109,7 @@ worktree
 
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'help']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'help', 'export']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');
