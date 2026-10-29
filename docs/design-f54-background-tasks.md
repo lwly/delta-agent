@@ -28,7 +28,7 @@ core/src/server/runtime.ts             装配单例 + dispose killAll
 web/src/api/client.ts                  BackgroundTaskView 类型 + backgroundTasks/killBackgroundTask
 web/src/stores/bgTasks.ts              轮询 store（2s；watch/refresh/kill/toggle）
 web/src/components/BackgroundTasksBar.vue  胶囊 + 展开面板（已运行时长 1s 现算、停止按钮）
-web/src/views/WorkbenchView.vue        挂载于 TerminalPane 与 composer 之间 + 会话切换接线
+web/src/views/WorkbenchView.vue        挂载于聊天区与 composer 之间 + 会话切换接线（TerminalPane 已迁至右侧栏底部，不再位于主区）
 ```
 
 ## 3. 关键语义
