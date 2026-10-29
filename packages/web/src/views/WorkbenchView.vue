@@ -4,7 +4,7 @@
 // 模型配置（记忆/配置/用量已迁移至独立设置页 /settings）；设置入口固定在侧栏底部（Token 用量条上方），角标保留待确认记忆提示；
 // 定时任务为工作台子路由 /cron（侧栏常驻，主区按路由切换）；回收站 / 检索仍为弹窗；回放走独立路由 /replay/:sessionId
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
 import { toolLabel } from '../utils/toolNames';
@@ -48,6 +48,7 @@ watch(
 );
 onUnmounted(() => bgTasks.watch(null));
 const route = useRoute();
+const router = useRouter();
 
 /** 是否处于定时任务子路由：主区渲染 <router-view>，对话流/输入区不渲染 */
 const isCronRoute = computed(() => route.path.startsWith('/cron'));
@@ -359,6 +360,12 @@ const summonList = computed(() => expertsStore.list.filter((e) => !expertsStore.
 async function toggleExpertPanel(open: boolean) {
   showExpertPanel.value = open;
   if (open && !expertsStore.loaded) void expertsStore.load(ws.activeProjectId ?? undefined);
+}
+
+/** F-39「↗ 召唤更多专家」：关闭面板并跳设置页专家 tab（design-f39 §6.8.1） */
+function onExpertMore() {
+  showExpertPanel.value = false;
+  void router.push({ path: '/settings', query: { tab: 'experts' } });
 }
 
 /**
@@ -1589,7 +1596,7 @@ watch(
               :errors="expertsStore.errors"
               @select="onExpertSelect"
               @close="showExpertPanel = false"
-              @more="showExpertPanel = false"
+              @more="onExpertMore"
               @detail="onExpertDetail"
             />
             <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden @change="onPickImages" />
