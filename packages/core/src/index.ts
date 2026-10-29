@@ -435,6 +435,40 @@ export {
   type RunLogSink,
 } from './logging/logger.js';
 
+// F-50 自动更新：版本比较 / 渠道判定 / 更新源 / 节流启动检查 / SEA 替换
+export {
+  applyBinarySwap,
+  checkForUpdate,
+  compareVersions,
+  DEFAULT_UPDATE_CONFIG,
+  DEFAULT_UPDATE_INTERVAL_MS,
+  DEFAULT_UPDATE_SOURCE,
+  detectChannel,
+  downloadUpdateAsset,
+  isNewerVersion,
+  loadUpdateConfig,
+  maybeCheckOnStartup,
+  parseVersion,
+  resolveSourceUrl,
+  updateUpdateState,
+  userUpdateConfigPath,
+  type ApplyBinarySwapResult,
+  type CheckForUpdateOptions,
+  type DownloadUpdateAssetResult,
+  type FetchLike,
+  type MaybeCheckOnStartupOptions,
+  type ResolvedUpdateConfig,
+  type UpdateAsset,
+  type UpdateChannel,
+  type UpdateCheckResult,
+  type UpdateConfig,
+  type UpdateConfigAndState,
+  type UpdateConfigWarning,
+  type UpdateSource,
+  type UpdateSourceType,
+  type UpdateState,
+} from './update/index.js';
+
 export {
   discoverSkills,
   defaultBuiltinSkillsDir,

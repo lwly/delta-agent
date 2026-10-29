@@ -16,6 +16,14 @@ import path from 'node:path';
 /** 应用名：CLI 命令、npm scope、界面展示名 */
 export const APP_NAME = 'delta';
 
+/**
+ * 应用版本（单一事实来源）。
+ *
+ * 修改时同步各 package 的 package.json version 字段（发布脚本以 package.json 为准，
+ * 本常量供 CLI --version、更新检查等运行时读取；SEA 与 npm 两渠道共用）。
+ */
+export const APP_VERSION = '0.1.0';
+
 /** 配置目录名（用户级与项目级共用） */
 export const CONFIG_DIR = '.delta';
 
@@ -55,6 +63,10 @@ export const FILES = {
   agentMdDraft: 'agent.md.draft',
   /** Web 控制台设置 */
   settings: 'settings.json',
+  /** F-50 自动更新：配置（enabled/source/intervalMs）与状态（lastCheckAt/lastSeenVersion）共用 */
+  update: 'update.json',
+  /** F-50 SEA 渠道更新包下载暂存目录 */
+  updateStagingDir: 'update-staging',
   /** 技能包目录 */
   skillsDir: 'skills',
   /** 专家包目录 */

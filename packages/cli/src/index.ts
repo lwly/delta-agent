@@ -28,6 +28,7 @@ import {
   restrictRegistry,
   toTeamRuntime,
   exportSession,
+  APP_VERSION,
   type ExpertRecord,
 } from '@delta/core';
 import { App } from './ui/app.js';
@@ -97,6 +98,12 @@ import {
 import { createSpawnExecutor } from './cron-executor.js';
 import { createDesktopNotifier, autoOnboardProject } from '@delta/core';
 import {
+  startupUpdateCheck,
+  updateCheckOnlyCommand,
+  updateRunCommand,
+  updateStatusCommand,
+} from './update.js';
+import {
   normalizeGitPolicy,
   normalizeMode,
   parseAllowTools,
@@ -128,7 +135,7 @@ program.enablePositionalOptions();
 program
   .name('delta')
   .description('delta-agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
-  .version('0.1.0')
+  .version(APP_VERSION)
   .option('-r, --resume [sessionId]', '恢复指定会话（缺省恢复项目最近会话）')
   .option('-m, --model <model>', '指定模型名（默认读 DELTA_MODEL，再退回各厂商默认）')
   .option('-p, --provider <name>', '模型厂商：anthropic | deepseek | qwen | openai（默认读 DELTA_PROVIDER，再按已配置 Key 自动探测）')
@@ -613,6 +620,10 @@ program
   });
 
 async function start(opts: CliOpts): Promise<void> {
+  // F-50 启动版本检查：fire-and-forget 周节流（可经 ~/.delta/update.json 关闭），
+  // 失败静默留档 F-41；发现新版本在 TUI 挂起前提示一行，绝不阻塞启动
+  void startupUpdateCheck();
+
   // provider (M2: anthropic / deepseek / qwen / openai via env)
   let provider;
   try {
@@ -924,6 +935,21 @@ notify
     void notifyTestCommand();
   });
 
+// ── delta update：F-50 自动更新（检查 + 按渠道升级；启动周检在 start() 内接线）──
+
+const update = program.command('update').description('F-50 自动更新：检查新版本并按渠道升级（npm 渠道 npm i -g / SEA 渠道替换二进制）');
+
+update
+  .option('--check', '只检查新版本，不执行升级动作', false)
+  .action((opts: { check?: boolean }) => {
+    void (opts.check ? updateCheckOnlyCommand() : updateRunCommand(opts));
+  });
+
+update
+  .command('status')
+  .description('查看渠道、更新源配置与上次检查时间（不发网络请求）')
+  .action(() => updateStatusCommand());
+
 // ── delta skill：Skill Hub 搜索 / 安装 / hub 地址管理 ────────────────────
 
 const skill = program
@@ -1173,7 +1199,7 @@ mcp
 
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

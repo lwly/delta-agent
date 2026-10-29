@@ -15,8 +15,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Tray } from 'electron';
-import { createServeRuntime, type ServeRuntime } from '@delta/core';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, Tray } from 'electron';
+import { FILES, RunLog, checkForUpdate, createServeRuntime, userConfigDir, type ServeRuntime, type UpdateCheckResult } from '@delta/core';
 import { ElectronNotifier } from './electron-notifier.js';
 
 const APP_ID = 'com.delta.agent';
@@ -121,20 +121,81 @@ async function bootstrap(): Promise<void> {
   const tray = trayIcon ? new Tray(trayIcon) : undefined;
   if (tray) {
     trayActive = true;
-    tray.setToolTip('delta-agent');
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
+
+    // ── F-50：托盘「检查更新」+ 新版本角标 + 跳转 Release（AC-50-3）────────
+    // 菜单随检查状态重建：checking（检查中禁用入口）/ 有新版（插入新版本项 + 角标）/ 无新版 / 检查失败。
+    // F-41 留档：更新事件写 serve-YYYYMMDD.log（source=update），失败静默（目录不可写则不留档）。
+    let updateLog: RunLog | undefined;
+    try {
+      updateLog = new RunLog({ dir: `${userConfigDir()}/${FILES.logsDir}` });
+    } catch {
+      updateLog = undefined;
+    }
+    type TrayUpdateState = { phase: 'checking' } | { phase: 'idle'; result?: UpdateCheckResult; error?: string };
+    let trayUpdate: TrayUpdateState = { phase: 'idle' };
+    const refreshTrayMenu = (): void => {
+      const updateItem =
+        trayUpdate.phase === 'checking'
+          ? { label: '正在检查更新…', enabled: false }
+          : { label: '检查更新…', click: () => void checkUpdate() };
+      const template: Electron.MenuItemConstructorOptions[] = [
         { label: '显示主窗口', click: showMain },
         { type: 'separator' },
-        {
-          label: '退出',
-          click: () => {
-            quitting = true;
-            app.quit();
-          },
+        updateItem,
+      ];
+      if (trayUpdate.phase === 'idle' && trayUpdate.result?.hasUpdate) {
+        const r = trayUpdate.result;
+        template.push({
+          label: `⬆ 新版本 ${r.latestVersion} 可用（点击查看）`,
+          click: () => void shell.openExternal(r.releaseUrl || 'https://gitee.com/lwly/delta-agent/releases'),
+        });
+      } else if (trayUpdate.phase === 'idle' && trayUpdate.error) {
+        template.push({ label: `更新检查失败：${trayUpdate.error}`, enabled: false });
+      }
+      template.push({ type: 'separator' }, {
+        label: '退出',
+        click: () => {
+          quitting = true;
+          app.quit();
         },
-      ]),
-    );
+      });
+      tray.setContextMenu(Menu.buildFromTemplate(template));
+      // 角标：有新版时 macOS 菜单栏图标旁显示 ●，并同步 tooltip
+      if (trayUpdate.phase === 'idle' && trayUpdate.result?.hasUpdate) {
+        tray.setTitle('●');
+        tray.setToolTip(`delta-agent — 新版本 ${trayUpdate.result.latestVersion} 可用`);
+      } else if (trayUpdate.phase === 'idle' && trayUpdate.error) {
+        tray.setTitle('');
+        tray.setToolTip('delta-agent — 更新检查失败');
+      } else {
+        tray.setTitle('');
+        tray.setToolTip('delta-agent');
+      }
+    };
+    const checkUpdate = async (): Promise<void> => {
+      trayUpdate = { phase: 'checking' };
+      refreshTrayMenu();
+      try {
+        const result = await checkForUpdate({ currentVersion: app.getVersion(), log: updateLog });
+        trayUpdate = result.hasUpdate
+          ? { phase: 'idle', result }
+          : { phase: 'idle', result, error: undefined };
+        updateLog?.append(
+          result.hasUpdate ? 'info' : 'debug',
+          'update',
+          result.hasUpdate
+            ? `[desktop] 发现新版本 ${result.latestVersion}（当前 ${result.currentVersion}）：${result.releaseUrl}`
+            : `[desktop] 已是最新（远端 ${result.latestVersion}）`,
+        );
+      } catch (e) {
+        // AC-50-4：失败静默留档，不打扰用户主流程（菜单里保留一条可忽略的失败项）
+        updateLog?.append('warn', 'update', `[desktop] 更新检查失败：${(e as Error).message}`);
+        trayUpdate = { phase: 'idle', error: '网络或更新源不可用' };
+      }
+      refreshTrayMenu();
+    };
+    refreshTrayMenu();
+
     // Windows 左键单击托盘图标唤起主窗口；macOS 设置了 contextMenu 后 click 即展开菜单
     if (process.platform !== 'darwin') tray.on('click', showMain);
   }
