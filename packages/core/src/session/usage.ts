@@ -192,4 +192,28 @@ export class UsageStore {
        ORDER BY cost_usd DESC`,
     ).all({ cutoff, project: filter.projectId ?? null }) as UsageSessionRow[];
   }
+
+  /** 单会话逐轮用量明细（导出场景：F-49b；turn 升序）。 */
+  sessionTurns(sessionId: string): UsageTurnRow[] {
+    return this.db.prepare(
+      `SELECT turn,
+              input_tokens,
+              output_tokens,
+              cost_usd,
+              COALESCE(model, '')  AS model,
+              COALESCE(created_at, '') AS created_at
+       FROM usage
+       WHERE session_id = ?
+       ORDER BY turn ASC`,
+    ).all(sessionId) as UsageTurnRow[];
+  }
+}
+
+export interface UsageTurnRow {
+  turn: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  model: string;
+  created_at: string;
 }
