@@ -36,6 +36,7 @@ import {
   restrictRegistry,
   seedExpertSkills,
   toTeamRuntime,
+  UnavailableProvider,
   type ExpertRecord,
   type SkillRuntime,
   type PermissionMode,
@@ -47,6 +48,7 @@ import {
 import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
 import { runPlanExecute } from '../engine/plan-execute.js';
 import { runMultiAgent } from '../engine/orchestrator.js';
+import { runExternalAgent } from '../engine/external.js';
 import { modeSegment } from '../engine/mode-prompt.js';
 import { distillMemories } from '../session/distill.js';
 import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
@@ -635,7 +637,17 @@ export class SessionHub {
       const userMessage: ChatMessage = { role: 'user', content: input };
       if (images && images.length > 0) userMessage.images = images;
       service.appendMessage(sessionId, userMessage);
-      const provider = await this.deps.resolveProvider();
+      // ── F-55 外部会话分流（第 4 引擎，docs/design-f55-external-cli-agents.md §1/§5.2）──
+      // model 带 cli:/acp: 前缀 → 外部 CLI Agent 会话：本就无 API Key，注入 UnavailableProvider
+      // 占位（RunContext.provider 必填，§11.1）并跳过 resolveProvider（不抛错）。adapter 解析
+      // 失败（未注册）由映射引擎发 external_agent_not_found fatal 事件走正常事件流。
+      // 能力降级收拢于下方各赋值点的 isExternal 三元，事件循环内零外部判断（done 蒸馏跳过除外）。
+      // 沙箱：hub 本就不向 toolContext 注沙箱实例；外部会话的工具在 CLI 进程内执行，
+      // delta 沙箱天然不生效（P3 由 UI 提示条显式告知，不静默）。
+      const isExternal = /^(cli|acp):/.test(session.model || '');
+      const provider = isExternal
+        ? new UnavailableProvider(session.model || '')
+        : await this.deps.resolveProvider();
       const ac = this.running.get(sessionId)!.ac; // send 入口已创建，僵尸判定与 engine 共用同一 Controller
       acRef = ac;
       service.registerRun(sessionId, ac);
@@ -650,13 +662,15 @@ export class SessionHub {
       const budget = new BudgetManager(this.deps.resolveBudgetConfig?.() ?? {});
 
       // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型（省 token）；
-      // 规则缺失 / 目标 provider 不可用 → 回退会话主模型（与 routeAux 降级语义一致）
-      const subRoute = await this.routeAux('subagent', sessionId);
+      // 规则缺失 / 目标 provider 不可用 → 回退会话主模型（与 routeAux 降级语义一致）。
+      // F-55：外部会话不注入 subagent（task 工具自带 task_unavailable 降级），无需路由。
+      const subRoute = isExternal ? undefined : await this.routeAux('subagent', sessionId);
       const subagentModel = subRoute?.model ?? session.model ?? '';
 
       // F-42：压缩摘要（summarize kind）路由——规则命中时压缩摘要走小模型，
-      // 用量按 aux model 归因落库；未配置 / 目标 provider 构建失败 → 跟随会话主模型
-      const summarizeRoute = await this.routeAux('summarize', sessionId);
+      // 用量按 aux model 归因落库；未配置 / 目标 provider 构建失败 → 跟随会话主模型。
+      // F-55：外部会话上下文由 CLI 自管，压缩能力降级跳过（§5.2）。
+      const summarizeRoute = isExternal ? undefined : await this.routeAux('summarize', sessionId);
 
       // ── F-39：专家解析 + 注册表收窄（收窄点唯一，D3/§6.4）────────────────
       // 包丢失 → expert=undefined → 不注入不收窄不 seed，会话照常运行（AC-9 降级）
@@ -680,6 +694,8 @@ export class SessionHub {
 
       const { staticText, dynamicText } = await this.buildPrompt(
         workRoot,
+        // F-55：外部会话 session.model 即虚拟 id（cli:*/acp:*），非空短路 → 不会触达
+        // defaultModelFor(provider.id)，UnavailableProvider 的虚拟 id 不参与默认模型推导
         session.model || this.deps.defaultModel || defaultModelFor(provider.id),
         runRegistry.definitions(),
         expert,
@@ -757,14 +773,19 @@ export class SessionHub {
           expertTeam: expert && expert.expertType === 'team' ? toTeamRuntime(expert, this.deps.registry) : undefined,
           // F-39：委派事件透传 SSE（Web 成员卡 / CLI 单行）
           emit: (ev) => this.publish(sessionId, ev),
-          subagent: {
-            provider: subRoute?.provider ?? provider,
-            model: subagentModel || session.model || this.deps.defaultModel || defaultModelFor(provider.id),
-            budget,
-            budgetConfig: budget.config,
-            windowTokens: this.deps.windowTokens ?? 200_000,
-            depth: 0,
-          },
+          // F-55：外部会话不注入 subagent → task 工具自带 task_unavailable 报错（既有降级口径）
+          ...(isExternal
+            ? {}
+            : {
+                subagent: {
+                  provider: subRoute?.provider ?? provider,
+                  model: subagentModel || session.model || this.deps.defaultModel || defaultModelFor(provider.id),
+                  budget,
+                  budgetConfig: budget.config,
+                  windowTokens: this.deps.windowTokens ?? 200_000,
+                  depth: 0,
+                },
+              }),
         },
         budget,
         // 方案 D：Web 链路预算耗尽降级续跑（headless/cron 硬停协议不受影响）
@@ -786,9 +807,11 @@ export class SessionHub {
 
       const history: ChatMessage[] = service.getHistory(sessionId);
 
-      // M5: 按会话模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）
-      const engine =
-        ctx.mode === 'plan-execute'
+      // M5: 按会话模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）；
+      // F-55：外部会话走第 4 引擎 runExternalAgent（判定在先，外部会话忽略 mode——无 DAG 语义）
+      const engine = isExternal
+        ? runExternalAgent
+        : ctx.mode === 'plan-execute'
           ? runPlanExecute
           : ctx.mode === 'multi-agent'
             ? runMultiAgent
@@ -835,6 +858,8 @@ export class SessionHub {
               ev.usage.outputTokens,
               ev.usage.costUsd ?? 0,
               ev.model ?? ctx.model,
+              // F-55：外部会话 usage 事件自带 billing='subscription'（§7），provider 会话回退 metered
+              ev.billing ?? 'metered',
             );
             break;
           }
@@ -842,8 +867,11 @@ export class SessionHub {
             // 最后一轮（通常无工具调用）在此落库；随后为中断残留的悬空调用补齐占位 tool 消息
             saveTurnAssistant();
             pairUnansweredCalls();
-            // 记忆里程碑：任务结束自动提炼（0-3 条候选进待确认队列；默认开启）
-            if (this.deps.autoDistill !== false && !ac.signal.aborted) {
+            // 记忆里程碑：任务结束自动提炼（0-3 条候选进待确认队列；默认开启）。
+            // F-55：外部会话跳过记忆蒸馏（§5.2 能力降级，debug 留痕不打扰用户）
+            if (isExternal) {
+              this.log('debug', '外部会话跳过记忆蒸馏', sessionId);
+            } else if (this.deps.autoDistill !== false && !ac.signal.aborted) {
               const transcript = service
                 .getHistory(sessionId)
                 .map((m) => `${m.role}: ${m.content}`)
