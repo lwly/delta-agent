@@ -46,4 +46,9 @@ export interface ExternalAgentAdapter {
     mcpConfigPath?: string;
     signal: AbortSignal;
   }): AsyncIterable<ExternalEvent>;
+  /**
+   * Tier A 权限应答通道：把 delta 确认流的决定回传 CLI（acp kind 必实现，其他可缺省）。
+   * decision 是映射后的三值 —— ConfirmDecision 的 edit 视作 reject（外部 agent 无法回填编辑参数）。
+   */
+  respondPermission?(permissionId: string, decision: 'allow' | 'allow_session' | 'reject'): void;
 }

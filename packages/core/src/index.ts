@@ -133,6 +133,9 @@ export {
 } from './external/spawn.js';
 export type { SpawnOptions, ProcEvent, SpawnedProcess } from './external/spawn.js';
 
+// F-55 外部 adapter 注册表：hub 引擎分派与 runExternalAgent 按 ctx.model（cli:*/acp:* 虚拟 id）解析
+export { registerExternalAdapter, resolveExternalAdapter } from './external/registry.js';
+
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
 export {
@@ -207,6 +210,8 @@ export {
 } from './tools/permissions.js';
 
 export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
+// F-55 外部 CLI Agent 事件映射引擎（ExternalEvent → AgentEvent，不 import 协议解析）
+export { runExternalAgent } from './engine/external.js';
 export {
   runHeadless,
   headlessExitCode,
