@@ -179,6 +179,14 @@ ALTER TABLE sessions ADD COLUMN expert_type TEXT DEFAULT NULL;
 CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);
 `;
 
+/** v6：F-55 外部 CLI Agent——sessions 存 resume 令牌与 agent 标识（NULL = 内置引擎），
+ * usage 加 billing 口径（metered 按量计费 / subscription 订阅内未计量），历史行回填 metered */
+const MIGRATION_V6_F55_EXTERNAL_AGENTS = `
+ALTER TABLE sessions ADD COLUMN external_id TEXT DEFAULT NULL;
+ALTER TABLE sessions ADD COLUMN external_agent TEXT DEFAULT NULL;
+ALTER TABLE usage ADD COLUMN billing TEXT NOT NULL DEFAULT 'metered';
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'baseline-core-tables', sql: MIGRATION_V1_BASELINE },
   { version: 2, name: 'f17-search-indexes', sql: MIGRATION_V2_F17_SEARCH },
@@ -192,6 +200,16 @@ export const MIGRATIONS: Migration[] = [
     skipIf: (db) => hasColumn(db, 'sessions', 'expert') && hasColumn(db, 'sessions', 'expert_type'),
     // 跳过时不能连带漏建索引（幂等语句，可安全重复执行）
     repairSql: 'CREATE INDEX IF NOT EXISTS idx_sessions_expert ON sessions(expert);',
+  },
+  {
+    version: 6,
+    name: 'f55-external-agents',
+    sql: MIGRATION_V6_F55_EXTERNAL_AGENTS,
+    // 列已存在 = 「user_version 被外部工具改小」后重放。三列齐全才跳过 ALTER（无索引要补，repairSql 不需要）
+    skipIf: (db) =>
+      hasColumn(db, 'sessions', 'external_id') &&
+      hasColumn(db, 'sessions', 'external_agent') &&
+      hasColumn(db, 'usage', 'billing'),
   },
 ];
 

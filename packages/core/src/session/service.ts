@@ -309,8 +309,16 @@ export class SessionService {
     };
   }
 
-  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model = ''): void {
-    this.store.recordUsage(sessionId, turn, input, output, costUsd, model);
+  recordUsage(
+    sessionId: string,
+    turn: number,
+    input: number,
+    output: number,
+    costUsd: number,
+    model = '',
+    billing: 'metered' | 'subscription' = 'metered',
+  ): void {
+    this.store.recordUsage(sessionId, turn, input, output, costUsd, model, billing);
   }
 
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void {

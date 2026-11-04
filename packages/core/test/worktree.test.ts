@@ -17,6 +17,7 @@ import {
   worktreeOffMessage,
   resolveWorkRoot,
 } from '../src/index.js';
+import { LATEST_SCHEMA_VERSION } from '../src/session/migrations.js';
 
 let tmpBase = ''; // 仓库父目录（worktree 容器落在这里）
 let repoRoot = '';
@@ -213,7 +214,7 @@ describe('resolveWorkRoot 与会话绑定（v4）', () => {
     const dbFile = path.join(tmpBase, 'test.db');
     const svc = new SessionService(dbFile);
     try {
-      expect(svc.store.schemaVersion).toBe(5);
+      expect(svc.store.schemaVersion).toBe(LATEST_SCHEMA_VERSION);
       const pid = svc.ensureProject(repoRoot).id;
       const s = svc.createSession(pid);
       // 默认两列为 NULL（主工作区）

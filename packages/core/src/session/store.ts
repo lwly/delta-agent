@@ -489,10 +489,21 @@ export class SessionStore {
   /**
    * F-31：逐轮用量落库。model 为可选尾参（缺省 ''，调用方从引擎 usage 事件透传）；
    * created_at 由 store 内部生成（ISO 8601 UTC，对齐 projects/sessions 存法），调用方禁止自传。
+   * F-55：billing 为用量口径（'metered' 按量计费 / 'subscription' 订阅内未计量），缺省 'metered'。
    */
-  recordUsage(sessionId: string, turn: number, inputTokens: number, outputTokens: number, costUsd: number, model = ''): void {
+  recordUsage(
+    sessionId: string,
+    turn: number,
+    inputTokens: number,
+    outputTokens: number,
+    costUsd: number,
+    model = '',
+    billing: 'metered' | 'subscription' = 'metered',
+  ): void {
     this.db
-      .prepare('INSERT INTO usage (session_id, turn, input_tokens, output_tokens, cost_usd, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(sessionId, turn, inputTokens, outputTokens, costUsd, model, new Date().toISOString());
+      .prepare(
+        'INSERT INTO usage (session_id, turn, input_tokens, output_tokens, cost_usd, model, created_at, billing) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(sessionId, turn, inputTokens, outputTokens, costUsd, model, new Date().toISOString(), billing);
   }
 }
