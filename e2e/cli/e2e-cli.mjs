@@ -234,10 +234,21 @@ if (process.platform !== 'win32') {
   check('外部会话报告含 usage（tokens > 0）', (okReport?.usage?.input_tokens ?? 0) > 0);
   // billing 只落在 usage 表（F-31 报表口径），headless --json 报告本就不含该字段
   check('外部会话报告不含 billing 字段', okReport != null && !('billing' in (okReport.usage ?? {})));
-  // usage 行 billing='subscription' 的落库断言不在此覆盖：headless 的 recordUsage
-  // （core/headless.ts）未透传 ev.billing（hub 路径才透传），headless 落库为缺省
-  // metered —— 属 core 侧已知缺口，事件层 billing='subscription' 语义由
-  // external-mapper 单测覆盖，待 core 侧补齐后此处再挂 DB 断言。
+  // usage 行 billing='subscription'（AC-55-6）：headless 路径 recordUsage 透传 ev.billing
+  // （core/headless.ts case 'usage'），直接读隔离 HOME 下的 agent.db 验证落库口径
+  {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(path.join(repoRoot, 'packages/core/package.json'));
+    const Database = req('better-sqlite3');
+    const db = new Database(path.join(home, '.delta', 'agent.db'), { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare('SELECT billing, cost_usd FROM usage WHERE session_id = ?').get(okReport.session_id);
+      check('外部会话 usage 行 billing=subscription', row?.billing === 'subscription', JSON.stringify(row));
+      check('外部会话 usage 行 cost_usd=0', row != null && row.cost_usd === 0, JSON.stringify(row));
+    } finally {
+      db.close();
+    }
+  }
 
   // ② 非零退出且无任何产出 → fatal → failed → 退出码 2（协议与三引擎一致）
   const fail = runCli(['run', 'F-55 外部失败', '--json', '--model', 'cli:fake'], {
