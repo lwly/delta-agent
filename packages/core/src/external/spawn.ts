@@ -30,6 +30,8 @@ export interface SpawnOptions {
   cwd: string;
   /** 额外放行的变量名（如 provider 自身变量 ANTHROPIC_API_KEY）；基础白名单固定包含 PATH/HOME/SHELL/LANG/TMPDIR */
   envWhitelist?: string[];
+  /** 直接注入子进程的变量（优先于白名单透传；adapter 传单次运行参数用，不改父进程 env） */
+  extraEnv?: Record<string, string>;
   /** abort → 先 onAbort 协议取消钩子，ABORT_KILL_DELAY_MS 后仍未退则杀进程组 */
   signal: AbortSignal;
   /** 协议级取消钩子（如 ACP session/cancel）；可缺省 */
@@ -65,8 +67,14 @@ export interface SpawnedProcess {
  */
 const defaultWindowsShellQuote = (commandLine: string): string => `'${JSON.stringify(commandLine)}'`;
 
-/** 组装子进程 env：仅 { 基础白名单 + envWhitelist 中存在于 process.env 的项 }，不透传 delta 进程的其余变量（不注入 delta 的密钥） */
-function buildChildEnv(envWhitelist: string[] | undefined, command: string): NodeJS.ProcessEnv {
+/** 组装子进程 env：仅 { 基础白名单 + envWhitelist 中存在于 process.env 的项 + extraEnv 直注入 }，
+ * 不透传 delta 进程的其余变量（不注入 delta 的密钥）。extraEnv 供 adapter 传单次运行的
+ * 场景参数（如 ScriptedExternalAdapter 的 FAKE_CLI_SCRIPT），不改父进程 env（P4 并发安全）。 */
+function buildChildEnv(
+  envWhitelist: string[] | undefined,
+  extraEnv: Record<string, string> | undefined,
+  command: string,
+): NodeJS.ProcessEnv {
   const allowed = new Set<string>(BASE_ENV_KEYS);
   for (const key of envWhitelist ?? []) allowed.add(key);
   const isWin = process.platform === 'win32';
@@ -76,6 +84,9 @@ function buildChildEnv(envWhitelist: string[] | undefined, command: string): Nod
   for (const key of allowed) {
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(extraEnv ?? {})) {
+    env[key] = value;
   }
   if (!isWin) {
     // POSIX 至少补 `_`：让 `command --version` 类调用有 argv0 观感
@@ -166,14 +177,14 @@ function killProcessTree(child: ChildProcess): void {
 
 /** spawn 外部 CLI 进程：白名单 env、逐行事件、stderr 环形缓冲、abort→杀进程组 */
 export function spawnExternal(options: SpawnOptions): SpawnedProcess {
-  const { command, args, cwd, envWhitelist, signal, onAbort, windowsShellQuote } = options;
+  const { command, args, cwd, envWhitelist, extraEnv, signal, onAbort, windowsShellQuote } = options;
 
   // Windows：command 解析到 .cmd/.bat/.ps1 shim（如 npm 装的 claude.cmd）必须 shell:true，
   // 否则 Node 无法直接执行 shim（CVE-2024-27980 相关限制）；整条命令行经引号包装防拆分。
   const isWinShim = /\.(cmd|bat|ps1)$/i.test(command);
   const spawnOpts: Parameters<typeof nodeSpawn>[2] = {
     cwd,
-    env: buildChildEnv(envWhitelist, command),
+    env: buildChildEnv(envWhitelist, extraEnv, command),
     stdio: ['pipe', 'pipe', 'pipe'],
     // detached 仅 POSIX：建立进程组，便于 kill(-pid) 连子孙一起杀
     detached: process.platform !== 'win32',

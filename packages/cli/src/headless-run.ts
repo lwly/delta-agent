@@ -36,6 +36,7 @@ import {
   runMultiAgent,
   runPlanExecute,
   runReAct,
+  isExternalModel,
   modeSegment,
   createDesktopNotifier,
   UnavailableProvider,
@@ -89,7 +90,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   // F-55：外部会话（cli:/acp: 前缀虚拟 model）本就无 Provider Key 可解析——入口先按
   // 显式 model / DELTA_MODEL 预判跳过解析；resume 会话的 model 可能落在 session 里，
   // session 就绪后还会按 session.model 复判（见下），以复判结果为准
-  const isExternalInput = /^(cli|acp):/.test(opts.model ?? process.env.DELTA_MODEL ?? '');
+  const isExternalInput = isExternalModel(opts.model ?? process.env.DELTA_MODEL ?? '');
   let provider;
   if (!isExternalInput) {
     try {
@@ -142,7 +143,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   service.recoverTasks(session.id);
 
   // F-55 复判：以 session.model 为准（覆盖 resume 命中外部会话 / 仅 DELTA_MODEL 带前缀等场景）
-  const isExternal = /^(cli|acp):/.test(session.model || '');
+  const isExternal = isExternalModel(session.model || '');
   if (isExternal) {
     // 外部会话注入占位 Provider：chat() 一经迭代即抛 external_agent_no_llm，
     // 保持 RunContext.provider 必填契约（design-f55 §11.1）；此处不再解析环境 Key。

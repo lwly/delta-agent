@@ -70,6 +70,8 @@ export async function* runExternalAgent(
   let produced = false;
   /** 上游退出码（ExternalEvent done 携带；流结束但没发 done 视作异常） */
   let exitCode: number | undefined;
+  /** 上游是否已发过 fatal error（去重：进程非零退出时不再重复报错） */
+  let upstreamFatal = false;
 
   try {
     for await (const ev of stream) {
@@ -155,6 +157,7 @@ export async function* runExternalAgent(
           // TODO(F-55 P3)：会话续跑阶段使用（--resume），当前仅记 debug 语义，直接忽略
           break;
         case 'error':
+          if (ev.fatal) upstreamFatal = true;
           yield { type: 'error', message: ev.message, fatal: ev.fatal };
           break;
         case 'done':
@@ -175,11 +178,13 @@ export async function* runExternalAgent(
     return;
   }
   const code = exitCode ?? -1;
-  if (code !== 0) {
-    // stderr 摘要本层拿不到（进程细节归 adapter），只写退出码
+  if (code !== 0 && !upstreamFatal) {
+    // 设计稿 §9：进程异常时把 stderr 环形缓冲前 20 行随 error 带出（adapter 可缺省）
+    const stderrLines = adapter.stderrTail?.().slice(0, 20) ?? [];
+    const stderrNote = stderrLines.length > 0 ? `：${stderrLines.join(' ⏎ ')}` : '';
     yield {
       type: 'error',
-      message: `外部 agent 进程退出（exit ${code}）`,
+      message: `外部 agent 进程退出（exit ${code}）${stderrNote}`,
       // 无任何产出且非零退出 = 真失败；有产出则模型已给出结果，仅进程异常收尾
       fatal: !produced,
     };

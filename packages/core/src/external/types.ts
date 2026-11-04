@@ -38,6 +38,8 @@ export type ExternalEvent =
 
 export interface ExternalAgentAdapter {
   readonly spec: ExternalAgentSpec;
+  /** 最近一次 run() 的 stderr 环形缓冲快照（设计稿 §9：进程异常时随 error 事件带出前 20 行；可缺省） */
+  stderrTail?(): string[];
   run(req: {
     prompt: string;
     cwd: string;

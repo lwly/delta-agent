@@ -43,6 +43,8 @@ function scriptAdapter(
     /** 每个事件吐出前的延迟（ms），供打点计时断言用 */
     delayMs?: number;
     respondPermission?: (permissionId: string, decision: 'allow' | 'allow_session' | 'reject') => void;
+    /** adapter 级 stderr 环形缓冲快照（进程异常收尾时随 error 事件带出） */
+    stderrTail?: string[];
   } = {},
 ): ExternalAgentAdapter & { captures: RunCapture[]; decisions: Array<{ id: string; decision: string }> } {
   const self: ExternalAgentAdapter & { captures: RunCapture[]; decisions: Array<{ id: string; decision: string }> } = {
@@ -67,6 +69,7 @@ function scriptAdapter(
     self.decisions.push({ id, decision });
     opts.respondPermission?.(id, decision);
   };
+  if (opts.stderrTail) self.stderrTail = () => opts.stderrTail!;
   return self;
 }
 
@@ -431,5 +434,31 @@ describe('runExternalAgent（F-55 事件映射引擎）', () => {
     const forbidden = /^compact_|^budget_|^subtask_|^review_verdict$/;
     const offenders = events.filter((e) => forbidden.test(e.type));
     expect(offenders).toEqual([]);
+  });
+
+  it('非零退出收尾：adapter.stderrTail 前 20 行随 error 消息带出（§9）', async () => {
+    const lines = Array.from({ length: 25 }, (_, i) => `err-line-${i + 1}`);
+    const adapter = scriptAdapter([{ type: 'done', exitCode: 3 }], { stderrTail: lines });
+    registerExternalAdapter(adapter);
+    const events = await collect(makeCtx());
+    const err = events.find((e) => e.type === 'error');
+    expect(err?.type === 'error' && err.fatal).toBe(true); // 无产出 → fatal
+    expect(err?.type === 'error' && err.message).toContain('exit 3');
+    expect(err?.type === 'error' && err.message).toContain('err-line-1');
+    expect(err?.type === 'error' && err.message).not.toContain('err-line-21'); // 只带前 20 行
+    expect(events.at(-1)?.type).toBe('done'); // done 必达
+  });
+
+  it('上游已发 fatal error 后进程非零退出 → error 去重不连发，done 照发', async () => {
+    const adapter = scriptAdapter([
+      { type: 'error', message: 'boom', fatal: true },
+      { type: 'done', exitCode: 3 },
+    ]);
+    registerExternalAdapter(adapter);
+    const events = await collect(makeCtx());
+    const errors = events.filter((e) => e.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.type === 'error' && errors[0]!.message).toBe('boom');
+    expect(events.at(-1)?.type).toBe('done');
   });
 });

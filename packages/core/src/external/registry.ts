@@ -16,3 +16,8 @@ export function registerExternalAdapter(adapter: ExternalAgentAdapter): void {
 export function resolveExternalAdapter(model: string): ExternalAgentAdapter | undefined {
   return adapters.get(model);
 }
+
+/** 会话 model 是否指向外部 CLI Agent（cli:xxx / acp:xxx 虚拟 id 前缀）——hub 与 CLI 入口共用的唯一判定点 */
+export function isExternalModel(model: string): boolean {
+  return /^(cli|acp):/.test(model);
+}

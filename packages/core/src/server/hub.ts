@@ -49,6 +49,7 @@ import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js'
 import { runPlanExecute } from '../engine/plan-execute.js';
 import { runMultiAgent } from '../engine/orchestrator.js';
 import { runExternalAgent } from '../engine/external.js';
+import { isExternalModel } from '../external/registry.js';
 import { modeSegment } from '../engine/mode-prompt.js';
 import { distillMemories } from '../session/distill.js';
 import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
@@ -644,7 +645,7 @@ export class SessionHub {
       // 能力降级收拢于下方各赋值点的 isExternal 三元，事件循环内零外部判断（done 蒸馏跳过除外）。
       // 沙箱：hub 本就不向 toolContext 注沙箱实例；外部会话的工具在 CLI 进程内执行，
       // delta 沙箱天然不生效（P3 由 UI 提示条显式告知，不静默）。
-      const isExternal = /^(cli|acp):/.test(session.model || '');
+      const isExternal = isExternalModel(session.model || '');
       const provider = isExternal
         ? new UnavailableProvider(session.model || '')
         : await this.deps.resolveProvider();

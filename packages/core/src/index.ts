@@ -134,7 +134,7 @@ export {
 export type { SpawnOptions, ProcEvent, SpawnedProcess } from './external/spawn.js';
 
 // F-55 外部 adapter 注册表：hub 引擎分派与 runExternalAgent 按 ctx.model（cli:*/acp:* 虚拟 id）解析
-export { registerExternalAdapter, resolveExternalAdapter } from './external/registry.js';
+export { registerExternalAdapter, resolveExternalAdapter, isExternalModel } from './external/registry.js';
 
 // F-55 Scripted 外部适配器（测试/e2e 专用；DELTA_FAKE_CLI 命中时模块加载即自动注册）
 export { ScriptedExternalAdapter } from './external/scripted.js';

@@ -37,6 +37,13 @@ export class ScriptedExternalAdapter implements ExternalAgentAdapter {
     permissionArgs: { plan: [], default: [], yolo: [] },
   };
 
+  /** 最近一次 run() 的进程句柄（stderrTail 供映射引擎收尾带出 stderr 摘要） */
+  private lastProc: ReturnType<typeof spawnExternal> | undefined;
+
+  stderrTail(): string[] {
+    return this.lastProc?.stderrTail() ?? [];
+  }
+
   async *run(req: {
     prompt: string;
     cwd: string;
@@ -46,17 +53,16 @@ export class ScriptedExternalAdapter implements ExternalAgentAdapter {
     signal: AbortSignal;
   }): AsyncGenerator<ExternalEvent> {
     // 场景 JSON → 子进程：DELTA_FAKE_CLI 指向场景文件，fake-cli.mjs 读的是 FAKE_CLI_SCRIPT。
-    // spawnExternal 的子进程 env 取自本进程 env 的白名单子集，故此处镜像一次
-    // （测试/e2e 专用适配器，单场景串行跑，不做 P4 多会话并发隔离）。
+    // 经 spawnExternal 的 extraEnv 直接注入（不改父进程 env，P4 多场景并发安全）
     const scriptPath = process.env.DELTA_FAKE_CLI ?? '';
-    if (scriptPath) process.env.FAKE_CLI_SCRIPT = scriptPath;
     const proc = spawnExternal({
       command: process.execPath,
       args: [FAKE_CLI_PATH],
       cwd: req.cwd,
-      envWhitelist: ['FAKE_CLI_SCRIPT'],
+      extraEnv: scriptPath ? { FAKE_CLI_SCRIPT: scriptPath } : undefined,
       signal: req.signal,
     });
+    this.lastProc = proc;
     try {
       for await (const ev of proc.events) {
         if (ev.type === 'line') {
