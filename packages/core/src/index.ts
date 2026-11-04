@@ -92,6 +92,8 @@ export { DeepSeekProvider } from './llm/providers/deepseek.js';
 export { QwenProvider } from './llm/providers/qwen.js';
 export { ProviderManager, type ProviderView } from './llm/manager.js';
 export { ScriptedFakeProvider, type FakeProviderMode } from './llm/fake-provider.js';
+// F-55 外部 CLI Agent：虚拟 model id 的占位 Provider（外部会话不可走 LLMProvider）
+export { UnavailableProvider } from './llm/placeholders.js';
 export { PROVIDER_DEFAULT_MODELS, defaultModelFor } from './llm/defaults.js';
 export {
   ModelRouter,
@@ -112,6 +114,15 @@ export {
   type RoutingRule,
   type RoutingConfig,
 } from './llm/keychain.js';
+
+// F-55 外部 CLI Agent 适配层：类型契约（adapter 只懂协议，engine/external.ts 只懂映射）
+// 详见 docs/design-f55-external-cli-agents.md §3
+export type {
+  ExternalTier,
+  ExternalAgentSpec,
+  ExternalEvent,
+  ExternalAgentAdapter,
+} from './external/types.js';
 
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
