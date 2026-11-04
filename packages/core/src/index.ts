@@ -124,6 +124,15 @@ export type {
   ExternalAgentAdapter,
 } from './external/types.js';
 
+// F-55 外部进程生命周期底座（§9）：spawn / 杀进程组 / stderr 环形缓冲，纯进程层不做协议解析
+export {
+  spawnExternal,
+  MAX_LINE_BYTES,
+  STDERR_RING_LINES,
+  ABORT_KILL_DELAY_MS,
+} from './external/spawn.js';
+export type { SpawnOptions, ProcEvent, SpawnedProcess } from './external/spawn.js';
+
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
 export {
