@@ -198,6 +198,90 @@ if (process.platform !== 'win32') {
   regProc.kill('SIGKILL');
 }
 
+// ── ⑨ F-55：外部 CLI Agent（cli:fake 假 CLI）→ 退出码协议与三引擎一致 ────────
+// DELTA_FAKE_CLI 指向场景 JSON：ScriptedExternalAdapter 以 spec.id=cli:fake 自动注册，
+// 并把该路径镜像为子进程的 FAKE_CLI_SCRIPT。外部会话不解析 Provider Key
+// （DELTA_FAKE_PROVIDER 显式清空，证明外部路径零 Key 可跑）。
+// 用例 ④（无 Key 且 model 非 cli:/acp: 前缀 → 退出码 1）由用例 ② 覆盖，不重复。
+{
+  const scenDir = path.join(tmp, 'f55-scenarios');
+  await fsp.mkdir(scenDir);
+  const writeScenario = async (name, steps) => {
+    const p = path.join(scenDir, name);
+    await fsp.writeFile(p, JSON.stringify(steps));
+    return p;
+  };
+  const okPath = await writeScenario('ok.json', [
+    { type: 'stdout', text: '{"type":"text","text":"F55_E2E_EXTERNAL_OK"}' },
+    { type: 'stdout', text: '{"type":"usage","input":120,"output":40}' },
+    { type: 'exit', code: 0 },
+  ]);
+  const failPath = await writeScenario('fail.json', [
+    { type: 'stderr', text: '[fake-cli] fatal boom' },
+    { type: 'exit', code: 3 },
+  ]);
+  const hangPath = await writeScenario('hang.json', [{ type: 'delay', ms: 30_000 }]);
+
+  // ① 正常完成 → 退出码 0 + 报告 completed + 场景文本
+  const ok = runCli(['run', 'F-55 外部任务', '--json', '--model', 'cli:fake'], {
+    DELTA_FAKE_PROVIDER: '',
+    DELTA_FAKE_CLI: okPath,
+  });
+  const okReport = parseJsonReport(ok.stdout);
+  check('外部会话退出码 0', ok.code === 0, `code=${ok.code} stderr=${ok.stderr.slice(0, 300)}`);
+  check('外部会话报告 status=completed', okReport?.status === 'completed');
+  check('外部会话报告含场景文本', okReport?.result?.includes('F55_E2E_EXTERNAL_OK') === true);
+  check('外部会话报告含 usage（tokens > 0）', (okReport?.usage?.input_tokens ?? 0) > 0);
+  // billing 只落在 usage 表（F-31 报表口径），headless --json 报告本就不含该字段
+  check('外部会话报告不含 billing 字段', okReport != null && !('billing' in (okReport.usage ?? {})));
+  // usage 行 billing='subscription' 的落库断言不在此覆盖：headless 的 recordUsage
+  // （core/headless.ts）未透传 ev.billing（hub 路径才透传），headless 落库为缺省
+  // metered —— 属 core 侧已知缺口，事件层 billing='subscription' 语义由
+  // external-mapper 单测覆盖，待 core 侧补齐后此处再挂 DB 断言。
+
+  // ② 非零退出且无任何产出 → fatal → failed → 退出码 2（协议与三引擎一致）
+  const fail = runCli(['run', 'F-55 外部失败', '--json', '--model', 'cli:fake'], {
+    DELTA_FAKE_PROVIDER: '',
+    DELTA_FAKE_CLI: failPath,
+  });
+  const failReport = parseJsonReport(fail.stdout);
+  check('外部会话致命错误退出码 2', fail.code === 2, `code=${fail.code} stderr=${fail.stderr.slice(0, 200)}`);
+  check('外部会话失败报告 status=failed', failReport?.status === 'failed');
+
+  // ③ SIGINT 中断 → 退出码 5（Windows 跳过，同 ⑤）
+  if (process.platform !== 'win32') {
+    // detached 进程组：SIGINT 发给整组（tsx 包装进程不会自动转发信号给 node 子进程）
+    const child = spawn(TSX, [CLI_ENTRY, 'run', 'F-55 外部长任务', '--json', '--model', 'cli:fake'], {
+      cwd: projectDir,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        DELTA_FAKE_PROVIDER: '',
+        DELTA_FAKE_CLI: hangPath,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+    const exitCode = new Promise((resolve) => child.on('exit', (c) => resolve(c)));
+    // 等引擎进入外部 CLI 事件消费窗口（tsx 启动 ~1s + spawn fake-cli）再发 SIGINT；
+    // fake-cli 由 spawnExternal 以 detached:true 建独立进程组，组内 SIGINT 只命中
+    // delta CLI 链 → abort → 取消外部进程，退出码 5 无子进程竞态
+    await new Promise((r) => setTimeout(r, 3_000));
+    try {
+      process.kill(-child.pid, 'SIGINT');
+    } catch {
+      child.kill('SIGINT');
+    }
+    const code = await Promise.race([
+      exitCode,
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 30_000)),
+    ]);
+    child.kill('SIGKILL');
+    check('外部会话 SIGINT 中断退出码 5', code === 5, `code=${code}`);
+  }
+}
+
 await fsp.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
 console.log(failed === 0 ? '\n✔ CLI E2E 全部通过' : `\n✘ ${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);
