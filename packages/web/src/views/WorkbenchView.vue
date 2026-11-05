@@ -1601,8 +1601,23 @@ watch(
         <BackgroundTasksBar />
         <div class="composer-wrap">
           <!-- F-55 外部会话降级提示条：常驻不自动消失，可关闭（关闭态存 localStorage） -->
-          <div v-if="showExternalBar" class="external-bar">
-            <span class="eb-text">外部 Agent 会话（{{ externalModel }}）：不使用 delta 沙箱 · 内置工具不可用 · 无压缩/记忆蒸馏 · 订阅内不计费</span>
+          <!-- 排版：标题 + 模型 pill + 能力标签，扫读优于把四条约束塞进一句话；细节放 title -->
+          <div
+            v-if="showExternalBar"
+            class="external-bar"
+            :title="`外部 Agent（${externalModel}）由外部 CLI/ACP 子进程执行：delta 的沙箱、内置工具、上下文压缩与记忆蒸馏均不生效；用量计入对方订阅，不计入 delta 成本`"
+          >
+            <span class="eb-ico" aria-hidden="true">ⓘ</span>
+            <div class="eb-main">
+              <span class="eb-title">外部 Agent 会话</span>
+              <code class="eb-model">{{ externalModel }}</code>
+              <span class="eb-tags">
+                <span class="eb-tag">不走 delta 沙箱</span>
+                <span class="eb-tag">内置工具不可用</span>
+                <span class="eb-tag">无压缩 / 记忆蒸馏</span>
+                <span class="eb-tag">订阅内不计费</span>
+              </span>
+            </div>
             <button class="eb-close" type="button" title="关闭提示" @click="dismissExternalBar">×</button>
           </div>
           <div class="composer" :class="{ resizing: composerResizing, degraded: chat.running }">
@@ -1731,8 +1746,10 @@ watch(
               <span class="cap-left">支持 Markdown · @ 引用文件 · / 调用 Skill · 可粘贴图片</span>
               <span class="cap-right"><span class="kbd">Enter</span> 发送 · <span class="kbd">Shift+Enter</span> 换行</span>
             </div>
-            <!-- 底部操作区：模型选择（右下角，对齐 WorkBuddy）+ 暂停/停止/发送 -->
+            <!-- 底部操作区：左=会话 git 状态（项目 ｜ 分支 ｜ Worktree），右=模型选择 + 暂停/停止/发送 -->
             <div class="composer-actions">
+              <!-- F-37 会话 git 状态：并入操作行左侧（原先独占一行页脚，竖向太占位） -->
+              <GitStatusBar v-if="chat.sessionId" />
               <select class="composer-model" :value="selectedModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
                 <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta.model || '默认模型' }}</option>
                 <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
@@ -1744,9 +1761,6 @@ watch(
               </button>
             </div>
             <div class="rsz bottom" title="拖动调整输入框高度" @pointerdown="startComposerResize('bottom', $event)"></div>
-
-            <!-- F-37 底部状态条：作为输入框卡片内置页脚（同宽拼合，项目名 ｜ 当前分支 ｜ Worktree 开关） -->
-            <GitStatusBar v-if="chat.sessionId" />
           </div>
         </div>
       </template>
@@ -2117,7 +2131,9 @@ watch(
 /* 消息流容器（含回到底部按钮的定位上下文） */
 .chat-area { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 0; }
-.chat-inner { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+/* 消息流与 .composer 同宽：composer 上限 1080，这里含左右各 24px 内边距，
+   故上限取 1080 + 48 = 1128（border-box），内容区正好 1080，左右边缘与输入框卡片对齐 */
+.chat-inner { max-width: 1128px; margin: 0 auto; padding: 0 24px; }
 /* F-53 载入更早消息入口：居中弱化按钮，不与消息流抢视觉 */
 .load-older-row { display: flex; justify-content: center; padding: 6px 0 10px; }
 .jump-btn {
@@ -2144,7 +2160,8 @@ watch(
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: 12px; padding: 12px 16px; line-height: 1.65;
 }
-.msg-user .bubble { max-width: 75%; }
+/* 用户气泡撑满整行：右缘与事件卡 / 输入框对齐（原先 max-width 75% 在宽列下明显短一截） */
+.msg-user .bubble { flex: 1; min-width: 0; }
 .msg-text { line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 .md :deep(p) { margin: 6px 0; }
 .md :deep(pre) {
@@ -2258,7 +2275,7 @@ watch(
 
 /* ══════════ 审批卡片 ══════════ */
 .cards-zone { padding-top: 0; }
-.cards-inner { max-width: 860px; margin: 0 auto; }
+.cards-inner { max-width: 1080px; margin: 0 auto; }
 .approve-card {
   border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 16px; margin-bottom: 10px; animation: fadeIn 0.25s ease;
@@ -2295,22 +2312,42 @@ watch(
 
 /* ══════════ 输入区 ══════════ */
 .composer-wrap { padding: 0 24px 10px; }
-/* F-55 外部会话降级提示条（info 条视觉：accent 软底 + 常驻，可关闭） */
+/* F-55 外部会话降级提示条（info 条视觉：accent 软底 + 常驻，可关闭）
+   宽度与 .composer 对齐（max-width 1080 居中），避免比输入框更宽显得游离在外 */
 .external-bar {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 8px; padding: 7px 12px;
+  display: flex; align-items: flex-start; gap: 8px;
+  max-width: 1080px; margin: 0 auto 8px;
+  padding: 7px 8px 7px 10px;
   border: 1px solid var(--accent-border); border-radius: 8px;
   background: var(--accent-soft); font-size: 12px; color: var(--text-dim);
 }
-.eb-text { flex: 1; min-width: 0; line-height: 1.5; }
+.eb-ico { flex: none; color: var(--accent); font-size: 12.5px; line-height: 18px; }
+.eb-main {
+  flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  line-height: 18px;
+}
+.eb-title { color: var(--text); font-weight: 600; white-space: nowrap; }
+.eb-model {
+  font-family: var(--mono); font-size: 11px; color: var(--accent);
+  background: var(--bg); border: 1px solid var(--accent-border);
+  border-radius: 4px; padding: 0 5px; line-height: 16px;
+}
+.eb-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.eb-tag {
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 7px; font-size: 11px; line-height: 16px;
+  color: var(--text-dim); white-space: nowrap;
+}
 .eb-close {
-  flex: none; width: 20px; height: 20px; line-height: 1;
-  border: none; border-radius: 6px; background: transparent;
-  color: var(--text-dim); font-size: 14px; cursor: pointer;
+  flex: none; width: 18px; height: 18px; line-height: 1;
+  border: none; border-radius: 5px; background: transparent;
+  color: var(--text-faint); font-size: 14px; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
 .eb-close:hover { background: var(--bg-hover); color: var(--text); }
 .composer {
-  max-width: 860px; margin: 0 auto; position: relative;
+  max-width: 1080px; margin: 0 auto; position: relative;
   background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: 12px; padding: 12px 14px 10px;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -2424,16 +2461,22 @@ watch(
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin-top: 6px; font-size: 11px; color: var(--text-faint);
 }
-.cap-right { display: inline-flex; align-items: center; gap: 5px; transition: color 0.15s; }
+.cap-left { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-right { display: inline-flex; align-items: center; gap: 5px; flex: none; white-space: nowrap; transition: color 0.15s; }
 .composer-cap .kbd { font-size: 10px; }
 /* composer 聚焦时快捷键提示提亮一档 */
 .composer:focus-within .cap-right { color: var(--text-dim); }
 .composer:focus-within .cap-right .kbd { color: var(--text-dim); border-color: var(--border-strong); }
-/* 底部操作区：暂停/停止/发送按钮右对齐（与模型选择间距 ≥12px） */
-.composer-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; justify-content: flex-end; }
+/* 底部操作区：左=git 状态（项目/分支/Worktree，可收缩省略），右=模型选择 + 暂停/停止/发送 */
+.composer-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; justify-content: flex-end; min-width: 0; }
+/* 窄屏降级：git 状态整行让出（100% 基础宽度），避免与模型选择挤在同一行被压成省略号 */
+@media (max-width: 1023px) {
+  .composer-actions { flex-wrap: wrap; row-gap: 8px; }
+  .composer-actions :deep(.git-bar) { flex: 1 0 100%; }
+}
 .send-btn {
   padding: 7px 20px; border: none; border-radius: 8px;
-  background: var(--accent);
+  background: var(--accent); flex: none;
   color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
   display: flex; align-items: center; gap: 7px; transition: background 0.15s;
 }
@@ -2443,7 +2486,7 @@ watch(
 /* 输入框右下角模型选择：独立 pill 控件（28px 高、自定义 ▾ caret、bg-elevated + border） */
 .composer-model {
   appearance: none; -webkit-appearance: none;
-  margin-left: auto; max-width: 220px; height: 28px;
+  margin-left: auto; flex: none; max-width: 220px; height: 28px;
   padding: 0 24px 0 10px;
   color: var(--text-dim); font-size: 12px; font-family: var(--mono);
   background: var(--bg-elevated)
@@ -2457,7 +2500,7 @@ watch(
 .composer-model option { background: var(--bg-elevated); color: var(--text); }
 /* 停止：实心危险红 + #fff 字（与状态条控制按钮同规范）；暂停：中性描边 */
 .stop-btn {
-  padding: 7px 20px; border: 1px solid var(--red);
+  padding: 7px 20px; border: 1px solid var(--red); flex: none;
   border-radius: 8px; background: var(--red); color: #fff;
   font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px;
   transition: background 0.15s, border-color 0.15s, color 0.15s;

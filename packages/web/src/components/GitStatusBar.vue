@@ -144,33 +144,32 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDo
 </template>
 
 <style scoped>
-/* 输入框卡片内置页脚：负 margin 抵消 composer 内边距拉通同宽，与卡片圆角拼合成一体 */
+/* 内联形态：并入 composer 底部操作行左侧（不再独占一行页脚；无背景/无边框，仅细字弱化信息） */
 .git-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 10px -14px -10px;
-  padding: 5px 14px 7px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-panel);
-  border-radius: 0 0 11px 11px;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
   font-size: 11.5px;
   color: var(--text-faint);
 }
-.seg { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.seg.project { color: var(--text-dim); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30%; }
-.branch-wrap { position: relative; flex: 1; display: flex; justify-content: center; }
+.seg { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.seg.project { color: var(--text-dim); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.branch-wrap { position: relative; display: flex; flex: 0 1 auto; min-width: 0; }
 .branch-btn {
   border: none; background: transparent; color: var(--text-dim);
   font-size: 11.5px; font-family: var(--mono); cursor: pointer;
-  padding: 3px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  height: 24px; padding: 0 8px; border-radius: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background 0.12s, color 0.12s;
 }
 .branch-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .branch-btn:disabled { color: var(--text-faint); cursor: not-allowed; }
 .caret { font-size: 9px; color: var(--text-faint); margin-left: 4px; }
 .branch-menu {
-  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  /* 分支按钮已移到卡片左下角，弹层改为左对齐向上展开，避免居中后越过卡片左边界 */
+  position: absolute; bottom: calc(100% + 6px); left: 0;
   z-index: 45; min-width: 260px; max-height: 280px; overflow-y: auto;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 9px;
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4); padding: 5px;
@@ -197,7 +196,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDo
   position: relative;
   white-space: nowrap; cursor: pointer; user-select: none;
   border: 1px solid var(--border); border-radius: 999px;
-  padding: 2px 10px; color: var(--text-faint); font-size: 11px;
+  height: 22px; padding: 0 9px; color: var(--text-faint); font-size: 11px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .seg.wt:not(.on):hover { color: var(--text-dim); border-color: var(--border-strong); }
