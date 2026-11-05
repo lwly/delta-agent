@@ -441,7 +441,7 @@ interface SessionService {
 - 物理删除（hard）在事务内执行且先做一次临时备份文件，异常可回滚。
 - 项目移除仅解除注册，**绝不触碰用户源码目录**；`.delta/` 项目级配置目录保留（由用户自行决定是否删除）。
 
-Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue 构建产物作为静态资源内嵌 CLI npm 包，CLI `agent serve` 启动本地 server（默认 `127.0.0.1:7900`，仅监听回环地址）调用 SessionService，AgentEvent 以 SSE 推送到前端渲染；不做远程部署形态。
+Web 控制台（Vue 3 + Pinia）**纯本地部署**（2026-10-22 决议）：Vue 构建产物作为静态资源内嵌 CLI npm 包，CLI `serve` 启动本地 server（仅监听回环地址；端口按形态错开——打包/托管默认 `127.0.0.1:7902`，本地开发后端 `serve --dev` 默认 `127.0.0.1:7900` 配合 vite dev 7901 代理）调用 SessionService，AgentEvent 以 SSE 推送到前端渲染；不做远程部署形态。
 
 ---
 
