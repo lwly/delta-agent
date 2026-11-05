@@ -241,6 +241,69 @@ describe('checkLoginState（登录态存在性，§10）', () => {
   });
 });
 
+describe('checkLoginState（F-56 实测修正：cursor 登录态走配置字段，不看目录存在）', () => {
+  const CURSOR = KNOWN_AGENTS.find((d) => d.id === 'cli:cursor-agent')!;
+  const writeConfig = (body: string) => {
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.cursor/cli-config.json'), body);
+  };
+
+  it('只有 ~/.cursor 目录（IDE 目录常驻）→ false，不再误报已登录', () => {
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    expect(checkLoginState(CURSOR, home)).toBe(false);
+  });
+
+  it('cli-config.json 含 authInfo.email → true', () => {
+    writeConfig(JSON.stringify({ authInfo: { email: 'dev@example.com' } }));
+    expect(checkLoginState(CURSOR, home)).toBe(true);
+  });
+
+  it('authInfo 被 logout 清空 / 配置文件损坏 → false（一律不抛错）', () => {
+    writeConfig(JSON.stringify({ authInfo: {} }));
+    expect(checkLoginState(CURSOR, home)).toBe(false);
+    writeConfig('{ not json');
+    expect(checkLoginState(CURSOR, home)).toBe(false);
+  });
+
+  it('CURSOR_API_KEY 非空 → true（走 Key 鉴权，无需落盘登录态）', () => {
+    const prev = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = 'sk-test';
+    try {
+      expect(checkLoginState(CURSOR, home)).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = prev;
+    }
+  });
+});
+
+describe('cursor 模型清单（F-56 实测：`cursor-agent models` 行格式解析）', () => {
+  const CURSOR = KNOWN_AGENTS.find((d) => d.id === 'cli:cursor-agent')!;
+
+  it('只取行首模型 id，显示名（Auto / Composer / Grok…）不被当成模型', () => {
+    const stdout = [
+      'Available models',
+      '',
+      'auto - Auto (default)',
+      'composer-2.5 - Composer 2.5 (current)',
+      'composer-2.5-fast - Composer 2.5 Fast',
+      'grok-4.7-high - Grok 4.7  High',
+      'grok-4.7-high - Grok 4.7  High', // 重复行去重
+    ].join('\n');
+    expect(CURSOR.modelsProbe!.parse(stdout)).toEqual([
+      'auto',
+      'composer-2.5',
+      'composer-2.5-fast',
+      'grok-4.7-high',
+    ]);
+  });
+
+  it('静态回落的 models 不含早已下线的 composer-1（防回归）', () => {
+    expect(CURSOR.models).not.toContain('composer-1');
+    expect(CURSOR.models).toContain('composer-2.5');
+  });
+});
+
 describe('detectedToSpec / registerDetected（协议接缝）', () => {
   it('detectedToSpec 产出完整 ExternalAgentSpec', () => {
     const detected: DetectedAgent = { def: DEF, command: '/usr/local/bin/claude', version: '2.1.168', source: 'path' };
