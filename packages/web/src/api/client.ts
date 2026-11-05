@@ -242,6 +242,8 @@ export interface ExternalAgentTemplate {
   executable: string;
   kind: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl' | 'reserved';
   tier: 'A' | 'B' | 'C' | 'D';
+  /** F-56：候选模型清单（向导模型字段下拉建议；允许自由输入不设限） */
+  models?: string[];
 }
 
 async function request<T>(method: string, p: string, body?: unknown): Promise<T> {

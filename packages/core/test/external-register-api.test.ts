@@ -114,6 +114,10 @@ describe('GET /api/external-agents/templates（向导第 1 步）', () => {
       expect(typeof t.description).toBe('string');
       expect(typeof t.executable).toBe('string');
     }
+    // F-56 下拉选择：模板透出候选模型清单
+    const cb = templates.find((t) => t.id === 'cli:codebuddy')! as Record<string, unknown>;
+    expect(Array.isArray(cb.models)).toBe(true);
+    expect(cb.models as string[]).toContain('glm-5.3');
   });
 });
 

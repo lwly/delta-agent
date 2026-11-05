@@ -115,6 +115,16 @@ describe('模板注册表（F-56：6 CLI 齐备）', () => {
     const spec = detectedToSpec({ def, command: '/usr/local/bin/codebuddy', version: '2.171.0', source: 'manual' });
     expect(spec.args).toEqual(['--acp']);
   });
+
+  it('F-56 下拉选择：模板带候选模型清单（dsh 预留档除外）', () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    expect(byId('cli:codebuddy').models).toContain('glm-5.3');
+    expect(byId('cli:claude-code').models).toContain('sonnet');
+    expect(byId('cli:codex').models?.length).toBeGreaterThan(0);
+    expect(byId('cli:cursor-agent').models?.length).toBeGreaterThan(0);
+    expect(byId('cli:opencode').models?.every((m) => m.includes('/'))).toBe(true); // provider/model 格式
+    expect(byId('cli:dsh').models).toBeUndefined(); // 预留档不提供模型清单
+  });
 });
 
 describe('upsertManualEntry / removeManualEntry', () => {

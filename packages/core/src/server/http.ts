@@ -1231,6 +1231,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
             executable: d.executable,
             kind: d.kind,
             tier: d.tier,
+            models: d.models ?? [],
           })),
         });
       }

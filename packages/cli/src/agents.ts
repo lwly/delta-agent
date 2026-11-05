@@ -76,6 +76,7 @@ export async function agentsTemplatesCommand(): Promise<void> {
   console.log('内置外部 Agent 模板：');
   for (const d of KNOWN_AGENTS) {
     console.log(`  ${d.id.padEnd(18)} ${d.label.padEnd(14)} Tier ${d.tier}  ${d.description}`);
+    if (d.models?.length) console.log(`    候选模型：${d.models.join('、')}`);
   }
 }
 

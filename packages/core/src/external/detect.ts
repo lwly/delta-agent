@@ -53,6 +53,8 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
    * 模板不设（模型 flag 是协议知识，由适配器按 spec.model 自行组装）。
    */
   modelArgs?: (model: string) => { before?: string[]; after?: string[] };
+  /** F-56：候选模型清单（向导「模型」下拉建议；来源 = CLI --help / 官方文档，允许自由输入不设限） */
+  models?: string[];
 };
 
 /**
@@ -68,6 +70,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     label: 'Claude Code',
     description: 'Anthropic 官方 CLI，stream-json 双向协议（Tier B）',
     probeArgs: ['--version'],
+    models: ['opus', 'sonnet', 'haiku', 'claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
     loginStateFiles: ['.claude.json'],
     permissionArgs: {
       plan: ['--permission-mode', 'plan'],
@@ -87,6 +90,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     label: 'Codex CLI',
     description: 'OpenAI Codex CLI，app-server v2 JSON-RPC 协议（Tier C）',
     probeArgs: ['--version'],
+    models: ['gpt-5.1-codex-max', 'gpt-5.1-codex', 'gpt-5-codex', 'gpt-5.1', 'o4-mini'],
     // 弱判定：'.codex/auth.json' 是正式登录态文件；'.codex' 目录存在只说明「曾初始化过」
     // （auth.json 可能不存在但目录在）。任一存在即视为已登录，不解析内容（§10 只判存在性）。
     loginStateFiles: ['.codex/auth.json', '.codex'],
@@ -113,6 +117,11 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     description: '腾讯 CodeBuddy CLI，--acp stdio ACP 协议（Tier A）',
     protocolArgs: ['--acp'],
     modelArgs: (m) => ({ after: ['--model', m] }),
+    models: [
+      'glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'deepseek-v4-pro', 'deepseek-v4.1-flash',
+      'kimi-k3.1-pro', 'kimi-k3-1', 'kimi-k2.8-preview', 'minimax-m3.1-flash', 'minimax-m2.7',
+      'hy4free', 'hy4std', 'hy3', 'hy3-x', 'space-bunny', 'step-5-preview', 'mimo-v2.6-pro',
+    ],
     probeArgs: ['--version'],
     loginStateFiles: ['.codebuddy'],
     permissionArgs: {
@@ -132,6 +141,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     description: 'Cursor Agent CLI，acp 子命令 stdio ACP 协议（Tier A）',
     protocolArgs: ['acp'],
     modelArgs: (m) => ({ after: ['--model', m] }),
+    models: ['composer-1', 'claude-sonnet-4-5', 'claude-opus-4-1', 'gpt-5', 'gemini-2.5-pro'],
     probeArgs: ['--version'],
     loginStateFiles: ['.cursor'],
     // agent/plan/ask 三模式由 ACP 会话内协商（无启动 flags），permissionArgs 留空
@@ -147,6 +157,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     description: 'OpenCode CLI，acp 子命令 stdio ACP 协议（Tier A）',
     protocolArgs: ['acp'],
     modelArgs: (m) => ({ before: ['-m', m] }),
+    models: ['anthropic/claude-sonnet-4', 'openai/gpt-5', 'google/gemini-2.5-pro', 'opencode/gpt-5'],
     probeArgs: ['--version'],
     loginStateFiles: ['.local/share/opencode/auth.json', '.local/share/opencode', '.config/opencode'],
     permissionArgs: { plan: [], default: [], yolo: [] },

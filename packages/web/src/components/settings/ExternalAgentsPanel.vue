@@ -204,8 +204,15 @@ async function removeManual(a: ExternalAgentInfo) {
         </div>
         <div class="field">
           <label for="ext-model">模型（可选）</label>
-          <input id="ext-model" v-model="formModel" type="text" class="mono" placeholder="该 agent 使用的模型 ID" maxlength="100" />
-          <p class="field-hint">留空 = 用该 CLI 的默认模型。claude/codebuddy 为 --model，opencode 为 -m（provider/model），codex 走 -c model=…。</p>
+          <!-- datalist 组合框：下拉建议 + 自由输入（opencode 等 provider/model 格式不受清单限制） -->
+          <input id="ext-model" v-model="formModel" type="text" class="mono" list="ext-model-options" placeholder="下拉选择或直接输入模型 ID" maxlength="100" />
+          <datalist id="ext-model-options">
+            <option v-for="m in picked?.models ?? []" :key="m" :value="m" />
+          </datalist>
+          <p class="field-hint">
+            {{ picked?.models?.length ? `${picked.label} 常用模型已入下拉，也可直接输入任意 ID。` : '留空 = 用该 CLI 的默认模型。' }}
+            claude/codebuddy 为 --model，opencode 为 -m（provider/model），codex 走 -c model=…。
+          </p>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <div class="form-ops">
