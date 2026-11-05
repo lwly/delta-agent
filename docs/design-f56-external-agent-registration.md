@@ -49,6 +49,18 @@ reserved→ReservedExternalAdapter（stub）
 
 **候选模型清单（下拉选择）**：`KnownAgentDef.models?: string[]`，来源 = CLI `--help` 实测 / 官方文档（codebuddy 清单取自本机 2.171.0 `--help` 的 17 个模型 ID）。经 templates 端点透出，Web 向导「模型」字段用原生 `<datalist>` 组合框——下拉建议 + 自由输入并存（opencode 的 `provider/model` 格式不设限）；清单是建议不是校验，CLI 侧 `delta agents templates` 同步展示。dsh 预留档不提供清单。
 
+**自动获取模型（F-56 增补）**：`KnownAgentDef.modelsProbe?: { args, parse, timeoutMs? }`——CLI 自带列举命令/可解析输出时，向导进入第 2 步即跑 `resolveAgentModels(def, command)`（`probeAgentModels` 超时 8s、非零退出/解析为空 → null 静默），动态结果与静态 `models` 合并去重（动态优先），`source: 'probed' | 'static'` 供 UI 提示。覆盖矩阵：
+
+| 模板 | 列举方式 | 解析器 | 实测 |
+|---|---|---|---|
+| codebuddy | `--help` | 正则提取 `Currently supported: (…)` 行 | ✓ 本机实测 17 项 |
+| opencode | `opencode models` | 仅取 `provider/model` 形态 token（首 token + filter） | ✓ 官方 docs/models 实证 |
+| cursor-agent | `cursor-agent models` | 宽松 token 解析（表格行去噪） | 官方 changelog 实证 `agent models`；本机二进制损坏待实测 |
+| claude / codex | —（无列举命令） | — | 静态清单；API 拉取违反凭证红线（§10 只判登录态存在性） |
+| dsh | —（预留档） | — | 静态清单不提供 |
+
+新端点 `GET /api/external-agents/models?templateId=&command=`（`ServeOptions.externalModelsProbe` 注入，测试隔离）；CLI `delta agents models <templateId> [--command]` 同一 `resolveAgentModels`。
+
 ## 3. external.json schema 扩展
 
 白名单新增三字段（条件展开：无手动信息的条目回读键不增，F-55 旧文件零迁移）：
@@ -96,7 +108,7 @@ detect 写回时 `manual/displayName/description` 只增不抹：命中刷新 co
 
 - 头部新增「＋ 添加」；弹窗复用 `ModalShell`。
 - **第 1 步**：模板网格（2 列卡片：label + executable + Tier 徽标 + description），点选进第 2 步。
-- **第 2 步**：基础运行时（锁定只读：label + id + Tier）、显示名称（必填，预填 label）、命令（必填，预填 executable）、模型（可选，hint 说明各 CLI 的 flag 形态）、描述（可选）；400 校验错误就地展示。
+- **第 2 步**：基础运行时（锁定只读：label + id + Tier）、显示名称（必填，预填 label）、命令（必填，预填 executable）、模型（可选，datalist 组合框：进入第 2 步自动跑列举命令 → 动态+静态合并去重，hint 按 source 提示「已自动获取 N 个 / 静态建议 N 个 / 正在获取」）、描述（可选）；400 校验错误就地展示。
 - 列表行展示：名称取 `displayName || label || id`；指定模型的条目带 `⚙ model` 徽标；手动条目带「移除」按钮；`kind:'reserved'` 行显示预留提示；手动条目不显示「未检测到登录态」警告（避免注册即红字）。
 
 ## 8. CLI（`delta agents`）
