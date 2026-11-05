@@ -48,7 +48,7 @@ import {
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
 import { doctorCommand } from './doctor.js';
-import { agentsAddCommand, agentsListCommand, agentsTemplatesCommand, agentsRemoveCommand } from './agents.js';
+import { agentsAddCommand, agentsListCommand, agentsTemplatesCommand, agentsModelsCommand, agentsRemoveCommand } from './agents.js';
 import {
   sandboxStatusCommand,
   sandboxEnableCommand,
@@ -461,6 +461,15 @@ agents
         description: opts.description,
         model: opts.model,
       }),
+  );
+agents
+  .command('models')
+  .description('F-56 自动获取外部 Agent 支持的模型清单（跑 CLI 列举命令，失败回落静态建议）')
+  .argument('<templateId>', '模板 id（见 delta agents templates）')
+  .option('--command <command>', '可执行命令（缺省 = 模板 executable）')
+  .action(
+    async (templateId: string, opts: { command?: string }) =>
+      agentsModelsCommand({ templateId, command: opts.command }),
   );
 agents
   .command('list')

@@ -166,6 +166,7 @@ export {
   upsertManualEntry,
   removeManualEntry,
   findKnownAgent,
+  resolveAgentModels,
 } from './external/detect.js';
 export type { ManualRegisterInput } from './external/detect.js';
 

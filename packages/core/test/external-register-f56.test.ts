@@ -23,6 +23,7 @@ import {
   ManualRegisterError,
   readExternalAgentsCache,
   removeManualEntry,
+  resolveAgentModels,
   upsertManualEntry,
   writeExternalAgentsCache,
 } from '../src/external/detect.js';
@@ -124,6 +125,16 @@ describe('模板注册表（F-56：6 CLI 齐备）', () => {
     expect(byId('cli:cursor-agent').models?.length).toBeGreaterThan(0);
     expect(byId('cli:opencode').models?.every((m) => m.includes('/'))).toBe(true); // provider/model 格式
     expect(byId('cli:dsh').models).toBeUndefined(); // 预留档不提供模型清单
+  });
+
+  it('F-56 自动获取模型：modelsProbe 只挂在有列举命令的模板上（claude/codex 静态清单，凭证红线）', () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    expect(byId('cli:codebuddy').modelsProbe?.args).toEqual(['--help']);
+    expect(byId('cli:opencode').modelsProbe?.args).toEqual(['models']);
+    expect(byId('cli:cursor-agent').modelsProbe?.args).toEqual(['models']);
+    expect(byId('cli:claude-code').modelsProbe).toBeUndefined();
+    expect(byId('cli:codex').modelsProbe).toBeUndefined();
+    expect(byId('cli:dsh').modelsProbe).toBeUndefined();
   });
 });
 
@@ -291,6 +302,59 @@ describe('F-56 指定模型（model 参数）', () => {
     await ensureExternalAdapters({ homeDir: home, probePathEnv: '' });
     const adapter = resolveExternalAdapter('cli:codebuddy')!();
     expect(adapter.spec.args).toEqual(['--acp', '--model', 'glm-5.3']);
+  });
+});
+
+describe('F-56 自动获取模型（probeAgentModels / resolveAgentModels）', () => {
+  /** POSIX 包装脚本：任意参数 → 把指定文本写 stdout 后退出 0 */
+  function writeOutputWrapper(name: string, text: string): string {
+    const p = path.join(tmpRoot, name);
+    fs.writeFileSync(p, `#!/bin/sh\ncat <<'EOF'\n${text}\nEOF\n`, { mode: 0o755 });
+    return p;
+  }
+
+  itPosix('codebuddy：--help 的 Currently supported 行解析出模型清单（含静态合并去重）', async () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    const wrapper = writeOutputWrapper('cb-help', 'Usage: codebuddy [options]\n  --model <model>  Model for the current session. Please provide the model ID. Currently supported: (glm-5.3, glm-5.3-flash, kimi-k3.1-pro)\n');
+    const { models, source } = await resolveAgentModels(byId('cli:codebuddy'), wrapper, { probeTimeoutMs: 3000 });
+    expect(source).toBe('probed');
+    // 动态在前、静态补充去重
+    expect(models.slice(0, 3)).toEqual(['glm-5.3', 'glm-5.3-flash', 'kimi-k3.1-pro']);
+    expect(models).toContain('deepseek-v4-pro'); // 静态清单兜底补充
+  });
+
+  itPosix('opencode：models 表格输出 → 仅取 provider/model 形态 token', async () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    const wrapper = writeOutputWrapper('oc-models', 'openai/gpt-5        200k   $3.00\nanthropic/claude-sonnet-4   180k   $3.00\nProvider   Model   Context\n---        ---     ---\nnot-a-model-line\n');
+    const { models, source } = await resolveAgentModels(byId('cli:opencode'), wrapper, { probeTimeoutMs: 3000 });
+    expect(source).toBe('probed');
+    expect(models).toContain('openai/gpt-5');
+    expect(models).toContain('anthropic/claude-sonnet-4');
+    expect(models).not.toContain('Provider');
+    expect(models).not.toContain('not-a-model-line');
+  });
+
+  itPosix('探测失败（非零退出/超时）→ 静默回落静态清单（source=static）', async () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    // 非零退出 fixture（version-fail.mjs）
+    const failPath = path.join(FIXTURES, 'version-fail.mjs');
+    const failCmd = writeWrapper('cb-fail2', '');
+    fs.writeFileSync(failCmd, `#!/bin/sh\nexec "${NODE}" "${failPath}"\n`, { mode: 0o755 });
+    const { models, source } = await resolveAgentModels(byId('cli:codebuddy'), failCmd, { probeTimeoutMs: 3000 });
+    expect(source).toBe('static');
+    expect(models).toContain('glm-5.3');
+    // 解析为空也回落（wrapper 输出无 Currently supported 行）
+    const emptyCmd = writeWrapper('cb-empty', '');
+    const r2 = await resolveAgentModels(byId('cli:codebuddy'), emptyCmd, { probeTimeoutMs: 3000 });
+    expect(r2.source).toBe('static');
+    expect(r2.models).toContain('glm-5.3');
+  });
+
+  it('无 modelsProbe 的模板 → 直接静态清单，不 spawn（claude/codex 凭证红线口径）', async () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    const { models, source } = await resolveAgentModels(byId('cli:claude-code'), '/nonexistent/claude', { probeTimeoutMs: 100 });
+    expect(source).toBe('static');
+    expect(models).toContain('sonnet');
   });
 });
 

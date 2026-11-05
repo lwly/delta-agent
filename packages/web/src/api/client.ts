@@ -911,6 +911,12 @@ export const api = {
   // F-56 手动注册：模板网格 / 注册（upsert）/ 移除
   externalAgentTemplates: () =>
     request<{ templates: ExternalAgentTemplate[] }>('GET', '/api/external-agents/templates'),
+  // F-56 自动获取模型：跑 CLI 列举命令（失败静默回落静态清单），source = probed | static
+  externalAgentModels: (templateId: string, command?: string) =>
+    request<{ models: string[]; source: 'probed' | 'static' }>(
+      'GET',
+      `/api/external-agents/models?templateId=${encodeURIComponent(templateId)}&command=${encodeURIComponent(command ?? '')}`,
+    ),
   registerExternalAgent: (input: {
     templateId: string;
     command?: string;

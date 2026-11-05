@@ -55,6 +55,19 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
   modelArgs?: (model: string) => { before?: string[]; after?: string[] };
   /** F-56：候选模型清单（向导「模型」下拉建议；来源 = CLI --help / 官方文档，允许自由输入不设限） */
   models?: string[];
+  /**
+   * F-56 自动获取模型：CLI 模型清单探测（列举命令 + 输出解析器）。探测失败静默回落静态
+   * models 清单——不阻塞注册，解析是建议不是校验。仅对「CLI 自带列举命令/可解析输出」的
+   * 模板提供；claude/codex 无列举命令且 API 拉取会违反凭证红线（§10），不设。
+   */
+  modelsProbe?: {
+    /** 模型列举命令参数（如 opencode ['models']、codebuddy ['--help']） */
+    args: string[];
+    /** stdout → 模型 ID 数组（宽松解析，空数组 = 视为失败） */
+    parse: (stdout: string) => string[];
+    /** 探测超时（缺省 MODELS_PROBE_TIMEOUT_MS） */
+    timeoutMs?: number;
+  };
 };
 
 /**
@@ -122,6 +135,14 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
       'kimi-k3.1-pro', 'kimi-k3-1', 'kimi-k2.8-preview', 'minimax-m3.1-flash', 'minimax-m2.7',
       'hy4free', 'hy4std', 'hy3', 'hy3-x', 'space-bunny', 'step-5-preview', 'mimo-v2.6-pro',
     ],
+    // --help 实测：模型清单在「Currently supported: (a, b, …)」一行里，正则可稳定提取
+    modelsProbe: {
+      args: ['--help'],
+      parse: (stdout) => {
+        const m = stdout.match(/Currently supported:\s*\(([^)]+)\)/);
+        return m ? m[1]!.split(/[\s,]+/).filter((t) => t !== '') : [];
+      },
+    },
     probeArgs: ['--version'],
     loginStateFiles: ['.codebuddy'],
     permissionArgs: {
@@ -142,6 +163,12 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     protocolArgs: ['acp'],
     modelArgs: (m) => ({ after: ['--model', m] }),
     models: ['composer-1', 'claude-sonnet-4-5', 'claude-opus-4-1', 'gpt-5', 'gemini-2.5-pro'],
+    // 官方 changelog 实证：`agent models` / `--list-models` 列出全部可用模型（输出为表格，
+    // 解析取首个「形似模型 ID」的 token；本机二进制损坏待实测，解析器从宽）
+    modelsProbe: {
+      args: ['models'],
+      parse: (stdout) => parseModelTokens(stdout, /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)?$/i),
+    },
     probeArgs: ['--version'],
     loginStateFiles: ['.cursor'],
     // agent/plan/ask 三模式由 ACP 会话内协商（无启动 flags），permissionArgs 留空
@@ -158,6 +185,11 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     protocolArgs: ['acp'],
     modelArgs: (m) => ({ before: ['-m', m] }),
     models: ['anthropic/claude-sonnet-4', 'openai/gpt-5', 'google/gemini-2.5-pro', 'opencode/gpt-5'],
+    // 官方 docs/models 实证：`opencode models` 列出全部模型（provider/model 格式，取含 '/' 的首 token）
+    modelsProbe: {
+      args: ['models'],
+      parse: (stdout) => parseModelTokens(stdout, /^[a-z0-9][a-z0-9._-]*\/([a-z0-9][a-z0-9._-]*)$/i),
+    },
     probeArgs: ['--version'],
     loginStateFiles: ['.local/share/opencode/auth.json', '.local/share/opencode', '.config/opencode'],
     permissionArgs: { plan: [], default: [], yolo: [] },
@@ -451,9 +483,90 @@ const DISPLAY_NAME_MAX = 100;
 const DESCRIPTION_MAX = 500;
 const MODEL_MAX = 100;
 
-/** 模板查表：id → KnownAgentDef（手动注册/CLI/HTTP 共用） */
+/** 模型清单探测超时（列举命令可能要拉 provider 注册表，比 --version 宽） */
+export const MODELS_PROBE_TIMEOUT_MS = 8000;
+
+/**
+ * 宽松模型 token 解析：逐行取首个匹配 tokenFilter 的空白分隔 token，去重保序。
+ * 表格/装饰线/表头行自然被 filter 挡掉；解析是建议不是校验，宁缺勿滥（空 = 失败回落静态清单）。
+ */
+export function parseModelTokens(stdout: string, tokenFilter: RegExp): string[] {
+  const out: string[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    for (const token of line.trim().split(/\s+/)) {
+      if (token !== '' && tokenFilter.test(token) && !out.includes(token)) out.push(token);
+    }
+  }
+  return out;
+}
+
+/** 模板清单：id → KnownAgentDef（手动注册/CLI/HTTP 共用） */
 export function findKnownAgent(id: string): KnownAgentDef | undefined {
   return KNOWN_AGENTS.find((d) => d.id === id);
+}
+
+/**
+ * F-56 自动获取模型：跑 def.modelsProbe 列举命令，解析 stdout 得模型 ID 数组。
+ * 超时/非零退出/解析为空 → null（静默，调用方回落静态 models 清单）。
+ * cwd 用 os.tmpdir()；envWhitelist 空（基础白名单已含 PATH/HOME）。
+ */
+export async function probeAgentModels(
+  def: KnownAgentDef,
+  command: string,
+  opts: { probeTimeoutMs?: number } = {},
+): Promise<string[] | null> {
+  const probe = def.modelsProbe;
+  if (!probe) return null;
+  const ac = new AbortController();
+  const proc = spawnExternal({
+    command,
+    args: probe.args,
+    cwd: os.tmpdir(),
+    envWhitelist: [],
+    signal: ac.signal,
+  });
+  const timeoutMs = opts.probeTimeoutMs ?? MODELS_PROBE_TIMEOUT_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const collected = (async (): Promise<{ stdout: string; exitCode: number | null }> => {
+      let stdout = '';
+      let exitCode: number | null = null;
+      for await (const ev of proc.events) {
+        if (ev.type === 'line') stdout += `${ev.text}\n`;
+        else if (ev.type === 'exit') exitCode = ev.code;
+      }
+      return { stdout, exitCode };
+    })();
+    const result = await Promise.race([collected, timeoutPromise]);
+    if (result === null) return null; // 超时
+    if (result.exitCode !== 0) return null;
+    const models = probe.parse(result.stdout);
+    return models.length > 0 ? models : null;
+  } finally {
+    clearTimeout(timer);
+    ac.abort(); // 幂等收尾子进程（同 probeAgent）
+    await proc.cancel();
+  }
+}
+
+/**
+ * 自动获取 + 静态清单合并（去重保序，动态优先）。探测失败 / 无 modelsProbe → 静态清单。
+ * 返回 source 供 UI 提示（'probed' = 动态探测命中，'static' = 回落静态清单）。
+ */
+export async function resolveAgentModels(
+  def: KnownAgentDef,
+  command: string,
+  opts: { probeTimeoutMs?: number } = {},
+): Promise<{ models: string[]; source: 'probed' | 'static' }> {
+  const dynamic = await probeAgentModels(def, command, opts);
+  const merged: string[] = [];
+  for (const m of [...(dynamic ?? []), ...(def.models ?? [])]) {
+    if (!merged.includes(m)) merged.push(m);
+  }
+  return { models: merged, source: dynamic !== null ? 'probed' : 'static' };
 }
 
 /**

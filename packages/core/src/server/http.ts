@@ -75,9 +75,11 @@ import { readMarketSources, validateMarketSources, writeMarketSources } from '..
 import {
   checkLoginState,
   ensureExternalAdapters,
+  findKnownAgent,
   KNOWN_AGENTS,
   ManualRegisterError,
   removeManualEntry,
+  resolveAgentModels,
   upsertManualEntry,
   type DetectedAgent,
 } from '../external/detect.js';
@@ -135,6 +137,11 @@ export interface ServeOptions {
   externalRegister?: typeof upsertManualEntry;
   /** F-56 手动条目移除入口（缺省 removeManualEntry；测试注入隔离） */
   externalRemove?: typeof removeManualEntry;
+  /**
+   * F-56 模型清单自动获取入口（缺省 resolveAgentModels——真探测会跑 CLI 列举命令，
+   * 最长 8s；测试注入隔离）。
+   */
+  externalModelsProbe?: typeof resolveAgentModels;
   /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
@@ -1234,6 +1241,21 @@ export function createWebServer(opts: ServeOptions): http.Server {
             models: d.models ?? [],
           })),
         });
+      }
+      // GET /api/external-agents/models?templateId=&command= —— 自动获取模型清单：
+      // 跑 CLI 列举命令解析（失败静默）→ 与静态候选清单合并去重；source 供 UI 提示
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'external-agents' && parts[2] === 'models' && parts.length === 3) {
+        const templateId = url.searchParams.get('templateId') ?? '';
+        const def = findKnownAgent(templateId);
+        if (!def) return err(res, 400, `unknown_template: ${templateId}`);
+        const command = (url.searchParams.get('command') ?? def.executable).trim();
+        try {
+          const result = await (opts.externalModelsProbe ?? resolveAgentModels)(def, command);
+          return json(res, 200, result);
+        } catch {
+          // 探测异常静默回落静态清单（AC-55-7 精神：不弹错误）
+          return json(res, 200, { models: def.models ?? [], source: 'static' });
+        }
       }
       // POST /api/external-agents —— 手动注册（upsert：同模板 id 覆盖）
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 2) {

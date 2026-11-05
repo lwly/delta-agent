@@ -121,6 +121,43 @@ describe('GET /api/external-agents/templates（向导第 1 步）', () => {
   });
 });
 
+describe('GET /api/external-agents/models（F-56 自动获取模型）', () => {
+  it('注入探测 → probed 结果回显', async () => {
+    await startServer();
+    // startServer 未注入 externalModelsProbe → 走缺省 resolveAgentModels；注入版用例单独起服务
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const service = new SessionService(path.join(tmp, 'db2.sqlite'));
+    const deps: SessionHubDeps = {
+      service,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => new MockProvider(),
+    };
+    const hub = new SessionHub(deps);
+    server = createWebServer({
+      service,
+      hub,
+      port: 0,
+      externalModelsProbe: (def) =>
+        def.modelsProbe
+          ? Promise.resolve({ models: ['probed-model-1', ...def.models ?? []], source: 'probed' as const })
+          : Promise.resolve({ models: def.models ?? [], source: 'static' as const }),
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    const { status, json } = await api('GET', '/api/external-agents/models?templateId=cli:codebuddy');
+    expect(status).toBe(200);
+    expect(json.source).toBe('probed');
+    expect(json.models as string[]).toContain('probed-model-1');
+  });
+
+  it('未知模板 → 400', async () => {
+    await startServer();
+    const { status } = await api('GET', '/api/external-agents/models?templateId=cli:nope');
+    expect(status).toBe(400);
+  });
+});
+
 describe('POST /api/external-agents（手动注册）', () => {
   it('合法载荷 → 200 + entry 回显，注册入口收到规范化字段（AC-56-1）', async () => {
     const calls: RegisterCall[] = [];

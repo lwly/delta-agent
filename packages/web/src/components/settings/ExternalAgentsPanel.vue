@@ -57,6 +57,26 @@ const formDesc = ref('');
 const formModel = ref('');
 const submitting = ref(false);
 const formError = ref('');
+/** F-56 自动获取模型：动态探测 + 静态清单合并后的下拉候选与来源提示 */
+const modelOptions = ref<string[]>([]);
+const modelSource = ref<'' | 'probed' | 'static'>('');
+const modelLoading = ref(false);
+
+/** 进入第 2 步后拉取模型清单：跑 CLI 列举命令（最长 8s）→ 合并静态候选 → datalist */
+async function loadModelOptions(t: ExternalAgentTemplate) {
+  modelLoading.value = true;
+  modelSource.value = '';
+  try {
+    const res = await api.externalAgentModels(t.id, formCommand.value || t.executable);
+    modelOptions.value = res.models;
+    modelSource.value = res.source;
+  } catch {
+    modelOptions.value = t.models ?? []; // 静默回落模板静态清单
+    modelSource.value = '';
+  } finally {
+    modelLoading.value = false;
+  }
+}
 
 async function openWizard() {
   wizardOpen.value = true;
@@ -83,6 +103,7 @@ function pickTemplate(t: ExternalAgentTemplate) {
   formModel.value = '';
   formError.value = '';
   wizardStep.value = 2;
+  void loadModelOptions(t); // F-56 自动获取模型（动态探测 + 静态合并，静默降级）
 }
 
 async function submitRegister() {
@@ -204,13 +225,16 @@ async function removeManual(a: ExternalAgentInfo) {
         </div>
         <div class="field">
           <label for="ext-model">模型（可选）</label>
-          <!-- datalist 组合框：下拉建议 + 自由输入（opencode 等 provider/model 格式不受清单限制） -->
+          <!-- datalist 组合框：候选 = 自动获取（CLI 列举命令解析）+ 模板静态清单合并，仍可自由输入 -->
           <input id="ext-model" v-model="formModel" type="text" class="mono" list="ext-model-options" placeholder="下拉选择或直接输入模型 ID" maxlength="100" />
           <datalist id="ext-model-options">
-            <option v-for="m in picked?.models ?? []" :key="m" :value="m" />
+            <option v-for="m in modelOptions" :key="m" :value="m" />
           </datalist>
           <p class="field-hint">
-            {{ picked?.models?.length ? `${picked.label} 常用模型已入下拉，也可直接输入任意 ID。` : '留空 = 用该 CLI 的默认模型。' }}
+            <template v-if="modelLoading">正在自动获取 {{ picked?.label }} 支持的模型…</template>
+            <template v-else-if="modelSource === 'probed'">已自动获取 {{ modelOptions.length }} 个模型（来自 CLI 实时列举），也可直接输入任意 ID。</template>
+            <template v-else-if="modelOptions.length > 0">常用模型 {{ modelOptions.length }} 个已入下拉（CLI 未提供列举命令，静态建议），也可直接输入任意 ID。</template>
+            <template v-else>留空 = 用该 CLI 的默认模型。</template>
             claude/codebuddy 为 --model，opencode 为 -m（provider/model），codex 走 -c model=…。
           </p>
         </div>

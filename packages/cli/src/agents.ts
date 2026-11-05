@@ -10,8 +10,10 @@
 import {
   KNOWN_AGENTS,
   ManualRegisterError,
+  findKnownAgent,
   readExternalAgentsCache,
   removeManualEntry,
+  resolveAgentModels,
   upsertManualEntry,
 } from '@delta/core';
 
@@ -78,6 +80,25 @@ export async function agentsTemplatesCommand(): Promise<void> {
     console.log(`  ${d.id.padEnd(18)} ${d.label.padEnd(14)} Tier ${d.tier}  ${d.description}`);
     if (d.models?.length) console.log(`    候选模型：${d.models.join('、')}`);
   }
+}
+
+/** F-56 自动获取模型：跑 CLI 列举命令解析，失败回落静态清单（与 Web 向导同一 resolveAgentModels） */
+export async function agentsModelsCommand(opts: {
+  templateId: string;
+  command?: string;
+  probeTimeoutMs?: number;
+}): Promise<void> {
+  const def = findKnownAgent(opts.templateId);
+  if (!def) {
+    const tpl = KNOWN_AGENTS.map((d) => d.id).join('、');
+    fail(`未知模板 id：${opts.templateId}\n可用模板：${tpl}`);
+  }
+  const { models, source } = await resolveAgentModels(def!, opts.command ?? def!.executable, {
+    probeTimeoutMs: opts.probeTimeoutMs,
+  });
+  console.log(`${def!.label}（${def!.id}）候选模型（${source === 'probed' ? 'CLI 实时列举' : '静态建议'}，共 ${models.length} 个）：`);
+  for (const m of models) console.log(`  ${m}`);
+  if (source === 'static') console.log('（该 CLI 未提供列举命令或探测失败，以上为静态建议清单）');
 }
 
 export async function agentsRemoveCommand(id: string, opts: { homeDir?: string } = {}): Promise<void> {
