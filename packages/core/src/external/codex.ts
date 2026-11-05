@@ -94,6 +94,11 @@ export class CodexExternalAdapter implements ExternalAgentAdapter {
     return this.lastProc?.stderrTail() ?? [];
   }
 
+  /** 主动取消当前 run() 的子进程（AC-55-5 dispose 全杀；spawnExternal.cancel 幂等，onAbort 协议取消钩子同路径） */
+  async cancel(): Promise<void> {
+    await this.lastProc?.cancel();
+  }
+
   /**
    * 权限应答：把 delta 确认流的决定映射回审批 decision（v2 accept 系 / legacy approved 系）。
    * permissionId 已不在等待表（已答复 / 超时 / 会话已结束）→ 静默忽略，不崩。

@@ -15,6 +15,7 @@ import type { AgentEvent, ChatMessage, MessageImage, Plan, TaskNode, ToolCall, T
 import type { RunContext } from './react.js';
 import type { ExternalAgentAdapter, ExternalEvent } from '../external/types.js';
 import { resolveExternalAdapter } from '../external/registry.js';
+import { trackExternalRun, untrackExternalRun, type ExternalRunHandle } from '../external/lifecycle.js';
 import { buildDeltaMcpFile } from '../external/mcp-passthrough.js';
 
 /** tool_result.content 保尾截断上限（字符；与 F-54 task_output 的 MAX_BG_OUTPUT 同口径） */
@@ -99,12 +100,15 @@ export async function* runExternalAgent(
     return;
   }
 
-  const adapter = resolveExternalAdapter(ctx.model);
-  if (!adapter) {
+  // P4 工厂语义：registry 存工厂，每 run 执行得到独立 adapter 实例——
+  // 并发会话跑同一 model 时实例状态（pending/lastProc 等）天然隔离，不再互踩
+  const makeAdapter = resolveExternalAdapter(ctx.model);
+  if (!makeAdapter) {
     yield { type: 'error', message: `external_agent_not_found: ${ctx.model}`, fatal: true };
     yield { type: 'done', usage: usageTotal };
     return;
   }
+  const adapter = makeAdapter();
 
   // 权限档位存于 PermissionState.policy.mode；缺省（未装配权限体系）= default
   const permissionMode = ctx.toolContext.permissions?.policy.mode ?? 'default';
@@ -138,6 +142,12 @@ export async function* runExternalAgent(
   } catch (e) {
     yield { type: 'error', message: `MCP 配置透传失败（已跳过，继续运行）：${(e as Error).message}`, fatal: false };
   }
+
+  // 运行追踪（AC-55-5）：adapter 实例化之后、run 之前注册进 lifecycle，serve dispose
+  // 全杀兜底可经 handle.cancel() 取消本 run 的子进程；收尾 finally 反注册（含 abort /
+  // 消费方提前 break 全部路径——与下方 mcpFile.cleanup 同一 finally 覆盖面）
+  const runHandle: ExternalRunHandle = { cancel: () => adapter.cancel?.() ?? Promise.resolve() };
+  trackExternalRun(runHandle);
 
   try {
     // 首轮：带 resume 令牌续跑（全新会话 resumeToken 为 undefined）。
@@ -212,6 +222,7 @@ export async function* runExternalAgent(
 
     yield { type: 'done', usage: usageTotal };
   } finally {
+    untrackExternalRun(runHandle); // 运行结束即反注册（dispose 全杀只覆盖在跑的 run）
     mcpFile?.cleanup(); // done 产出之后、return 前删除临时 MCP 配置文件（幂等）
   }
 }

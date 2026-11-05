@@ -62,4 +62,10 @@ export interface ExternalAgentAdapter {
    * decision 是映射后的三值 —— ConfirmDecision 的 edit 视作 reject（外部 agent 无法回填编辑参数）。
    */
   respondPermission?(permissionId: string, decision: 'allow' | 'allow_session' | 'reject'): void;
+  /**
+   * 主动取消当前 run() 的子进程（AC-55-5 serve dispose 全杀兜底；可缺省）。
+   * 语义与 spawnExternal 的 cancel 一致（幂等，等待进程确认退出）；
+   * engine/external.ts 经 ExternalRunHandle 调用，实现类取消自身 lastProc 即可。
+   */
+  cancel?(): Promise<void>;
 }

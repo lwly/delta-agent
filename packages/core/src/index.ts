@@ -134,7 +134,22 @@ export {
 export type { SpawnOptions, ProcEvent, SpawnedProcess } from './external/spawn.js';
 
 // F-55 外部 adapter 注册表：hub 引擎分派与 runExternalAgent 按 ctx.model（cli:*/acp:* 虚拟 id）解析
-export { registerExternalAdapter, resolveExternalAdapter, isExternalModel } from './external/registry.js';
+// （P4 工厂语义：resolveExternalAdapter 返回工厂，每 run 独立实例——并发会话状态隔离）
+export {
+  registerExternalAdapter,
+  registerExternalAdapterFactory,
+  resolveExternalAdapter,
+  isExternalModel,
+} from './external/registry.js';
+
+// F-55 外部 agent 运行追踪（AC-55-5）：serve dispose 全杀在跑的外部 agent 子进程
+// （与 F-54 BackgroundTaskManager.killAll 同一 dispose 收尾语义）
+export {
+  trackExternalRun,
+  untrackExternalRun,
+  cancelAllExternalRuns,
+} from './external/lifecycle.js';
+export type { ExternalRunHandle } from './external/lifecycle.js';
 
 // F-55 Scripted 外部适配器（测试/e2e 专用；DELTA_FAKE_CLI 命中时模块加载即自动注册）
 export { ScriptedExternalAdapter } from './external/scripted.js';

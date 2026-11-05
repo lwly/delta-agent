@@ -257,15 +257,19 @@ describe('detectedToSpec / registerDetected（协议接缝）', () => {
     expect(spec.mcpArgs?.('/tmp/mcp.json')).toEqual(['--mcp-config', '/tmp/mcp.json']);
   });
 
-  it('registerDetected 经工厂注册到 registry，可按 model id 解析', () => {
+  it('registerDetected 经工厂注册到 registry（P4 工厂语义：注册不实例化，每 run 独立实例）', () => {
     const detected: DetectedAgent = { def: DEF, command: '/usr/local/bin/claude', version: '2.1.168', source: 'env' };
     const stub = { spec: detectedToSpec(detected) } as unknown as ExternalAgentAdapter;
     const factory = vi.fn(() => stub);
     registerDetected(detected, factory);
-    expect(factory).toHaveBeenCalledTimes(1);
-    const specArg = factory.mock.calls[0]![0];
-    expect(specArg.id).toBe('cli:claude-code');
-    expect(resolveExternalAdapter('cli:claude-code')).toBe(stub);
+    expect(factory).not.toHaveBeenCalled(); // 注册只存工厂，不实例化
+    const make = resolveExternalAdapter('cli:claude-code');
+    expect(make).toBeDefined();
+    const first = make!();
+    const second = make!();
+    expect(factory).toHaveBeenCalledTimes(2); // 每次 run 执行工厂 → 独立实例（并发会话状态隔离）
+    expect(first).toBe(stub);
+    expect(second).toBe(stub);
   });
 });
 
@@ -280,7 +284,7 @@ describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组
     expect(found[0]!.version).toBe('2.1.168-ensure');
     expect(found[0]!.def.id).toBe('cli:claude-code');
 
-    const adapter = resolveExternalAdapter('cli:claude-code');
+    const adapter = resolveExternalAdapter('cli:claude-code')!(); // 工厂语义：执行工厂得到本 run 实例
     expect(adapter).toBeInstanceOf(StreamJsonExternalAdapter);
     expect(adapter!.spec.id).toBe('cli:claude-code');
     expect(adapter!.spec.command).toBe(cmd);
@@ -306,11 +310,11 @@ describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组
     process.env[ENV_NAME] = cmd;
 
     await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
-    const first = resolveExternalAdapter('cli:claude-code');
+    const first = resolveExternalAdapter('cli:claude-code')!();
     await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
-    const second = resolveExternalAdapter('cli:claude-code');
+    const second = resolveExternalAdapter('cli:claude-code')!();
     expect(first).toBeInstanceOf(StreamJsonExternalAdapter);
     expect(second).toBeInstanceOf(StreamJsonExternalAdapter);
-    expect(second!.spec.version).toBe('9.9.9-twice');
+    expect(second.spec.version).toBe('9.9.9-twice');
   });
 });

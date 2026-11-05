@@ -75,6 +75,11 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     return this.lastProc?.stderrTail() ?? [];
   }
 
+  /** 主动取消当前 run() 的子进程（AC-55-5 dispose 全杀；spawnExternal.cancel 幂等，onAbort 协议取消钩子同路径） */
+  async cancel(): Promise<void> {
+    await this.lastProc?.cancel();
+  }
+
   /**
    * 权限应答：把 delta 确认流的决定映射回 ACP option（allow→allow_once / allow_session→
    * allow_always / reject→reject_once；找不到对应 kind 取第一个 option 兜底）。

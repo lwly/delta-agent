@@ -17,7 +17,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import { spawnExternal } from './spawn.js';
-import { registerExternalAdapter } from './registry.js';
+import { registerExternalAdapterFactory } from './registry.js';
 import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalEvent } from './types.js';
 
 /** 假 CLI fixture 绝对路径：test/fixtures/fake-cli.mjs（测试/e2e 专用，不随 dist 发布） */
@@ -42,6 +42,11 @@ export class ScriptedExternalAdapter implements ExternalAgentAdapter {
 
   stderrTail(): string[] {
     return this.lastProc?.stderrTail() ?? [];
+  }
+
+  /** 主动取消当前 run() 的子进程（AC-55-5 dispose 全杀；与 run() finally 的 proc.cancel 同语义、幂等） */
+  async cancel(): Promise<void> {
+    await this.lastProc?.cancel();
   }
 
   async *run(req: {
@@ -91,6 +96,7 @@ export class ScriptedExternalAdapter implements ExternalAgentAdapter {
 
 // DELTA_FAKE_CLI 命中 → 自动注册（见文件头「注册时机说明」）；env 指向场景 JSON，
 // fake-cli.mjs 路径由 adapter 自己按 import.meta.url 解析，env 不承载路径信息。
+// P4 工厂语义：注册存工厂，每 run 独立实例（多会话并发跑 fake-cli 时 lastProc 不互踩）。
 if (process.env.DELTA_FAKE_CLI) {
-  registerExternalAdapter(new ScriptedExternalAdapter());
+  registerExternalAdapterFactory('cli:fake', () => new ScriptedExternalAdapter());
 }

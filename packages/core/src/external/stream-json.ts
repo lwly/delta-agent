@@ -76,6 +76,11 @@ export class StreamJsonExternalAdapter implements ExternalAgentAdapter {
     return this.lastProc?.stderrTail() ?? [];
   }
 
+  /** 主动取消当前 run() 的子进程（AC-55-5 dispose 全杀；spawnExternal.cancel 幂等） */
+  async cancel(): Promise<void> {
+    await this.lastProc?.cancel();
+  }
+
   async *run(req: {
     prompt: string;
     cwd: string;

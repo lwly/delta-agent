@@ -16,7 +16,7 @@ import path from 'node:path';
 
 import { userConfigDir } from '../paths.js';
 import { spawnExternal } from './spawn.js';
-import { registerExternalAdapter } from './registry.js';
+import { registerExternalAdapterFactory } from './registry.js';
 import { StreamJsonExternalAdapter } from './stream-json.js';
 import { CodexExternalAdapter } from './codex.js';
 import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalTier } from './types.js';
@@ -315,7 +315,10 @@ export function registerDetected(
   detected: DetectedAgent,
   factory: (spec: ExternalAgentSpec) => ExternalAgentAdapter,
 ): void {
-  registerExternalAdapter(factory(detectedToSpec(detected)));
+  // P4 工厂语义：注册只存工厂不实例化——每次 run 执行工厂得到独立 adapter 实例
+  // （并发会话实例状态隔离）；factory 闭包捕获本次探测的 spec。
+  const spec = detectedToSpec(detected);
+  registerExternalAdapterFactory(spec.id, () => factory(spec));
 }
 
 /**
