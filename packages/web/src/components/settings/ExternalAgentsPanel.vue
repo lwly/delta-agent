@@ -220,10 +220,6 @@ async function removeManual(a: ExternalAgentInfo) {
           <p class="field-hint">注册后即写入 external.json，下次探测以此命令为准。</p>
         </div>
         <div class="field">
-          <label for="ext-desc">描述（可选）</label>
-          <textarea id="ext-desc" v-model="formDesc" rows="2" maxlength="500" placeholder="这个 agent 用来做什么"></textarea>
-        </div>
-        <div class="field">
           <label for="ext-model">模型（可选）</label>
           <!-- datalist 组合框：候选 = 自动获取（CLI 列举命令解析）+ 模板静态清单合并，仍可自由输入 -->
           <input id="ext-model" v-model="formModel" type="text" class="mono" list="ext-model-options" placeholder="下拉选择或直接输入模型 ID" maxlength="100" />
@@ -237,6 +233,10 @@ async function removeManual(a: ExternalAgentInfo) {
             <template v-else>留空 = 用该 CLI 的默认模型。</template>
             claude/codebuddy 为 --model，opencode 为 -m（provider/model），codex 走 -c model=…。
           </p>
+        </div>
+        <div class="field">
+          <label for="ext-desc">描述（可选）</label>
+          <textarea id="ext-desc" v-model="formDesc" rows="2" maxlength="500" placeholder="这个 agent 用来做什么"></textarea>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <div class="form-ops">
