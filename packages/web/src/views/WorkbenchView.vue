@@ -1247,7 +1247,7 @@ watch(
       <div class="brand">
         <span class="brand-logo">Δ</span>
         <span class="brand-text">
-          <span class="brand-name">delta-agent</span>
+          <span class="brand-name">Delta-Agent</span>
           <span class="brand-sub">AI Coding Agent · v0.1.0</span>
         </span>
       </div>
@@ -1367,7 +1367,7 @@ watch(
         <!-- 空态 hero：图标 / 产品名 / 价值主张 / 主行动 + 快捷键提示 / 次级入口 / 三特性卡 -->
         <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
           <div class="hero-logo">Δ</div>
-          <h1>delta-agent</h1>
+          <h1>Delta-Agent</h1>
           <p class="hero-tagline">在本地仓库中推理、规划并执行你的开发任务</p>
           <div class="hero-actions">
             <button class="hero-btn primary" :disabled="!ws.activeProjectId" @click="newSession()">新建对话</button>
@@ -1401,7 +1401,7 @@ watch(
         <!-- 顶栏：层级面包屑 + 回放（右侧） -->
         <div class="topbar">
           <nav class="crumb" aria-label="会话位置">
-            <span class="crumb-seg crumb-brand" title="delta-agent">delta-agent</span>
+            <span class="crumb-seg crumb-brand" title="Delta-Agent">Delta-Agent</span>
             <span class="crumb-sep" aria-hidden="true">/</span>
             <span class="crumb-seg crumb-project" :title="activeProjectName || '未选择项目'">{{ activeProjectName || '未选择项目' }}</span>
             <span class="crumb-sep" aria-hidden="true">/</span>

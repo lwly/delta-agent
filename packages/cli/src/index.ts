@@ -147,7 +147,7 @@ program.enablePositionalOptions();
 
 program
   .name('delta')
-  .description('delta-agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
+  .description('Delta-Agent —— AI 编程命令行工具（M2：4 家 Provider + MCP 扩展 + 并行工具）')
   .version(APP_VERSION)
   .option('-r, --resume [sessionId]', '恢复指定会话（缺省恢复项目最近会话）')
   .option('-m, --model <model>', '指定模型名（默认读 DELTA_MODEL，再退回各厂商默认）')

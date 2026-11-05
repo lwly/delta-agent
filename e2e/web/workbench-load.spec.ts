@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 
 test('工作台首屏：品牌、侧栏、hero 就绪', async ({ page }) => {
   await page.goto('/#/');
-  await expect(page.locator('.brand-name')).toHaveText('delta-agent');
+  await expect(page.locator('.brand-name')).toHaveText('Delta-Agent');
   await expect(page.locator('.sidebar')).toBeVisible();
   await expect(page.locator('.hero-logo')).toBeVisible();
   await expect(page.locator('.hero-btn', { hasText: '注册项目' })).toBeVisible();

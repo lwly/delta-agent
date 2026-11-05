@@ -52,7 +52,7 @@ export function notifyDisableCommand(): void {
 /** test：发送一条样例通知（等待发送完成以便脚本验证退出码）。 */
 export async function notifyTestCommand(): Promise<void> {
   const notifier = createDesktopNotifier({ projectRoot: process.cwd() });
-  await notifier.deliver('delta-agent 通知测试', '如果你看到这条通知，桌面通知链路已就绪（F-33）');
+  await notifier.deliver('Delta-Agent 通知测试', '如果你看到这条通知，桌面通知链路已就绪（F-33）');
   if (process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux') {
     console.log('✔ 已发送样例通知（若未看到请检查系统通知权限设置）');
   } else {

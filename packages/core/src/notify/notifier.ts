@@ -16,7 +16,7 @@ import type { Notifier, NotifyConfig } from './types.js';
 import { loadNotifyConfig } from './config.js';
 
 /** 通知标题统一前缀（与命令名一致，用户一眼知道是谁在通知） */
-const NOTIFY_TITLE = 'delta-agent';
+const NOTIFY_TITLE = 'Delta-Agent';
 
 /** 正文最大长度（系统通知面板展示差，且降低转义风险） */
 const MAX_BODY_LENGTH = 200;
