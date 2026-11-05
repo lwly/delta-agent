@@ -8,7 +8,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useChatStore } from '../stores/chat';
 import { toolLabel } from '../utils/toolNames';
-import { api, apiFetch, type ChatMessage, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
+import { api, apiFetch, type ChatMessage, type ExternalAgentInfo, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
 import ModalShell from '../components/ModalShell.vue';
 import TrashModal from '../components/TrashModal.vue';
@@ -113,6 +113,8 @@ const MODES = [
 const modeChoice = ref<string>('react');
 const preferredModel = ref(localStorage.getItem('yz.preferredModel') ?? '');
 const providers = ref<ProviderView[]>([]);
+// F-56：探测到的外部 Agent（模型选择器以 cli: 前缀选项接入，与 Provider 选项并列）
+const externalAgents = ref<ExternalAgentInfo[]>([]);
 const memoryPendingCount = ref(0);
 
 // ── 今日 token（侧栏底部 + 顶栏预算胶囊）───────────────────
@@ -288,6 +290,12 @@ async function refreshProviders() {
     providers.value = Array.isArray(json) ? (json as ProviderView[]) : [];
   } catch {
     // Provider 列表不可用时模型下拉退化为当前会话模型
+  }
+  // F-56：外部 Agent 探测（失败静默空态，模型下拉无外部选项——AC-55-7 精神不弹错误）
+  try {
+    externalAgents.value = (await api.externalAgents()).agents;
+  } catch {
+    externalAgents.value = [];
   }
 }
 async function refreshMemoryBadge() {
@@ -501,6 +509,12 @@ const modelOptions = computed(() => {
       value: p.model || '',
       label: p.model ? `${p.model}（${p.id}）` : `${p.id}（默认模型）`,
     }));
+  // F-56：外部 Agent 选项（cli: 前缀即外部会话；展示名 displayName > label > id，指定模型时带出）
+  for (const a of externalAgents.value) {
+    const name = a.displayName || a.label || a.id;
+    const suffix = a.model ? ` · ${a.model}` : '';
+    opts.push({ value: a.id, label: `${name}（外部 Agent${suffix}）` });
+  }
   const cur = chat.sessionMeta?.model;
   if (cur && !opts.some((o) => o.value === cur)) opts.unshift({ value: cur, label: cur });
   return opts;
