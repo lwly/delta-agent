@@ -212,6 +212,18 @@ export interface HubEvent {
   [key: string]: unknown;
 }
 
+/** F-55 探测到的外部 Agent 条目（GET /api/external-agents，只读） */
+export interface ExternalAgentInfo {
+  id: string;
+  command: string;
+  version: string;
+  source: 'env' | 'cache' | 'path';
+  tier: 'A' | 'B' | 'C';
+  loginState: boolean;
+  planSupported: boolean;
+  yoloSupported: boolean;
+}
+
 async function request<T>(method: string, p: string, body?: unknown): Promise<T> {
   const res = await fetch(p, {
     method,
@@ -870,6 +882,10 @@ export const api = {
     request<{ items: Array<{ name: string; description: string; danger: 'safe' | 'confirm' }> }>(
       'GET', '/api/tools',
     ),
+
+  // F-55 外部 Agent 探测清单（设置页「外部 Agent」面板：只读展示，不提供安装/卸载）
+  externalAgents: () =>
+    request<{ agents: ExternalAgentInfo[] }>('GET', '/api/external-agents'),
 
   // F-47 Web 内置终端（node-pty 可选能力；不可用时 available:false 由 UI 降级）
   terminalStatus: () =>

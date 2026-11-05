@@ -10,6 +10,7 @@ import UsagePanel from '../components/settings/UsagePanel.vue';
 import SkillsPanel from '../components/settings/SkillsPanel.vue';
 import MarketPanel from '../components/settings/MarketPanel.vue';
 import McpPanel from '../components/settings/McpPanel.vue';
+import ExternalAgentsPanel from '../components/settings/ExternalAgentsPanel.vue';
 import ExpertsPanel from '../components/settings/ExpertsPanel.vue';
 import ToolsPanel from '../components/settings/ToolsPanel.vue';
 import RoutingPanel from '../components/settings/RoutingPanel.vue';
@@ -25,6 +26,7 @@ const SECTIONS = [
   { key: 'skills', ico: '🧩', label: 'Skills' },
   { key: 'market', ico: '🛒', label: '市场' },
   { key: 'mcp', ico: '🔌', label: 'MCP' },
+  { key: 'external', ico: '🤖', label: '外部 Agent' },
   { key: 'tools', ico: '🛠️', label: '功能' },
   { key: 'experts', ico: '🧑‍💼', label: '专家' },
   { key: 'usage', ico: '📊', label: '用量' },
@@ -78,6 +80,7 @@ function switchTab(key: SectionKey) {
         <SkillsPanel v-else-if="activeTab === 'skills'" />
         <MarketPanel v-else-if="activeTab === 'market'" />
         <McpPanel v-else-if="activeTab === 'mcp'" />
+        <ExternalAgentsPanel v-else-if="activeTab === 'external'" />
         <ToolsPanel v-else-if="activeTab === 'tools'" />
         <ExpertsPanel v-else-if="activeTab === 'experts'" />
         <UsagePanel v-else-if="activeTab === 'usage'" />
