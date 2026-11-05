@@ -1,0 +1,264 @@
+/**
+ * F-55 外部 agent 探测与 external.json 持久化单测（docs/design-f55-external-cli-agents.md §10 + AC-55-9）：
+ *  - 零网络、零真实 CLI：probe 全部指向 node + fixture（POSIX 用 /bin/sh 包装脚本把版本串带给 version-cli.mjs）；
+ *  - PATH 探测隔离：detectExternalAgents 的 probePathEnv 注入项指向临时目录，不依赖真机 PATH；
+ *  - HOME 隔离：homeDir 注入临时目录，绝不触碰真实 ~/.delta；
+ *  - Windows：/bin/sh 包装脚本不可用，相关用例平台守卫跳过。
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  KNOWN_AGENTS,
+  checkLoginState,
+  detectExternalAgents,
+  detectedToSpec,
+  externalEnvPathName,
+  readExternalAgentsCache,
+  registerDetected,
+  writeExternalAgentsCache,
+} from '../src/external/detect.js';
+import type { DetectedAgent, DetectOptions, ExternalAgentCacheEntry } from '../src/external/detect.js';
+import { resolveExternalAdapter } from '../src/external/registry.js';
+import type { ExternalAgentAdapter } from '../src/external/types.js';
+
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const NODE = process.execPath;
+const IS_POSIX = process.platform !== 'win32';
+const itPosix = IS_POSIX ? it : it.skip;
+
+const ENV_NAME = externalEnvPathName('cli:claude-code');
+const DEF = KNOWN_AGENTS[0]!;
+const VERSION_CLI = path.join(FIXTURES, 'version-cli.mjs');
+const VERSION_FAIL = path.join(FIXTURES, 'version-fail.mjs');
+const LONG_RUNNING = path.join(FIXTURES, 'long-running.mjs');
+
+let tmpRoot: string;
+let home: string;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+/** POSIX 包装脚本：把 version-cli.mjs 包成独立可执行（探测命令必须是单个可执行路径） */
+function writeWrapper(name: string, target: string, version: string): string {
+  const p = path.join(tmpRoot, name);
+  fs.writeFileSync(p, `#!/bin/sh\nexec "${NODE}" "${target}" "${version}"\n`, { mode: 0o755 });
+  return p;
+}
+
+function cacheFile(): string {
+  return path.join(home, '.delta', 'external.json');
+}
+
+function makeEntry(command: string): ExternalAgentCacheEntry {
+  return {
+    id: 'cli:claude-code',
+    kind: 'stream-json-jsonl',
+    command,
+    version: '0.0.0-cached',
+    tier: 'B',
+    enabled: true,
+    lastProbeAt: '2026-11-05T00:00:00.000Z',
+  };
+}
+
+async function detect(opts: Partial<DetectOptions> = {}): Promise<DetectedAgent[]> {
+  return detectExternalAgents({ homeDir: home, ...opts });
+}
+
+beforeEach(() => {
+  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-detect-'));
+  home = path.join(tmpRoot, 'home');
+  fs.mkdirSync(home, { recursive: true });
+  delete process.env[ENV_NAME];
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env[ENV_NAME];
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+});
+
+describe('externalEnvPathName', () => {
+  it('id 转换：去 cli: 前缀、大写、非字母数字 → _', () => {
+    expect(externalEnvPathName('cli:claude-code')).toBe('DELTA_EXTERNAL_CLAUDE_CODE_PATH');
+    expect(externalEnvPathName('cli:codex')).toBe('DELTA_EXTERNAL_CODEX_PATH');
+  });
+});
+
+describe('detectExternalAgents（三级优先级）', () => {
+  itPosix('env 显式路径优先级最高：命中 env command，version 来自脚本输出，external.json 落 entry', async () => {
+    const cmd = writeWrapper('claude-env', VERSION_CLI, '2.1.168-fake');
+    process.env[ENV_NAME] = cmd;
+    // PATH 注入另一个同样可用的候选：env 命中时不得使用
+    const pathDir = path.join(tmpRoot, 'pathdir');
+    fs.mkdirSync(pathDir);
+    writeWrapper(path.join('pathdir', 'claude'), VERSION_CLI, '9.9.9-path');
+
+    const found = await detect({ probePathEnv: pathDir });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.command).toBe(cmd);
+    expect(found[0]!.version).toBe('2.1.168-fake');
+    expect(found[0]!.source).toBe('env');
+
+    const cache = readExternalAgentsCache(home);
+    expect(cache).toHaveLength(1);
+    expect(cache[0]).toMatchObject({
+      id: 'cli:claude-code',
+      command: cmd,
+      version: '2.1.168-fake',
+      tier: 'B',
+      enabled: true,
+    });
+    expect(cache[0]!.lastProbeAt).not.toBe('');
+  });
+
+  itPosix('external.json 缓存命中：清 env 后用已存 entry 的 command', async () => {
+    const cmd = writeWrapper('claude-cache', VERSION_CLI, '1.2.3-cache');
+    writeExternalAgentsCache([makeEntry(cmd)], home);
+
+    const found = await detect();
+    expect(found).toHaveLength(1);
+    expect(found[0]!.command).toBe(cmd);
+    expect(found[0]!.source).toBe('cache');
+  });
+
+  itPosix('PATH 探测：清 env 与缓存，probePathEnv 注入 fixture 目录命中 claude 包装脚本', async () => {
+    const pathDir = path.join(tmpRoot, 'pathdir');
+    fs.mkdirSync(pathDir);
+    const cmd = writeWrapper(path.join('pathdir', 'claude'), VERSION_CLI, '4.5.6-path');
+
+    const found = await detect({ probePathEnv: pathDir });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.command).toBe(cmd);
+    expect(found[0]!.version).toBe('4.5.6-path');
+    expect(found[0]!.source).toBe('path');
+  });
+
+  itPosix('探测失败静默：command 指向 version-fail fixture → 不含该 agent、不抛错、缓存无 entry', async () => {
+    const cmd = writeWrapper('claude-fail', VERSION_FAIL, 'ignored');
+    process.env[ENV_NAME] = cmd;
+
+    const found = await detect();
+    expect(found).toEqual([]);
+    expect(readExternalAgentsCache(home)).toEqual([]);
+  });
+
+  itPosix('显式指定路径失败：warn 且不降级 PATH（PATH 注入里有好候选也不用）', async () => {
+    const badCmd = writeWrapper('claude-bad', VERSION_FAIL, 'ignored');
+    process.env[ENV_NAME] = badCmd;
+    const pathDir = path.join(tmpRoot, 'pathdir');
+    fs.mkdirSync(pathDir);
+    writeWrapper(path.join('pathdir', 'claude'), VERSION_CLI, '7.7.7-path');
+
+    const found = await detect({ probePathEnv: pathDir });
+    expect(found).toEqual([]); // 显式意图失效 → 跳过 agent，不降级
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]![0])).toContain(ENV_NAME);
+    expect(readExternalAgentsCache(home)).toEqual([]);
+  });
+
+  itPosix('缓存条目失效：warn 并降级尝试 PATH（缓存非显式意图）', async () => {
+    const badCmd = writeWrapper('claude-bad', VERSION_FAIL, 'ignored');
+    writeExternalAgentsCache([makeEntry(badCmd)], home);
+    const pathDir = path.join(tmpRoot, 'pathdir');
+    fs.mkdirSync(pathDir);
+    const goodCmd = writeWrapper(path.join('pathdir', 'claude'), VERSION_CLI, '8.8.8-path');
+
+    const found = await detect({ probePathEnv: pathDir });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.command).toBe(goodCmd);
+    expect(found[0]!.source).toBe('path');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0]![0])).toContain('external.json');
+  });
+
+  itPosix('探测超时：长驻脚本 + 短超时 → 返回空且总耗时常小于默认 3s（子进程被收尾）', async () => {
+    const cmd = writeWrapper('claude-hang', LONG_RUNNING, 'ignored');
+    process.env[ENV_NAME] = cmd;
+
+    const started = Date.now();
+    const found = await detect({ probeTimeoutMs: 300 });
+    const elapsed = Date.now() - started;
+    expect(found).toEqual([]);
+    expect(elapsed).toBeLessThan(2000); // 300ms 超时 + 杀进程宽限 ~300ms，远小于默认 3000ms
+    expect(readExternalAgentsCache(home)).toEqual([]);
+  });
+});
+
+describe('external.json 读写（AC-55-9）', () => {
+  it('写入后回读结构一致', () => {
+    const entry = makeEntry('/usr/local/bin/claude');
+    writeExternalAgentsCache([entry], home);
+    expect(readExternalAgentsCache(home)).toEqual([entry]);
+    const raw = fs.readFileSync(cacheFile(), 'utf8');
+    expect(JSON.parse(raw)).toEqual({ agents: [entry] });
+  });
+
+  it('AC-55-9：写入固定 schema 白名单，外部注入的 token/key/secret 字段进不了文件', () => {
+    const entry = makeEntry('/usr/local/bin/claude');
+    // 模拟恶意/误用注入：额外字段必须被白名单丢弃
+    writeExternalAgentsCache([{ ...entry, apiKey: 'sk-injected', secretToken: 'tok' } as unknown as ExternalAgentCacheEntry], home);
+    const raw = fs.readFileSync(cacheFile(), 'utf8');
+    expect(raw).not.toMatch(/token|key|secret/i);
+    expect(raw).not.toContain('sk-injected');
+    expect(readExternalAgentsCache(home)).toEqual([entry]);
+  });
+
+  it('损坏 JSON → warn 并按空处理；下次探测成功后重建为合法 JSON', async () => {
+    fs.mkdirSync(path.join(home, '.delta'), { recursive: true });
+    fs.writeFileSync(cacheFile(), '{oops not json');
+    expect(readExternalAgentsCache(home)).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    const cmd = writeWrapper('claude-rebuild', VERSION_CLI, '2.0.0-rebuild');
+    process.env[ENV_NAME] = cmd;
+    const found = await detect();
+    expect(found).toHaveLength(1); // 损坏缓存不阻塞探测
+    const reparsed = JSON.parse(fs.readFileSync(cacheFile(), 'utf8')) as { agents: unknown[] };
+    expect(reparsed.agents).toHaveLength(1);
+    expect(readExternalAgentsCache(home)[0]!.version).toBe('2.0.0-rebuild');
+  });
+
+  it('文件不存在 → 空，不抛错', () => {
+    expect(readExternalAgentsCache(home)).toEqual([]);
+  });
+});
+
+describe('checkLoginState（登录态存在性，§10）', () => {
+  it('临时 HOME 有 .claude.json → true；无 → false', () => {
+    expect(checkLoginState(DEF, home)).toBe(false);
+    fs.writeFileSync(path.join(home, '.claude.json'), '{}');
+    expect(checkLoginState(DEF, home)).toBe(true);
+  });
+});
+
+describe('detectedToSpec / registerDetected（协议接缝）', () => {
+  it('detectedToSpec 产出完整 ExternalAgentSpec', () => {
+    const detected: DetectedAgent = { def: DEF, command: '/usr/local/bin/claude', version: '2.1.168', source: 'path' };
+    const spec = detectedToSpec(detected);
+    expect(spec.id).toBe('cli:claude-code');
+    expect(spec.kind).toBe('stream-json-jsonl');
+    expect(spec.tier).toBe('B');
+    expect(spec.command).toBe('/usr/local/bin/claude');
+    expect(spec.version).toBe('2.1.168');
+    expect(spec.permissionArgs.plan).toEqual(['--permission-mode', 'plan']);
+    expect(spec.permissionArgs.default).toEqual([]);
+    expect(spec.permissionArgs.yolo).toEqual(['--dangerously-skip-permissions']);
+    expect(spec.resumeArgs?.('sess-1')).toEqual(['--resume', 'sess-1']);
+    expect(spec.mcpArgs?.('/tmp/mcp.json')).toEqual(['--mcp-config', '/tmp/mcp.json']);
+  });
+
+  it('registerDetected 经工厂注册到 registry，可按 model id 解析', () => {
+    const detected: DetectedAgent = { def: DEF, command: '/usr/local/bin/claude', version: '2.1.168', source: 'env' };
+    const stub = { spec: detectedToSpec(detected) } as unknown as ExternalAgentAdapter;
+    const factory = vi.fn(() => stub);
+    registerDetected(detected, factory);
+    expect(factory).toHaveBeenCalledTimes(1);
+    const specArg = factory.mock.calls[0]![0];
+    expect(specArg.id).toBe('cli:claude-code');
+    expect(resolveExternalAdapter('cli:claude-code')).toBe(stub);
+  });
+});

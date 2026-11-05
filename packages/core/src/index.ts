@@ -142,6 +142,29 @@ export { ScriptedExternalAdapter } from './external/scripted.js';
 // F-55 Tier A 外部适配器：ACP（JSON-RPC over stdio；spec 由调用方构建，detect 归 P2）
 export { AcpExternalAdapter } from './external/acp.js';
 
+// F-55 外部 agent 探测与 external.json 持久化（§10 + AC-55-9 白名单 schema）：
+// 只做探测/持久化/纯接缝（detectedToSpec + 工厂注入 registerDetected），不实现 stream-json 协议适配器（Task 10）
+export {
+  KNOWN_AGENTS,
+  PROBE_TIMEOUT_MS,
+  detectExternalAgents,
+  probeAgent,
+  detectedToSpec,
+  registerDetected,
+  checkLoginState,
+  externalEnvPathName,
+  readExternalAgentsCache,
+  writeExternalAgentsCache,
+} from './external/detect.js';
+export type {
+  KnownAgentDef,
+  DetectedAgent,
+  DetectSource,
+  DetectOptions,
+  ExternalAgentCacheEntry,
+} from './external/detect.js';
+
+
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
 export {
