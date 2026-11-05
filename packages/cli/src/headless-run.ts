@@ -291,6 +291,18 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     budget,
     windowTokens: 200_000,
     tasks: service.tasks,
+    // F-55 会话续跑（§8）：外部会话注入 resume 令牌（CLI 侧 session id 只作令牌，
+    // 不读其历史文件——单一权威规则）与 external_session 上报持久化回调
+    ...(session.external_id && session.external_agent
+      ? { externalResume: { externalId: session.external_id, agentId: session.external_agent } }
+      : {}),
+    onExternalSession: (externalId) => {
+      try {
+        service.setSessionExternal(session.id, externalId, session.model || 'cli:');
+      } catch {
+        // 持久化失败不阻塞运行（降级路径可重建上下文）
+      }
+    },
   };
 
   // SIGINT/SIGTERM → 中断（退出码 5）

@@ -804,6 +804,20 @@ export class SessionHub {
                 return this.decision<PlanDecision>(req.id, 'plan', ac.signal);
               }
             : undefined,
+        // F-55 会话续跑（§8）：sessions.external_id/external_agent 成对存在时注入 resume 令牌
+        // （CLI 侧 session id 只作令牌，不读其历史文件——单一权威规则）
+        ...(session.external_id && session.external_agent
+          ? { externalResume: { externalId: session.external_id, agentId: session.external_agent } }
+          : {}),
+        // F-55：external_session 上报即覆盖持久化（claude --resume 会返回新 session id），
+        // 下一轮 send 读到最新令牌；持久化失败不阻塞运行（降级路径可重建上下文）
+        onExternalSession: (externalId) => {
+          try {
+            service.setSessionExternal(sessionId, externalId, session.model || 'cli:');
+          } catch {
+            // 持久化失败不阻塞运行
+          }
+        },
       };
 
       const history: ChatMessage[] = service.getHistory(sessionId);

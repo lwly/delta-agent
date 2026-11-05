@@ -52,6 +52,18 @@ export interface RunContext {
    * 缺省 = 压缩摘要跟随会话主模型（决议 #10 原口径不变）。
    */
   summarizeRoute?: { provider: LLMProvider; model: string };
+  /**
+   * F-55 会话续跑（设计稿 §8）：外部会话的 resume 令牌（CLI 侧 session id）与 agent 虚拟 id。
+   * 由 hub / headless 入口从 sessions.external_id/external_agent 注入；缺省 = 全新外部会话。
+   * 红线：令牌只作 resume 参数透传给 adapter，绝不读 CLI 自己的历史文件（单一权威规则）。
+   */
+  externalResume?: { externalId: string; agentId: string };
+  /**
+   * F-55：adapter 上报 CLI 侧 session id（external_session 事件）时的持久化回调——
+   * hub / headless 注入（写 sessions.external_id/external_agent，覆盖式更新），
+   * 新令牌下一轮生效；缺省忽略（纯内存运行，如单测）。
+   */
+  onExternalSession?: (externalId: string) => void;
   /** retry limit for transient LLM failures */
   maxRetries?: number;
   /** M5: Plan/Multi-Agent 编排参数（agent-modes-design §3/§5） */

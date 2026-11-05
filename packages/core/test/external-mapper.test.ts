@@ -296,7 +296,7 @@ describe('runExternalAgent（F-55 事件映射引擎）', () => {
     }
   });
 
-  it('external_session 忽略不产出事件（P3 resume 再接入）', async () => {
+  it('external_session 不产出事件（resume 令牌经 onExternalSession 上报，见 external-resume.test.ts）', async () => {
     const adapter = scriptAdapter([
       { type: 'external_session', id: 'sess_abc' },
       { type: 'text', text: 'hi' },

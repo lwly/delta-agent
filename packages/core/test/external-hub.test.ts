@@ -204,6 +204,27 @@ describe('DELTA_FAKE_CLI 自动注册', () => {
   });
 });
 
+// ── 5. 会话续跑：external_session 上报持久化（Task 13，§8）─────────────────────
+
+describe('resume 令牌持久化（hub 接线）', () => {
+  it('fake-cli 场景含 external_session 行 → send() 后 sessions.external_id/external_agent 落库', async () => {
+    await useFakeCli([
+      { type: 'stdout', text: JSON.stringify({ type: 'external_session', id: 'cli-sess-42' }) },
+      { type: 'stdout', text: JSON.stringify({ type: 'text', text: '已建立 CLI 会话' }) },
+      { type: 'stdout', text: JSON.stringify({ type: 'done', exitCode: 0 }) },
+      { type: 'exit', code: 0 },
+    ]);
+
+    const session = service.createSession(projectId, { model: 'cli:fake', mode: 'react' });
+    const hub = makeHub(explodingResolveProvider);
+    await hub.send(session.id, '开始任务');
+
+    // 下一轮 send 时 hub 将读回该令牌作为 resumeSessionId（外部 id 只作令牌存储）
+    const row = service.getSession(session.id);
+    expect(row).toMatchObject({ external_id: 'cli-sess-42', external_agent: 'cli:fake' });
+  });
+});
+
 // ── 4. 回归护栏：provider 会话不受影响 ───────────────────────────────────────
 
 describe('provider 会话回归护栏', () => {

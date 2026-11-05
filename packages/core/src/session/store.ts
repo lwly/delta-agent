@@ -21,6 +21,10 @@ export interface SessionRow {
   expert: string | null;
   /** F-39（v5）：'agent' | 'team'；NULL = 无专家 */
   expert_type: string | null;
+  /** F-55（v6）：外部会话 resume 令牌（CLI 侧 session id）；NULL = 非外部会话或尚未建立 */
+  external_id: string | null;
+  /** F-55（v6）：外部 agent 虚拟 id（cli:* / acp:*）；与 external_id 成对写入 */
+  external_agent: string | null;
 }
 
 /** 会话列清单：4 处 SELECT 共用一份，避免加列时漏改（F-39 §6.5） */
@@ -37,6 +41,8 @@ const SESSION_COLUMNS = [
   'worktree_branch',
   'expert',
   'expert_type',
+  'external_id',
+  'external_agent',
 ] as const;
 
 const sessionColumns = (prefix = ''): string => SESSION_COLUMNS.map((c) => `${prefix}${c}`).join(', ');
@@ -235,6 +241,17 @@ export class SessionStore {
     this.db
       .prepare('UPDATE sessions SET worktree_path = ?, worktree_branch = ?, updated_at = ? WHERE id = ?')
       .run(patch.worktreePath ?? null, patch.worktreeBranch ?? null, new Date().toISOString(), id);
+  }
+
+  /**
+   * F-55（§8）：写入外部会话 resume 令牌（external_session 上报时调用，覆盖式更新）。
+   * agentId = 会话 model 虚拟 id（cli:* / acp:*），两列成对落库；CLI 侧 session id
+   * 只作 resume 令牌存储（下一轮 send 时读回注入），绝不读 CLI 自己的历史文件。
+   */
+  setSessionExternal(sessionId: string, externalId: string, agentId: string): void {
+    this.db
+      .prepare('UPDATE sessions SET external_id = ?, external_agent = ?, updated_at = ? WHERE id = ?')
+      .run(externalId, agentId, new Date().toISOString(), sessionId);
   }
 
   touchSession(id: string, patch: { title?: string; status?: string }): void {
