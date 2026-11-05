@@ -2,7 +2,7 @@
 // F-37 Web 底栏三段式（对齐 TUI 语义，PRD §5.2）：
 // 项目名 ｜ 当前分支（点击弹出下拉：本地分支列表 + 当前打勾 + 新建分支输入框）｜ Worktree checkbox
 // 运行中全部置灰禁用；切换结果经 chat store notice（toast 语义）+ git_notice 行内反馈。
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useChatStore } from '../stores/chat';
 import type { BranchInfo } from '../api/client';
 
@@ -77,6 +77,18 @@ async function onWorktreeToggle(ev: Event) {
 watch(() => [chat.sessionId, chat.running], () => {
   showBranchMenu.value = false;
 });
+
+// 点击弹层外部关闭（capture 阶段：先于目标元素自身 handler，避免误触发其他按钮）；
+// menuWrap 含触发按钮本体——点按钮仍是既有 toggle 语义，只有点弹层外才关
+function onDocPointerDown(ev: PointerEvent) {
+  if (!showBranchMenu.value) return;
+  const target = ev.target;
+  if (menuWrap.value && target instanceof Node && !menuWrap.value.contains(target)) {
+    showBranchMenu.value = false;
+  }
+}
+onMounted(() => document.addEventListener('pointerdown', onDocPointerDown, true));
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDown, true));
 </script>
 
 <template>
