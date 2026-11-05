@@ -149,11 +149,13 @@ export { StreamJsonExternalAdapter } from './external/stream-json.js';
 export { buildDeltaMcpFile } from './external/mcp-passthrough.js';
 
 // F-55 外部 agent 探测与 external.json 持久化（§10 + AC-55-9 白名单 schema）：
-// 只做探测/持久化/纯接缝（detectedToSpec + 工厂注入 registerDetected），不实现 stream-json 协议适配器（Task 10）
+// 探测/持久化/接缝（detectedToSpec + 工厂注入 registerDetected）+ ensureExternalAdapters
+// 组合入口（Task 11：detect → StreamJsonExternalAdapter 工厂 → registry 注册）
 export {
   KNOWN_AGENTS,
   PROBE_TIMEOUT_MS,
   detectExternalAgents,
+  ensureExternalAdapters,
   probeAgent,
   detectedToSpec,
   registerDetected,

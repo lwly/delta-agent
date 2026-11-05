@@ -16,6 +16,7 @@ import {
   checkLoginState,
   detectExternalAgents,
   detectedToSpec,
+  ensureExternalAdapters,
   externalEnvPathName,
   readExternalAgentsCache,
   registerDetected,
@@ -23,6 +24,7 @@ import {
 } from '../src/external/detect.js';
 import type { DetectedAgent, DetectOptions, ExternalAgentCacheEntry } from '../src/external/detect.js';
 import { resolveExternalAdapter } from '../src/external/registry.js';
+import { StreamJsonExternalAdapter } from '../src/external/stream-json.js';
 import type { ExternalAgentAdapter } from '../src/external/types.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -260,5 +262,51 @@ describe('detectedToSpec / registerDetected（协议接缝）', () => {
     const specArg = factory.mock.calls[0]![0];
     expect(specArg.id).toBe('cli:claude-code');
     expect(resolveExternalAdapter('cli:claude-code')).toBe(stub);
+  });
+});
+
+describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组合入口，Task 11）', () => {
+  itPosix('探测命中：返回 DetectedAgent[]，registry 注册 StreamJsonExternalAdapter 且 spec 正确', async () => {
+    const cmd = writeWrapper('claude-ensure', VERSION_CLI, '2.1.168-ensure');
+    process.env[ENV_NAME] = cmd;
+
+    const found = await ensureExternalAdapters({ homeDir: home });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.command).toBe(cmd);
+    expect(found[0]!.version).toBe('2.1.168-ensure');
+    expect(found[0]!.def.id).toBe('cli:claude-code');
+
+    const adapter = resolveExternalAdapter('cli:claude-code');
+    expect(adapter).toBeInstanceOf(StreamJsonExternalAdapter);
+    expect(adapter!.spec.id).toBe('cli:claude-code');
+    expect(adapter!.spec.command).toBe(cmd);
+    expect(adapter!.spec.version).toBe('2.1.168-ensure');
+    expect(adapter!.spec.tier).toBe('B');
+  });
+
+  itPosix('探测失败：静默返回空数组，不覆盖 registry 既有条目（幂等无副作用）', async () => {
+    // registry 是进程级单例且无反注册：同文件先行用例（registerDetected/命中用例）已注册过
+    // cli:claude-code —— 探测失败路径不得触碰既有条目，以「前后一致」断言
+    const before = resolveExternalAdapter('cli:claude-code');
+    const cmd = writeWrapper('claude-ensure-fail', VERSION_FAIL, 'ignored');
+    process.env[ENV_NAME] = cmd;
+
+    const found = await ensureExternalAdapters({ homeDir: home });
+    expect(found).toEqual([]);
+    expect(readExternalAgentsCache(home)).toEqual([]);
+    expect(resolveExternalAdapter('cli:claude-code')).toBe(before);
+  });
+
+  itPosix('重复调用幂等：同 id 覆盖注册，registry 始终可解析且为 StreamJsonExternalAdapter', async () => {
+    const cmd = writeWrapper('claude-ensure-twice', VERSION_CLI, '9.9.9-twice');
+    process.env[ENV_NAME] = cmd;
+
+    await ensureExternalAdapters({ homeDir: home });
+    const first = resolveExternalAdapter('cli:claude-code');
+    await ensureExternalAdapters({ homeDir: home });
+    const second = resolveExternalAdapter('cli:claude-code');
+    expect(first).toBeInstanceOf(StreamJsonExternalAdapter);
+    expect(second).toBeInstanceOf(StreamJsonExternalAdapter);
+    expect(second!.spec.version).toBe('9.9.9-twice');
   });
 });

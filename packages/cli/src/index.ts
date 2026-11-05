@@ -29,10 +29,12 @@ import {
   toTeamRuntime,
   exportSession,
   APP_VERSION,
+  ensureExternalAdapters,
   type ExpertRecord,
 } from '@delta/core';
 import { App } from './ui/app.js';
 import { assemblePrompt } from './prompt.js';
+import { externalAgentBlockLines } from './external-block.js';
 import {
   expertListCommand,
   expertShowCommand,
@@ -240,24 +242,30 @@ models
 
 models
   .command('list')
-  .description('列出已配置的 Provider（Key 脱敏显示）')
-  .action(() => {
+  .description('列出已配置的 Provider（Key 脱敏显示）+ 外部 Agent 探测区块（F-55 §10）')
+  .action(async () => {
     const list = new ProviderManager().list();
     if (list.length === 0) {
       console.log('（空）先用 `delta models add <id> -k <apiKey>` 添加');
-      return;
+    } else {
+      for (const p of list) {
+        const flags = [
+          p.default ? '默认' : '',
+          p.enabled ? '' : '已停用',
+        ].filter(Boolean).join(' · ');
+        console.log(
+          `${p.default ? '*' : ' '} ${p.id.padEnd(12)} [${p.vendor}] ${p.keyMasked}` +
+            `${p.model ? ` model=${p.model}` : ''}${p.baseUrl ? ` base=${p.baseUrl}` : ''}` +
+            `${flags ? `  (${flags})` : ''}`,
+        );
+      }
     }
-    for (const p of list) {
-      const flags = [
-        p.default ? '默认' : '',
-        p.enabled ? '' : '已停用',
-      ].filter(Boolean).join(' · ');
-      console.log(
-        `${p.default ? '*' : ' '} ${p.id.padEnd(12)} [${p.vendor}] ${p.keyMasked}` +
-          `${p.model ? ` model=${p.model}` : ''}${p.baseUrl ? ` base=${p.baseUrl}` : ''}` +
-          `${flags ? `  (${flags})` : ''}`,
-      );
-    }
+    // F-55 外部 Agent 区块（design-f55 §10）：探测 + registry 注册组合入口，返回值供只读展示。
+    // 副作用说明：探测会把结果落 ~/.delta/external.json（§10 探测结果落盘，只读展示的可接受副作用），
+    // 只探测不安装、不代用户接受许可条款（§16）
+    const detected = await ensureExternalAdapters();
+    console.log('');
+    for (const line of externalAgentBlockLines(detected)) console.log(line);
   });
 
 models

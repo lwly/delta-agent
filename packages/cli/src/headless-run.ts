@@ -30,6 +30,7 @@ import {
   prepareImages,
   describeImage,
   ImageError,
+  ensureExternalAdapters,
   resolveProviderFromEnv,
   runExternalAgent,
   runHeadless,
@@ -160,6 +161,12 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       return;
     }
   }
+
+  // F-55：外部会话启动前确保 adapter 已注册（Task 11 组合入口：detect 探测 →
+  // StreamJsonExternalAdapter 工厂 → registry 注册）。探测失败静默（detect 内部不抛）；
+  // adapter 未注册时映射引擎发 external_agent_not_found fatal error，走正常事件流。
+  // 副作用：探测结果落 ~/.delta/external.json（design-f55 §10）
+  if (isExternal) await ensureExternalAdapters();
 
   // F-34 项目 onboarding：新注册项目时同步扫描一次，生成静态记忆草案
   // （一次性成本可接受；失败静默——状态留在 pending，下次新项目启动重试）

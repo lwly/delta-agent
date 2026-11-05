@@ -6,9 +6,8 @@
 //     + external.json 白名单读写（AC-55-9：固定 schema，token/key/secret 进不了文件）
 //     + checkLoginState（登录态存在性，只 existsSync 不解析内容）
 //   - 协议接缝：detectedToSpec（DetectedAgent → ExternalAgentSpec 纯函数）与
-//     registerDetected（工厂注入式注册）在此导出，但本文件不调用、也不实现
-//     stream-json 适配器 —— Task 10 的 ensureExternalAdapters() 才是
-//     「detect + StreamJsonExternalAdapter 工厂 + registry 注册」的组合入口。
+//     registerDetected（工厂注入式注册）在此导出；ensureExternalAdapters() 是
+//     「detect + StreamJsonExternalAdapter 工厂 + registry 注册」的组合入口（Task 11）。
 //   - 不自动下载/安装任何 CLI（设计稿 §10），探测失败一律静默跳过（warn 例外见 resolveCommand）。
 
 import fs from 'node:fs';
@@ -18,6 +17,7 @@ import path from 'node:path';
 import { userConfigDir } from '../paths.js';
 import { spawnExternal } from './spawn.js';
 import { registerExternalAdapter } from './registry.js';
+import { StreamJsonExternalAdapter } from './stream-json.js';
 import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalTier } from './types.js';
 
 /** 探测超时（设计稿 §10：`command --version` 超时 3s，失败静默跳过） */
@@ -286,12 +286,30 @@ export function detectedToSpec(detected: DetectedAgent): ExternalAgentSpec {
   };
 }
 
-/** 工厂注入式注册：Task 10 的 ensureExternalAdapters() 以 StreamJsonExternalAdapter 工厂调用；本文件不调用 */
+/** 工厂注入式注册：ensureExternalAdapters() 以 StreamJsonExternalAdapter 工厂调用；也可单独使用 */
 export function registerDetected(
   detected: DetectedAgent,
   factory: (spec: ExternalAgentSpec) => ExternalAgentAdapter,
 ): void {
   registerExternalAdapter(factory(detectedToSpec(detected)));
+}
+
+/**
+ * 组合入口（Task 11）：detectExternalAgents 探测 → 每个命中以 StreamJsonExternalAdapter 工厂
+ * 经 registerDetected 注册进 registry。
+ *  - 幂等：同 id 重复注册覆盖（registry 语义，版本/路径变化后的重探测即重注册），无其他副作用
+ *    （探测本身按 §10 落 external.json 缓存）。
+ *  - 空命中静默：探测失败不抛错（detect 内部已静默），返回空数组；调用方（headless 入口）无需
+ *    特殊处理——adapter 未注册时映射引擎会发 external_agent_not_found fatal error，走正常事件流。
+ *  - 返回 DetectedAgent[]（注册副作用之外额外供 CLI 展示消费：models list / doctor 需要
+ *    loginStateFiles 与三档 permissionArgs 等 KnownAgentDef 信息，ExternalAgentSpec 上没有）。
+ */
+export async function ensureExternalAdapters(opts: DetectOptions = {}): Promise<DetectedAgent[]> {
+  const detected = await detectExternalAgents(opts);
+  for (const d of detected) {
+    registerDetected(d, (spec) => new StreamJsonExternalAdapter(spec));
+  }
+  return detected;
 }
 
 /**

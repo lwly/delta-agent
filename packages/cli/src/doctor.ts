@@ -16,12 +16,16 @@ import * as path from 'node:path';
 import {
   APP_VERSION,
   FILES,
+  KNOWN_AGENTS,
   LATEST_SCHEMA_VERSION,
   ProviderManager,
   SessionStore,
+  checkLoginState,
   compareVersions,
   decryptKeyDetailed,
   detectChannel,
+  ensureExternalAdapters,
+  externalEnvPathName,
   loadModelsFile,
   userConfigDir,
 } from '@delta/core';
@@ -50,6 +54,8 @@ export interface DoctorOptions {
   offline?: boolean;
   /** Provider 连通性探测超时（ms） */
   timeoutMs?: number;
+  /** F-55 外部 agent 版本探测超时（ms；缺省 core PROBE_TIMEOUT_MS，测试可调小） */
+  probeTimeoutMs?: number;
 }
 
 /** 判定最终退出码：任一 fail → 1（warn/info/ok 均 0）。 */
@@ -211,6 +217,89 @@ async function checkProviderConnectivity(opts: DoctorOptions): Promise<DoctorChe
   return ok('provider', 'Provider 连通', `${target}：${r.detail}（${r.latencyMs}ms）`);
 }
 
+/**
+ * F-55 外部 Agent 检查节（design-f55 §10 探测与配置展示 + §5.2/AC-55-7 能力降级声明）。
+ *
+ * 探测复用 ensureExternalAdapters（副作用说明：探测结果落 ~/.delta/external.json 缓存，
+ * §10 设计如此；只探测不安装、不代用户接受许可条款，§16）。
+ * 登录态只 existsSync（§10 红线：不解析内容、不复制、不上报）。
+ * 外部检查项永不 fail（探测不到是常态，info 即可），不影响退出码聚合。
+ */
+async function checkExternalAgents(opts: DoctorOptions): Promise<DoctorCheckResult[]> {
+  const results: DoctorCheckResult[] = [];
+  const detected = await ensureExternalAdapters({
+    ...(opts.homeDir !== undefined ? { homeDir: opts.homeDir } : {}),
+    ...(opts.probeTimeoutMs !== undefined ? { probeTimeoutMs: opts.probeTimeoutMs } : {}),
+  });
+
+  // 探测结果（路径 / 版本 / 来源 env|cache|path）
+  if (detected.length === 0) {
+    results.push(
+      info('external-probe', '外部 Agent 探测', '未探测到外部 Agent（delta 只探测不安装；PATH 上没有可用 CLI 或 --version 探测失败）'),
+    );
+  } else {
+    results.push(
+      ok(
+        'external-probe',
+        '外部 Agent 探测',
+        detected.map((d) => `${d.def.id} ${d.version} @ ${d.command}（来源 ${d.source}）`).join('；'),
+      ),
+    );
+  }
+
+  // 登录态存在性（§10：只 existsSync，不解析内容、不复制、不上报）。
+  // 未登录是正常状态而非环境缺陷 → info（不 warn）：全新环境 doctor 结论须保持「全部通过」
+  // （AC-51-4 / e2e ⑦ 契约），与「无 Provider 时为提示而非失败」同一口径
+  if (detected.length === 0) {
+    results.push(info('external-login', '外部 Agent 登录态', '（无探测结果，跳过登录态检查）'));
+  } else {
+    const marks = detected
+      .map((d) => {
+        const has = checkLoginState(d.def, opts.homeDir);
+        return `${d.def.id} ${has ? '✓' : `✗（未检测到登录态文件；如需使用，先在终端运行 ${d.def.executable} 完成登录）`}`;
+      })
+      .join('；');
+    results.push(info('external-login', '外部 Agent 登录态', `${marks}（存在性检查，未解析内容）`));
+  }
+
+  // 三档支持度（§5.1）：permissionArgs 非空 = 上游有显式 flags 支持
+  if (detected.length > 0) {
+    const marks = detected
+      .map((d) => {
+        const p = d.def.permissionArgs;
+        const mark = (args: string[]): string => (args.length > 0 ? '✓' : '✗');
+        return `${d.def.id}：plan ${mark(p.plan)} / default ${mark(p.default)} / yolo ${mark(p.yolo)}`;
+      })
+      .join('；');
+    results.push(
+      info(
+        'external-permissions',
+        '外部 Agent 权限档',
+        `${marks}（plan 档依赖上游只读模式；default 档非交互宿主上游自行拒绝）`,
+      ),
+    );
+  }
+
+  // 能力降级声明（§5.2 / AC-55-7）：固定文案，必须显式告知，不能静默失效
+  results.push(
+    info(
+      'external-capabilities',
+      '外部会话能力降级',
+      '外部会话不使用 delta 沙箱 / 内置 Function 不可注入 / 无上下文压缩与记忆蒸馏 / 订阅内调用不计费（usage.billing=subscription）',
+    ),
+  );
+
+  // 显式路径环境变量提示（优先级最高：env > external.json > PATH）
+  results.push(
+    info(
+      'external-env',
+      '外部 Agent 路径环境变量',
+      `${KNOWN_AGENTS.map((d) => `${d.id} → ${externalEnvPathName(d.id)}`).join('；')}（显式指定可执行路径，优先级高于 external.json 缓存与 PATH 探测）`,
+    ),
+  );
+  return results;
+}
+
 /** 收集全部检查项（不做打印，便于单测）。 */
 export async function collectDoctorChecks(opts: DoctorOptions = {}): Promise<DoctorCheckResult[]> {
   const results: DoctorCheckResult[] = [];
@@ -223,6 +312,7 @@ export async function collectDoctorChecks(opts: DoctorOptions = {}): Promise<Doc
   if (!opts.offline) {
     results.push(await checkProviderConnectivity(opts));
   }
+  results.push(...(await checkExternalAgents(opts)));
   return results;
 }
 
