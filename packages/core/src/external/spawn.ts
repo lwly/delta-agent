@@ -103,6 +103,23 @@ function buildChildEnv(
 }
 
 /**
+ * F-56（Windows 中文环境实测）：行缓冲解码。严格 UTF-8 解码出现替换符（U+FFFD）时回退 GBK
+ * ——中文 Windows 的 cmd shim / 控制台错误按本地码页（cp936）输出，UTF-8 硬解必出乱码；
+ * Node 20 full-icu 原生支持 GBK 解码。合法 UTF-8 内容不受影响（正常路径零开销）。
+ */
+function decodeLineBuffer(line: Buffer): string {
+  const utf8 = line.toString('utf8');
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    const gbk = new TextDecoder('gbk').decode(line);
+    if (!gbk.includes('\uFFFD')) return gbk;
+  } catch {
+    /* 运行时无 GBK 支持（非 full-icu 构建）：保持 UTF-8 结果 */
+  }
+  return utf8;
+}
+
+/**
  * 逐行拆分器：按 \n 切行（剥离行尾 \r），单行超 maxBytes 截断输出并置 truncated=true，
  * 残余字节丢弃直到下一个换行——不崩、不丢后续行。流结束时若有残余行（无换行结尾）也产出。
  */
@@ -129,7 +146,7 @@ function attachLineSplitter(
       if (idx === -1) {
         // 没等到换行就超限：先产出截断段，进入丢弃态
         if (buf.length > opts.maxBytes) {
-          opts.onLine(buf.subarray(0, opts.maxBytes).toString('utf8'), true);
+          opts.onLine(decodeLineBuffer(buf.subarray(0, opts.maxBytes)), true);
           buf = Buffer.alloc(0);
           discarding = true;
         }
@@ -142,7 +159,7 @@ function attachLineSplitter(
         line = line.subarray(0, opts.maxBytes);
         truncated = true;
       }
-      let text = line.toString('utf8');
+      let text = decodeLineBuffer(line);
       if (text.endsWith('\r')) text = text.slice(0, -1);
       opts.onLine(text, truncated);
     }
@@ -150,7 +167,7 @@ function attachLineSplitter(
   stream.on('end', () => {
     if (!discarding && buf.length > 0) {
       const truncated = buf.length > opts.maxBytes;
-      let text = (truncated ? buf.subarray(0, opts.maxBytes) : buf).toString('utf8');
+      let text = decodeLineBuffer(truncated ? buf.subarray(0, opts.maxBytes) : buf);
       if (text.endsWith('\r')) text = text.slice(0, -1);
       opts.onLine(text, truncated);
     }
