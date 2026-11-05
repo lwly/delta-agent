@@ -57,6 +57,13 @@ export interface SpawnedProcess {
   cancel(): Promise<void>;
   /** stderr 环形缓冲快照（最近 ≤ STDERR_RING_LINES 行） */
   stderrTail(): string[];
+  /**
+   * 向子进程 stdin 写一行（自动补 \n）。供协议 adapter 发 JSON-RPC 请求用（F-55 P1 ACP）。
+   * stdin 已关闭/进程已退时返回 false（不抛错）；写入后的 EPIPE 由内部兜底进环形缓冲。
+   */
+  writeLine(text: string): boolean;
+  /** 关闭子进程 stdin（ACP：prompt result 到达后通知 agent 自然退出） */
+  endStdin(): void;
   pid: number | undefined;
 }
 
@@ -278,6 +285,11 @@ export function spawnExternal(options: SpawnOptions): SpawnedProcess {
     }
   });
 
+  // stdin 写错误（EPIPE：子进程已退后才写）：进环形缓冲兜底，防 unhandled 'error' 崩溃
+  child.stdin?.on('error', (err: Error) => {
+    pushRing(`[delta] stdin 写入失败: ${err.message}`);
+  });
+
   // ---- 取消：onAbort 钩子 → 宽限期 → 杀进程组；幂等 ----
   const exitedBeforeCancel = (): boolean =>
     finished || child.exitCode !== null || child.signalCode !== null;
@@ -318,6 +330,15 @@ export function spawnExternal(options: SpawnOptions): SpawnedProcess {
     wait: () => waitPromise,
     cancel,
     stderrTail: () => [...ring],
+    writeLine: (text: string): boolean => {
+      const stdin = child.stdin;
+      if (!stdin || stdin.destroyed || stdin.writableEnded) return false;
+      stdin.write(`${text}\n`);
+      return true;
+    },
+    endStdin: () => {
+      child.stdin?.end();
+    },
     pid: child.pid,
   };
 }

@@ -139,6 +139,9 @@ export { registerExternalAdapter, resolveExternalAdapter, isExternalModel } from
 // F-55 Scripted 外部适配器（测试/e2e 专用；DELTA_FAKE_CLI 命中时模块加载即自动注册）
 export { ScriptedExternalAdapter } from './external/scripted.js';
 
+// F-55 Tier A 外部适配器：ACP（JSON-RPC over stdio；spec 由调用方构建，detect 归 P2）
+export { AcpExternalAdapter } from './external/acp.js';
+
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
 export {
