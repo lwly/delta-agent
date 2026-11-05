@@ -19,7 +19,7 @@ F-55 把外部 CLI Agent 做成了 delta 的第 4 种执行后端，但接入通
 
 ## 范围
 
-- **做**：内置模板注册表（6 CLI：label/description/executable/kind/tier/protocolArgs）；`external.json` schema 扩展（`manual`/`displayName`/`description` 白名单字段，旧文件零迁移）；探测四级优先级（env > 手动 > 缓存 > PATH）；手动条目探测失败不移除、探测不覆盖手动字段；ACP 适配器工厂接线（codebuddy `--acp` / cursor `acp` / opencode `acp`）；Tier D 预留档 stub（`external_unsupported_protocol`）；Web 两步向导 + `GET templates`/`POST`/`DELETE` 三端点；CLI `delta agents templates|add|list|remove`。
+- **做**：内置模板注册表（6 CLI：label/description/executable/kind/tier/protocolArgs）；**指定模型参数**（注册时可选指定该 agent 使用的模型，按 CLI 形态映射启动 flag）；`external.json` schema 扩展（`manual`/`displayName`/`description`/`model` 白名单字段，旧文件零迁移）；探测四级优先级（env > 手动 > 缓存 > PATH）；手动条目探测失败不移除、探测不覆盖手动字段；ACP 适配器工厂接线（codebuddy `--acp` / cursor `acp` / opencode `acp`）；Tier D 预留档 stub（`external_unsupported_protocol`）；Web 两步向导 + `GET templates`/`POST`/`DELETE` 三端点；CLI `delta agents templates|add|list|remove`。
 - **不做**：自动下载/安装/代登录；同一模板多实例（v1 一个模板一个手动条目，upsert 语义）；无模板的完全自定义条目（第 1 步必须点选模板）；dsh 协议适配器实现（仅预留）。
 
 ## 验收标准
@@ -29,6 +29,7 @@ F-55 把外部 CLI Agent 做成了 delta 的第 4 种执行后端，但接入通
 - **AC-56-3** opencode/cursor 注册后本机可启动则按 ACP 跑通；不可用时启动报明确协议错误，不静默。
 - **AC-56-4** dsh 注册成功但启动时报 `external_unsupported_protocol`（预留档）。
 - **AC-56-5** 手动条目优先于探测缓存；探测失败不移除手动条目；探测刷新不覆盖 manual/displayName/description。
+- **AC-56-6** 注册时指定模型后，外部 agent 启动行携带对应模型 flag：claude/codebuddy `--model`、cursor `acp --model`、opencode `-m`（在 `acp` 之前）、codex `-c model=…`；未指定时用各 CLI 默认模型。
 
 ## 里程碑
 

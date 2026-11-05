@@ -23,20 +23,27 @@ reserved→ReservedExternalAdapter（stub）
 
 ## 2. 模板注册表（KNOWN_AGENTS 扩展）
 
-`KnownAgentDef` 新增字段：`label`（展示名）、`description`（向导卡片描述）、`protocolArgs?`（协议入口参数，`detectedToSpec` 透传到 `spec.args`，适配器组装启动行时前置）。
+`KnownAgentDef` 新增字段：`label`（展示名）、`description`（向导卡片描述）、`protocolArgs?`（协议入口参数，`detectedToSpec` 透传到 `spec.args`，适配器组装启动行时前置）、`modelArgs?`（F-56 指定模型的 flag 形态与放置位置）。
 
 6 模板协议矩阵（2026-11-05 本机 `--help` 实测 + 官方文档核实）：
 
-| id | executable | kind | tier | protocolArgs | 启动形态 | 权限档 |
-|---|---|---|---|---|---|---|
-| cli:claude-code | claude | stream-json-jsonl | B | —（适配器自组 `-p`） | F-55 既有 | plan/yolo flags 既有 |
-| cli:codex | codex | app-server-jsonl | C | —（适配器自带 `app-server`） | F-55 既有 | F-55 既有 |
-| cli:codebuddy | codebuddy | acp | A | `['--acp']` | `codebuddy --acp`（ndJsonStream，--help 实测） | plan: `--permission-mode plan`；yolo: `--dangerously-skip-permissions` |
-| cli:cursor-agent | cursor-agent | acp | A | `['acp']` | `cursor-agent acp`（官方 docs/cli/acp） | 会话内协商，flags 空 |
-| cli:opencode | opencode | acp | A | `['acp']` | `opencode acp`（官方 docs/acp，协议 v1） | 会话内协商，flags 空 |
-| cli:dsh | dsh | reserved | D | — | 不启动 | —（stub 报错） |
+| id | executable | kind | tier | protocolArgs | 指定模型 flag | 启动形态 | 权限档 |
+|---|---|---|---|---|---|---|---|
+| cli:claude-code | claude | stream-json-jsonl | B | —（适配器自组 `-p`） | `--model`（适配器组装） | F-55 既有 | plan/yolo flags 既有 |
+| cli:codex | codex | app-server-jsonl | C | —（适配器自带 `app-server`） | `-c model=…`（适配器组装，app-server 无 --model flag） | F-55 既有 | F-55 既有 |
+| cli:codebuddy | codebuddy | acp | A | `['--acp']` | `--model`（protocolArgs 之后） | `codebuddy --acp`（ndJsonStream，--help 实测） | plan: `--permission-mode plan`；yolo: `--dangerously-skip-permissions` |
+| cli:cursor-agent | cursor-agent | acp | A | `['acp']` | `--model`（acp 之后，官方 docs/cli/acp） | `cursor-agent acp` | 会话内协商，flags 空 |
+| cli:opencode | opencode | acp | A | `['acp']` | `-m`（acp **之前**，根命令全局 flag，官方 docs/models） | `opencode acp` | 会话内协商，flags 空 |
+| cli:dsh | dsh | reserved | D | — | —（预留档不支持） | 不启动 | —（stub 报错） |
 
 登录态文件（只判存在性）：codebuddy `~/.codebuddy`；cursor `~/.cursor`；opencode `~/.local/share/opencode/auth.json`（+ 目录兜底）；dsh `~/.dsh`。
+
+**指定模型的接缝**（F-56 增补）：`ExternalAgentSpec.model?: string`（来自 external.json 条目）。两条组装路径：
+
+1. **ACP 系（kind 'acp'）**：`detectedToSpec` 按 `def.modelArgs(model)` 把 flag 折叠进 `spec.args`（before = protocolArgs 之前 / after = 之后）——模型 flag 的位置差异归模板注册表，适配器无感知；
+2. **stream-json / app-server-jsonl**：适配器按 `spec.model` 自行组装（协议知识归适配器）：stream-json 追加 `['--model', model]`；codex 追加 `['-c', 'model=<model>']`。
+
+模型变更生效时机：spec 在 detect 时冻结（工厂闭包），改 external.json 后下次探测/重探测生效。
 
 ## 3. external.json schema 扩展
 
@@ -46,10 +53,11 @@ reserved→ReservedExternalAdapter（stub）
 { "agents": [
   { "id": "cli:codebuddy", "kind": "acp", "command": "/opt/cb/codebuddy",
     "version": "2.171.0", "tier": "A", "enabled": true, "lastProbeAt": "…",
-    "manual": true, "displayName": "CodeBuddy 自建", "description": "本地构建" } ] }
+    "manual": true, "displayName": "CodeBuddy 自建", "description": "本地构建",
+    "model": "glm-5.3" } ] }
 ```
 
-红线不变（AC-55-9）：白名单外的 token/key/secret 字段读入即丢弃。
+白名单新增四字段（条件展开：无手动信息的条目回读键不增，F-55 旧文件零迁移）：`manual`/`displayName`/`description`/`model`。红线不变（AC-55-9）：白名单外的 token/key/secret 字段读入即丢弃。`model` 空串 = 清除（再注册不带 model 即恢复 CLI 默认模型）。
 
 ## 4. 探测合并语义（resolveCommand 四级 + detect 写回）
 
@@ -84,12 +92,12 @@ detect 写回时 `manual/displayName/description` 只增不抹：命中刷新 co
 
 - 头部新增「＋ 添加」；弹窗复用 `ModalShell`。
 - **第 1 步**：模板网格（2 列卡片：label + executable + Tier 徽标 + description），点选进第 2 步。
-- **第 2 步**：基础运行时（锁定只读：label + id + Tier）、显示名称（必填，预填 label）、命令（必填，预填 executable）、描述（可选）；400 校验错误就地展示。
-- 列表行展示：名称取 `displayName || label || id`；手动条目带「移除」按钮；`kind:'reserved'` 行显示预留提示；手动条目不显示「未检测到登录态」警告（避免注册即红字）。
+- **第 2 步**：基础运行时（锁定只读：label + id + Tier）、显示名称（必填，预填 label）、命令（必填，预填 executable）、模型（可选，hint 说明各 CLI 的 flag 形态）、描述（可选）；400 校验错误就地展示。
+- 列表行展示：名称取 `displayName || label || id`；指定模型的条目带 `⚙ model` 徽标；手动条目带「移除」按钮；`kind:'reserved'` 行显示预留提示；手动条目不显示「未检测到登录态」警告（避免注册即红字）。
 
 ## 8. CLI（`delta agents`）
 
-`packages/cli/src/agents.ts`：`templates`（列模板）/ `add <templateId> [--command] [--name] [--description]`（upsert，未知模板打印全部可用 id）/ `list`（external.json 全条目，[手动]/[缓存] 标）/ `remove <id>`。与 Web 共用 core 的 upsert/remove。
+`packages/cli/src/agents.ts`：`templates`（列模板）/ `add <templateId> [--command] [--name] [--description] [--model]`（upsert，未知模板打印全部可用 id）/ `list`（external.json 全条目，[手动]/[缓存] 标，含模型）/ `remove <id>`。与 Web 共用 core 的 upsert/remove。
 
 ## 9. 实现偏差说明
 
@@ -114,8 +122,9 @@ detect 写回时 `manual/displayName/description` 只增不抹：命中刷新 co
 ## 11. 测试矩阵
 
 - 模板注册表完整性（6 id、protocolArgs、reserved tier）
-- upsert/remove：缺省值、错误码、覆盖语义、白名单剥离 token
+- upsert/remove：缺省值、错误码、覆盖语义、白名单剥离 token、model 写入/清除/超长校验
 - 探测合并：manual probe 失败保留（AC-56-5）、成功刷新且手动字段保留、手动优先于缓存、非 manual 失效维持 F-55 移除语义
+- 指定模型（AC-56-6）：detectedToSpec 三种 flag 放置（codebuddy after / opencode before / claude 走 spec.model）；stream-json 启动行 `--model`（fake-claude argv 断言）；codex 启动行 `-c model=…`（argv-dump fixture 断言）；探测写回 model 沿用
 - 适配器分派：codebuddy → ACP（spec.args `--acp`）、dsh → stub（external_unsupported_protocol）
 - HTTP：templates 6 条、POST 200/400、DELETE 200/404
 
