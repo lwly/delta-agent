@@ -36,6 +36,8 @@ reserved→ReservedExternalAdapter（stub）
 | cli:opencode | opencode | acp | A | `['acp']` | `-m`（acp **之前**，根命令全局 flag，官方 docs/models） | `opencode acp` | 会话内协商，flags 空 |
 | cli:dsh | dsh | reserved | D | — | —（预留档不支持） | 不启动 | —（stub 报错） |
 
+上表模型列对应的候选清单（`models`）：codebuddy 17 项（--help 实测）、claude 6 项（别名 + 全 ID）、codex/cursor/opencode 各 4–5 项（官方文档常用值，待真机实测回填）。
+
 登录态文件（只判存在性）：codebuddy `~/.codebuddy`；cursor `~/.cursor`；opencode `~/.local/share/opencode/auth.json`（+ 目录兜底）；dsh `~/.dsh`。
 
 **指定模型的接缝**（F-56 增补）：`ExternalAgentSpec.model?: string`（来自 external.json 条目）。两条组装路径：
@@ -44,6 +46,8 @@ reserved→ReservedExternalAdapter（stub）
 2. **stream-json / app-server-jsonl**：适配器按 `spec.model` 自行组装（协议知识归适配器）：stream-json 追加 `['--model', model]`；codex 追加 `['-c', 'model=<model>']`。
 
 模型变更生效时机：spec 在 detect 时冻结（工厂闭包），改 external.json 后下次探测/重探测生效。
+
+**候选模型清单（下拉选择）**：`KnownAgentDef.models?: string[]`，来源 = CLI `--help` 实测 / 官方文档（codebuddy 清单取自本机 2.171.0 `--help` 的 17 个模型 ID）。经 templates 端点透出，Web 向导「模型」字段用原生 `<datalist>` 组合框——下拉建议 + 自由输入并存（opencode 的 `provider/model` 格式不设限）；清单是建议不是校验，CLI 侧 `delta agents templates` 同步展示。dsh 预留档不提供清单。
 
 ## 3. external.json schema 扩展
 
