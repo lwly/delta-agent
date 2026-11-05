@@ -4,7 +4,9 @@
  * 覆盖：
  *  1. external_session 上报 → onExternalSession 回调收到 id；缺省（无回调）不崩。
  *  2. 令牌失效降级：带令牌续跑 + 首轮「未建立会话 + 无产出 + 非零退出」→ 丢弃令牌重跑，
- *     prompt = delta 历史摘要 + 本次输入，提示 error（fatal:false）仅一次，done 恰一次。
+ *     prompt = delta 历史摘要 + 本次输入，提示 error（fatal:false）仅一次，done 恰一次；
+ *     首轮上游 fatal error 降级为 fatal:false（重建成功不以 fatal 告终，AC-55-8），
+ *     降级轮再失败则 fatal 照常透传（最多一轮 fallback）。
  *  3. 降级不触发（防误伤三条）：首轮成功 / 无令牌 / 会话已建立但 exit 3 → 均只跑一次。
  *  4. 持久化：store.setSessionExternal 落库 + getSession 读回 external_id/external_agent 两列。
  *  5. 超长 history（>8000 字符）→ 摘要截断保尾。
@@ -203,6 +205,49 @@ describe('令牌失效降级（§8.4）', () => {
     expect(prompt).toContain('TAIL_SENTINEL_结尾要点');
     expect(prompt).not.toContain('HEAD_被截掉的前缀');
     expect(prompt).toContain('继续');
+  });
+
+  it('resume + 首轮 fatal + 降级重建成功 → 全流无 fatal:true error（首轮 fatal 已降级），done 恰一次', async () => {
+    // AC-55-8 headless 语义：首轮上游 fatal error 降级为 fatal:false，重建成功后
+    // 整个 turn 不以 fatal 告终（runHeadless 不记 fatalMessage / failed 退出码）
+    const adapter = multiRunAdapter([
+      [{ type: 'error', message: 'session not found', fatal: true }, { type: 'done', exitCode: 3 }],
+      [{ type: 'text', text: '重建成功' }, { type: 'done', exitCode: 0 }],
+    ]);
+    registerExternalAdapter(adapter);
+    const events = await collect(makeCtx({ externalResume: { externalId: 'tok-stale', agentId: MODEL } }), HISTORY, '继续任务');
+
+    // 原始 fatal message 保留但降级为 fatal:false
+    const sessionNotFound = events.filter((e) => e.type === 'error' && e.message === 'session not found');
+    expect(sessionNotFound).toHaveLength(1);
+    expect(sessionNotFound[0]).toMatchObject({ fatal: false });
+    // 全事件流不存在 fatal:true 的 error
+    expect(events.some((e) => e.type === 'error' && e.fatal === true)).toBe(false);
+    // 降级提示（fatal:false）恰一次
+    const notices = events.filter((e) => e.type === 'error' && e.message.includes(RESUME_NOTICE));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ fatal: false });
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe('done');
+  });
+
+  it('resume + 首轮 fatal + 降级轮也 fatal → 最终有 fatal:true error（来自第二轮），done 恰一次', async () => {
+    // 最多一轮 fallback：第二轮真实失败照常 fatal 透传（不降级、不重试）
+    const adapter = multiRunAdapter([
+      [{ type: 'error', message: 'session not found', fatal: true }, { type: 'done', exitCode: 3 }],
+      [{ type: 'error', message: 'rebuild boom', fatal: true }, { type: 'done', exitCode: 3 }],
+    ]);
+    registerExternalAdapter(adapter);
+    const events = await collect(makeCtx({ externalResume: { externalId: 'tok-stale', agentId: MODEL } }), HISTORY, '继续任务');
+
+    // 第一轮 fatal 已降级
+    expect(events.some((e) => e.type === 'error' && e.message === 'session not found' && e.fatal === true)).toBe(false);
+    // 第二轮 fatal 原样保留
+    const fatalErrors = events.filter((e) => e.type === 'error' && e.fatal === true);
+    expect(fatalErrors).toHaveLength(1);
+    expect(fatalErrors[0]).toMatchObject({ message: 'rebuild boom' });
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe('done');
   });
 });
 

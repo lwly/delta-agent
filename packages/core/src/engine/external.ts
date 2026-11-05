@@ -79,6 +79,8 @@ function buildResumeFallbackPrompt(history: ChatMessage[], input: string): strin
  * 会话续跑（§8）：ctx.externalResume 存在时把令牌作为 resumeSessionId 传给 adapter；
  * 首轮运行命中 isResumeTokenFailure 时自动重建（丢弃令牌，以 delta 历史摘要 + 本次
  * 输入为 prompt 重跑一轮，最多一轮 fallback，不无限重试），见 consumeAdapterRun。
+ * resume 路径首轮事件先缓冲后透传：降级时首轮 fatal error 降级为 fatal:false，
+ * 保证重建成功后整个 turn 不以 fatal 告终（headless 不记 failed）。
  */
 export async function* runExternalAgent(
   ctx: RunContext,
@@ -138,12 +140,35 @@ export async function* runExternalAgent(
   }
 
   try {
-    // 首轮：带 resume 令牌续跑（全新会话 resumeToken 为 undefined）
+    // 首轮：带 resume 令牌续跑（全新会话 resumeToken 为 undefined）。
+    // resume 路径（externalResume 存在）缓冲首轮事件：令牌失效降级时首轮上游 fatal error
+    // 必须降级为 fatal:false 再透传（AC-55-8——降级重建成功后 headless 不得因首轮 fatal
+    // 记 fatalMessage / failed 退出码）。失效场景首轮很快结束、事件极少，缓冲开销可忽略；
+    // 非 resume 场景完全不缓冲，逐字节透传行为不变。
     let resumeToken = ctx.externalResume?.externalId;
-    const first = yield* consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, resumeToken);
+    const buffered: AgentEvent[] = [];
+    let first: ExternalRunOutcome;
+    if (resumeToken === undefined) {
+      first = yield* consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, undefined);
+    } else {
+      const gen = consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, resumeToken);
+      for (;;) {
+        const next = await gen.next();
+        if (next.done) {
+          first = next.value;
+          break;
+        }
+        buffered.push(next.value);
+      }
+    }
 
     // 令牌失效降级（§8.4，最多一轮）：abort 不重建（用户已叫停）；判定谓词见函数注释
     if (!ctx.signal.aborted && isResumeTokenFailure(ctx.externalResume, first)) {
+      // 首轮上游 fatal error 降级为 fatal:false（保留原始 message 供用户定位）
+      for (const ev of buffered) {
+        if (ev.type === 'error' && ev.fatal) yield { type: 'error', message: ev.message, fatal: false };
+        else yield ev;
+      }
       yield { type: 'error', message: RESUME_FALLBACK_NOTICE, fatal: false };
       resumeToken = undefined; // 丢弃失效令牌重跑
       yield* consumeAdapterRun(
@@ -155,6 +180,9 @@ export async function* runExternalAgent(
         usageTotal,
         resumeToken,
       );
+    } else {
+      // 非失效（首轮成功 / abort / 无令牌判定不命中）：缓冲事件原样 flush
+      for (const ev of buffered) yield ev;
     }
 
     yield { type: 'done', usage: usageTotal };
