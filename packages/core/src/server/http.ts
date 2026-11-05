@@ -1,6 +1,6 @@
 /**
  * delta 本地 Web 服务（technical-design §8/§10）
- * - 纯本地部署：默认 127.0.0.1:7900，仅监听回环地址
+ * - 纯本地部署：仅监听回环地址；默认端口按形态错开——打包/托管 127.0.0.1:7902，本地开发后端（--dev）7900
  * - REST API：projects / sessions / messages / trash / search / abort / confirm / answer
  * - SSE：GET /api/sessions/:id/events 推送 HubEvent
  * - 静态托管：Vue 构建产物目录（webDistDir），SPA fallback 到 index.html

@@ -659,11 +659,12 @@ program
 
 program
   .command('serve')
-  .description('启动 Web 控制台本地服务（纯本地：默认 127.0.0.1:7900，仅监听回环地址）')
-  .option('--port <n>', '监听端口（默认 7900）', '7900')
+  .description('启动 Web 控制台本地服务（纯本地仅监听回环地址；托管形态默认 127.0.0.1:7902，--dev 本地开发后端默认 7900）')
+  .option('--dev', '本地开发后端形态（配合 vite dev 代理：默认端口 7900；打包/托管形态默认 7902，两形态端口错开可并行运行）')
+  .option('--port <n>', '监听端口（缺省：--dev 为 7900，否则 7902）')
   .option('--web-dist <dir>', 'Vue 构建产物目录（缺省用包内嵌 packages/web/dist）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
-  .action(async (opts: { port: string; webDist?: string; db?: string }) => {
+  .action(async (opts: { dev?: boolean; port?: string; webDist?: string; db?: string }) => {
     // Vue 构建产物候选：--web-dist > 包内嵌 cli/dist/web（npm 安装形态）> 仓库 packages/web/dist（开发形态）
     const distDir = path.dirname(fileURLToPath(import.meta.url));
     const webDist = [
@@ -671,7 +672,8 @@ program
       path.resolve(distDir, 'web'),
       path.resolve(distDir, '../../web/dist'),
     ].find((d) => d && fs.existsSync(path.join(d, 'index.html')));
-    const port = Number(opts.port) || 7900;
+    // F-56：打包/托管（7902）与本地开发后端（7900）默认端口错开——两形态可同时在线互不抢占
+    const port = Number(opts.port) || (opts.dev ? 7900 : 7902);
 
     // 组装编排已下移 core（createServeRuntime，桌面宿主共用同一工厂）；
     // CLI 形态差异：注册 cwd 为默认项目 + spawn cron 执行器（nodePath = process.execPath 由 core 内部缺省）

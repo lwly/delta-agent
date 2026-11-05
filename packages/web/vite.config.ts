@@ -4,9 +4,9 @@ import { promises as fsp } from 'node:fs';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 
-// 纯本地部署形态（2026-10-22 决议）：
-// - dev：vite dev server，/api 代理到 `delta serve`（127.0.0.1:7900）
-// - build：产物输出 dist/，由 `delta serve` 内嵌托管（SPA fallback index.html）
+// 纯本地部署形态（2026-10-22 决议；F-56 端口错开）：
+// - dev：vite dev server（7901），/api 代理到本地开发后端 `delta serve --dev`（127.0.0.1:7900）
+// - build：产物输出 dist/，由 `delta serve` 内嵌托管（SPA fallback index.html；托管形态默认 7902）
 
 /**
  * F-53（AC-53-5）静态资源预压缩：构建期对 ≥1KB 的文本类产物生成 .gz 副本（gzip -9）。
@@ -55,7 +55,7 @@ export default defineConfig({
   server: {
     port: 7901,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:7900', changeOrigin: true },
+      '/api': { target: 'http://127.0.0.1:7900', changeOrigin: true }, // 本地开发后端：delta serve --dev
     },
   },
   build: {

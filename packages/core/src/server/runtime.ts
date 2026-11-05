@@ -33,7 +33,7 @@ import { userConfigDir, FILES } from '../paths.js';
 import type { CronExecutor } from '../cron/runner.js';
 
 export interface ServeRuntimeOptions {
-  /** 监听端口（缺省 7900） */
+  /** 监听端口（缺省 7900；CLI serve 托管形态默认 7902 / --dev 形态 7900，桌面宿主传 0 随机避让） */
   port?: number;
   /** SQLite 路径（缺省 ~/.delta/agent.db，由 SessionService 内部决定） */
   dbPath?: string;
