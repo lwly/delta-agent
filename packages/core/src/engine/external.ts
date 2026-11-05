@@ -49,11 +49,25 @@ export async function* runExternalAgent(
     return;
   }
 
+  // 权限档位存于 PermissionState.policy.mode；缺省（未装配权限体系）= default
+  const permissionMode = ctx.toolContext.permissions?.policy.mode ?? 'default';
+
+  // 启动门禁（设计稿 §5.1）：plan 档要求上游具备只读能力。
+  // Tier A（ACP）内建 request_permission 逐次拦截，不受此限；Tier B/C 靠 permissionArgs.plan
+  // flags 降档，flags 为空说明上游没有只读档 → 拒绝启动（能力降级必须显式告知，不静默放行）。
+  if (permissionMode === 'plan' && adapter.spec.tier !== 'A' && adapter.spec.permissionArgs.plan.length === 0) {
+    yield {
+      type: 'error',
+      message: `external_no_plan_mode: 外部 agent ${adapter.spec.id} 不支持只读档，拒绝启动（plan 档）`,
+      fatal: true,
+    };
+    yield { type: 'done', usage: usageTotal };
+    return;
+  }
+
   // headless 按 turn 记 usage 需要 turn_start；外部会话单 prompt 单 turn
   yield { type: 'turn_start', turn: 1 };
 
-  // 权限档位存于 PermissionState.policy.mode；缺省（未装配权限体系）= default
-  const permissionMode = ctx.toolContext.permissions?.policy.mode ?? 'default';
   const stream = adapter.run({
     prompt: input,
     cwd: ctx.toolContext.projectRoot,
@@ -107,8 +121,47 @@ export async function* runExternalAgent(
           break;
         }
         case 'permission_request': {
+          // 权限三档映射（设计稿 §5.1）——与 PermissionState.check（tools/permissions.ts）同语义：
+          //   plan：只读自动放行、写/执行直接拒绝（不走确认流）；
+          //   default：会话记忆（allow_session）/ allowlist 已放行 → 自动 allow，否则走确认流；
+          //   yolo：全放行。
+          const permissions = ctx.toolContext.permissions;
+
+          // ── plan 档 ──
+          if (permissionMode === 'plan') {
+            // 只读类 kind（ACP toolCall.kind）自动放行，不弹确认卡。
+            // 依据：PermissionState.check 在 plan 档对只读工具（toolCapability === 'read'）
+            // 直接 { action: 'allow' }，从不走确认 —— 外部映射保持同语义。
+            if (ev.toolKind === 'read' || ev.toolKind === 'search' || ev.toolKind === 'think' || ev.toolKind === 'fetch') {
+              adapter.respondPermission?.(ev.id, 'allow');
+              break;
+            }
+            // 其余 kind（edit/delete/execute/move）及未知 kind 一律拒绝。
+            // 未知即拒（安全默认）：无法证明该请求只读，宁可拒绝也不放行写/执行类副作用。
+            adapter.respondPermission?.(ev.id, 'reject');
+            yield {
+              type: 'error',
+              message: `外部 agent 的 ${ev.tool} 请求在 plan 档被拒绝（写/执行类操作）`,
+              fatal: false,
+            };
+            break;
+          }
+
+          // ── yolo 档：全放行，不调 confirm、不发确认事件 ──
+          if (permissionMode === 'yolo') {
+            adapter.respondPermission?.(ev.id, 'allow');
+            break;
+          }
+
+          // ── default 档 ──
+          // 会话记忆（allow_session）或 allowlist 已含该工具 → 自动 allow（与 F-23 会话记忆语义一致）
+          if (permissions?.isSessionAllowed(ev.tool) || permissions?.isAllowlisted(ev.tool)) {
+            adapter.respondPermission?.(ev.id, 'allow');
+            break;
+          }
           // 确认卡 publish 由 hub 注入的 toolContext.confirm 负责（hub.ts 737 行），
-          // 这里不再重复产出 confirm_request 事件 —— 与 react 引擎同一路径
+          // 这里不再重复产出 confirm_request 事件 —— 与 react 引擎同一路径。
+          // headless 形态下 hub 注入的 confirm 自动 reject，default 档自然收敛为拒绝，无需特判。
           let args: Record<string, unknown> = {};
           try {
             args = JSON.parse(ev.argsJson) as Record<string, unknown>;
@@ -121,6 +174,11 @@ export async function* runExternalAgent(
             args,
             reason: '外部 agent 请求执行 ' + ev.tool,
           });
+          if (decision.kind === 'allow_session') {
+            // F-23 会话记忆：先记入 PermissionState 再回包（口径与 tools/registry.ts 一致——
+            // 记被请求的工具名），同工具后续请求在本会话内不再弹卡。
+            permissions?.allowSession(ev.tool);
+          }
           // ConfirmDecision 四值 → 回包三值：edit 视作 reject（外部 agent 无法回填编辑参数）
           const reply = decision.kind === 'allow' ? 'allow' : decision.kind === 'allow_session' ? 'allow_session' : 'reject';
           adapter.respondPermission?.(ev.id, reply);

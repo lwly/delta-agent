@@ -320,6 +320,8 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
           ? JSON.stringify(toolCall.rawInput)
           : '',
       options: options.map((o) => o.optionId ?? ''),
+      // ACP toolCall.kind 原样带出（read/edit/…），供映射引擎做 plan 档只读判定；缺失不填
+      ...(typeof toolCall.kind === 'string' && toolCall.kind ? { toolKind: toolCall.kind } : {}),
     });
   }
 

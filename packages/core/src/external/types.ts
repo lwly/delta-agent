@@ -29,7 +29,15 @@ export type ExternalEvent =
   | { type: 'thinking'; text: string }
   | { type: 'tool_use'; id: string; name: string; argsJson: string }
   | { type: 'tool_result'; id: string; ok: boolean; content: string }
-  | { type: 'permission_request'; id: string; tool: string; argsJson: string; options: string[] }
+  | {
+      type: 'permission_request';
+      id: string;
+      tool: string;
+      argsJson: string;
+      options: string[];
+      /** ACP toolCall.kind（read/edit/delete/move/search/execute/think/fetch/other）；Tier B/C 或未知时缺省 undefined */
+      toolKind?: string;
+    }
   | { type: 'plan'; steps: Array<{ title: string; status: string }> }
   | { type: 'usage'; input: number; output: number }
   | { type: 'external_session'; id: string } // 用于 --resume
