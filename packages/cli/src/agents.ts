@@ -26,6 +26,7 @@ export async function agentsAddCommand(opts: {
   command?: string;
   name?: string;
   description?: string;
+  model?: string;
   homeDir?: string;
 }): Promise<void> {
   try {
@@ -35,12 +36,14 @@ export async function agentsAddCommand(opts: {
         command: opts.command,
         displayName: opts.name,
         description: opts.description,
+        model: opts.model,
       },
       opts.homeDir,
     );
     console.log(`已注册外部 Agent：${entry.displayName ?? entry.id}`);
     console.log(`  id：${entry.id}`);
     console.log(`  命令：${entry.command}`);
+    if (entry.model) console.log(`  模型：${entry.model}`);
     if (entry.description) console.log(`  描述：${entry.description}`);
     console.log('下次探测将以该条目为准（manual 条目探测失败不移除）。');
   } catch (e) {
@@ -64,6 +67,7 @@ export async function agentsListCommand(opts: { homeDir?: string } = {}): Promis
     console.log(`${name}${mark}`);
     console.log(`  id：${e.id}  tier：${e.tier}  kind：${e.kind}  version：${e.version || '(未探测)'}`);
     console.log(`  命令：${e.command}`);
+    if (e.model) console.log(`  模型：${e.model}`);
     if (e.description) console.log(`  描述：${e.description}`);
   }
 }

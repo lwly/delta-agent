@@ -230,6 +230,8 @@ export interface ExternalAgentInfo {
   description?: string;
   /** F-56：模板展示名（探测命中时来自模板定义） */
   label?: string;
+  /** F-56：指定模型（注册时可选） */
+  model?: string;
 }
 
 /** F-56 向导第 1 步：内置模板条目（GET /api/external-agents/templates） */
@@ -912,6 +914,7 @@ export const api = {
     command?: string;
     displayName?: string;
     description?: string;
+    model?: string;
   }) => request<{ ok: boolean; entry: unknown }>('POST', '/api/external-agents', input),
   removeExternalAgent: (id: string) =>
     request<{ ok: boolean }>('DELETE', `/api/external-agents/${encodeURIComponent(id)}`),

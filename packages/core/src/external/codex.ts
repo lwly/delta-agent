@@ -131,7 +131,13 @@ export class CodexExternalAdapter implements ExternalAgentAdapter {
       // 'app-server' 子命令由本适配器按协议静态携带（kind 'app-server-jsonl' 的协议知识，
       // 不进 detect 探测层——与 stream-json 适配器自行组装 '-p/--output-format' 同原则）；
       // 测试 spec.args 指向 fixture 脚本时 fixture 忽略多余 argv。
-      args: [...this.spec.args, 'app-server', ...(this.spec.permissionArgs[req.permissionMode] ?? [])],
+      args: [
+        ...this.spec.args,
+        'app-server',
+        ...(this.spec.permissionArgs[req.permissionMode] ?? []),
+        // F-56：指定模型——app-server 无 --model flag，走 -c 配置覆盖（codex app-server --help 实测）
+        ...(this.spec.model ? ['-c', `model=${this.spec.model}`] : []),
+      ],
       cwd: req.cwd,
       envWhitelist: [...CODEX_ENV_WHITELIST],
       signal: req.signal,

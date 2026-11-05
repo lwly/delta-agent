@@ -448,11 +448,19 @@ agents
   .option('--command <command>', '可执行命令（绝对路径或 PATH 裸名；缺省 = 模板 executable）')
   .option('--name <name>', '显示名称（缺省 = 模板 label）')
   .option('--description <text>', '一句话描述（可选）')
+  .option('--model <model>', '指定模型（可选；如 glm-5.3 / provider/model，留空用 CLI 默认）')
   .action(
     async (
       templateId: string,
-      opts: { command?: string; name?: string; description?: string },
-    ) => agentsAddCommand({ templateId, command: opts.command, name: opts.name, description: opts.description }),
+      opts: { command?: string; name?: string; description?: string; model?: string },
+    ) =>
+      agentsAddCommand({
+        templateId,
+        command: opts.command,
+        name: opts.name,
+        description: opts.description,
+        model: opts.model,
+      }),
   );
 agents
   .command('list')

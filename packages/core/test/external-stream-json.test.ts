@@ -286,4 +286,14 @@ describe('StreamJsonExternalAdapter（F-55 Tier B：claude stream-json JSONL）'
     await runScenario(adapter, { lines: [] }, { permissionMode: 'plan' });
     expect(spawnedArgs(adapter)).toEqual(['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'plan']);
   });
+
+  it('F-56 指定模型：spec.model → 启动行追加 --model <model>（缺省不追加）', async () => {
+    const adapter = new StreamJsonExternalAdapter(makeSpec({ model: 'glm-5.3' }));
+    await runScenario(adapter, { lines: [] });
+    expect(spawnedArgs(adapter)).toEqual(['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--model', 'glm-5.3']);
+
+    const adapterNoModel = new StreamJsonExternalAdapter(makeSpec());
+    await runScenario(adapterNoModel, { lines: [] });
+    expect(spawnedArgs(adapterNoModel)).not.toContain('--model');
+  });
 });

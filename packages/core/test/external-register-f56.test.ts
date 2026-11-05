@@ -231,6 +231,59 @@ describe('探测合并（AC-56-5：手动优先、不移除、不覆盖手动字
   });
 });
 
+describe('F-56 指定模型（model 参数）', () => {
+  it('upsert 携带 model → external.json 条目含 model；再注册不带 model → 清除', () => {
+    const withModel = upsertManualEntry(
+      { templateId: 'cli:codebuddy', command: '/a/cb', model: 'glm-5.3' },
+      home,
+    );
+    expect(withModel.model).toBe('glm-5.3');
+    expect(readExternalAgentsCache(home)[0]!.model).toBe('glm-5.3');
+    const cleared = upsertManualEntry({ templateId: 'cli:codebuddy', command: '/a/cb' }, home);
+    expect(cleared.model).toBeUndefined();
+    expect(readExternalAgentsCache(home)[0]!.model).toBeUndefined();
+  });
+
+  it('model 超长 → ManualRegisterError too_long', () => {
+    expect(() => upsertManualEntry({ templateId: 'cli:codebuddy', model: 'x'.repeat(101) }, home)).toThrow(
+      ManualRegisterError,
+    );
+  });
+
+  it('detectedToSpec 模型 flag 放置：codebuddy after（--acp 后）、opencode before（-m 在 acp 子命令前）、claude 走 spec.model', () => {
+    const byId = (id: string) => KNOWN_AGENTS.find((d) => d.id === id)!;
+    const cb = detectedToSpec({ def: byId('cli:codebuddy'), command: '/cb', version: 'v', source: 'manual', model: 'glm-5.3' });
+    expect(cb.args).toEqual(['--acp', '--model', 'glm-5.3']);
+    expect(cb.model).toBe('glm-5.3');
+    const oc = detectedToSpec({ def: byId('cli:opencode'), command: '/oc', version: 'v', source: 'manual', model: 'anthropic/claude-sonnet-4' });
+    // opencode 的 -m 是根命令全局 flag，必须在 acp 子命令之前
+    expect(oc.args).toEqual(['-m', 'anthropic/claude-sonnet-4', 'acp']);
+    const cl = detectedToSpec({ def: byId('cli:claude-code'), command: '/claude', version: 'v', source: 'manual', model: 'sonnet' });
+    // stream-json 模板不设 modelArgs：模型 flag 由适配器按 spec.model 组装，args 不携带
+    expect(cl.args).toEqual([]);
+    expect(cl.model).toBe('sonnet');
+  });
+
+  itPosix('探测合并：manual 条目 probe 命中后 model 沿用既有条目（探测不覆盖）', async () => {
+    const wrapper = writeWrapper('cb-model', '2.171.0');
+    writeExternalAgentsCache([manualEntry(wrapper, { model: 'glm-5.3' })], home);
+    const detected = await detectExternalAgents({ homeDir: home, probePathEnv: '' });
+    const hit = detected.find((d) => d.def.id === 'cli:codebuddy')!;
+    expect(hit.model).toBe('glm-5.3');
+    const cached = readExternalAgentsCache(home).find((e) => e.id === 'cli:codebuddy')!;
+    expect(cached.model).toBe('glm-5.3');
+    expect(cached.version).toBe('2.171.0'); // probe 刷新
+  });
+
+  itPosix('ensureExternalAdapters：codebuddy manual 条目带 model → ACP 适配器 spec.args 含模型 flag', async () => {
+    const wrapper = writeWrapper('cb-model2', '2.171.0');
+    writeExternalAgentsCache([manualEntry(wrapper, { model: 'glm-5.3' })], home);
+    await ensureExternalAdapters({ homeDir: home, probePathEnv: '' });
+    const adapter = resolveExternalAdapter('cli:codebuddy')!();
+    expect(adapter.spec.args).toEqual(['--acp', '--model', 'glm-5.3']);
+  });
+});
+
 describe('适配器分派（F-56）', () => {
   itPosix('codebuddy 手动条目 → AcpExternalAdapter 工厂，spec.args 含 --acp', async () => {
     const wrapper = writeWrapper('cb2', '2.171.0');

@@ -27,7 +27,7 @@ afterEach(async () => {
   await rm(tmp, { recursive: true, force: true });
 });
 
-function makeSpec(): ExternalAgentSpec {
+function makeSpec(extra: Partial<ExternalAgentSpec> = {}): ExternalAgentSpec {
   return {
     id: 'cli:codex',
     kind: 'app-server-jsonl',
@@ -38,6 +38,7 @@ function makeSpec(): ExternalAgentSpec {
     version: 'fake',
     // fixture 无权限 flags 语义，三档全空
     permissionArgs: { plan: [], default: [], yolo: [] },
+    ...extra,
   };
 }
 
@@ -392,6 +393,18 @@ describe('CodexExternalAdapter（F-55 Tier C：app-server v2 JSON-RPC over stdio
     expect(spec.mcpArgs).toBeUndefined(); // P3 不做 codex MCP 透传
   });
 });
+
+it('F-56 指定模型：spec.model → 启动行追加 -c model=<model>（app-server 无 --model flag，走 config 覆盖）', async () => {
+    // argv 回显 fixture：stderr 输出完整 argv 后退出（fake-codex.mjs 不透传 argv，这里内联）
+    const dumpPath = path.join(tmp, 'argv-dump.mjs');
+    await writeFile(dumpPath, `process.stderr.write('[argv] ' + JSON.stringify(process.argv.slice(2)) + '\\n');\n`);
+    const adapter = new CodexExternalAdapter(makeSpec({ args: [dumpPath], model: 'gpt-5.2' }));
+    for await (const _ev of startScenario(adapter, { steps: [] })) break;
+    const line = adapter.stderrTail().find((l) => l.startsWith('[argv] '));
+    expect(line).toBeDefined();
+    const argv = JSON.parse(line!.slice('[argv] '.length)) as string[];
+    expect(argv).toEqual(['app-server', '-c', 'model=gpt-5.2']);
+  });
 
 /** 审批回显收集：跑场景，respondPermission(reply) 应答，返回 permission_request 与回显 text */
 async function collectApprovalEcho(

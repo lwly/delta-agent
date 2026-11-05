@@ -47,6 +47,12 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
   description: string;
   /** 协议入口参数（adapter 组装启动行时前置：cursor/opencode ['acp']、codebuddy ['--acp']；探测层不做协议知识） */
   protocolArgs?: string[];
+  /**
+   * F-56 指定模型的 flag 形态与放置位置（模型 flag 因 CLI 而异，且 opencode 的 -m 必须在
+   * acp 子命令之前）——before = protocolArgs 之前，after = 之后。stream-json/app-server-jsonl
+   * 模板不设（模型 flag 是协议知识，由适配器按 spec.model 自行组装）。
+   */
+  modelArgs?: (model: string) => { before?: string[]; after?: string[] };
 };
 
 /**
@@ -106,6 +112,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     label: 'CodeBuddy Code',
     description: '腾讯 CodeBuddy CLI，--acp stdio ACP 协议（Tier A）',
     protocolArgs: ['--acp'],
+    modelArgs: (m) => ({ after: ['--model', m] }),
     probeArgs: ['--version'],
     loginStateFiles: ['.codebuddy'],
     permissionArgs: {
@@ -124,6 +131,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     label: 'Cursor CLI',
     description: 'Cursor Agent CLI，acp 子命令 stdio ACP 协议（Tier A）',
     protocolArgs: ['acp'],
+    modelArgs: (m) => ({ after: ['--model', m] }),
     probeArgs: ['--version'],
     loginStateFiles: ['.cursor'],
     // agent/plan/ask 三模式由 ACP 会话内协商（无启动 flags），permissionArgs 留空
@@ -138,6 +146,7 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     label: 'OpenCode',
     description: 'OpenCode CLI，acp 子命令 stdio ACP 协议（Tier A）',
     protocolArgs: ['acp'],
+    modelArgs: (m) => ({ before: ['-m', m] }),
     probeArgs: ['--version'],
     loginStateFiles: ['.local/share/opencode/auth.json', '.local/share/opencode', '.config/opencode'],
     permissionArgs: { plan: [], default: [], yolo: [] },
@@ -172,6 +181,8 @@ export interface DetectedAgent {
   manual?: boolean;
   displayName?: string;
   description?: string;
+  /** F-56：指定模型（手动条目携带；detectedToSpec 据此组装模型 flag） */
+  model?: string;
 }
 
 export interface DetectOptions {
@@ -198,6 +209,8 @@ export interface ExternalAgentCacheEntry {
   displayName?: string;
   /** F-56：手动注册的一句话描述（向导第 2 步「描述」字段） */
   description?: string;
+  /** F-56：指定模型（探测缓存条目也可携带；探测写回沿用既有值） */
+  model?: string;
 }
 
 /** 外部 agent 显式路径环境变量名：id `cli:claude-code` → `DELTA_EXTERNAL_CLAUDE_CODE_PATH` */
@@ -304,6 +317,7 @@ async function resolveCommand(
       manual: true,
       displayName: manualEntry.displayName,
       description: manualEntry.description,
+      model: manualEntry.model,
     };
     if (version !== null) return { def, command: manualEntry.command, version, source: 'manual', ...extras };
     warn(
@@ -344,6 +358,7 @@ function whitelistEntry(raw: unknown): ExternalAgentCacheEntry | null {
     ...(rec.manual === true ? { manual: true } : {}),
     ...(typeof rec.displayName === 'string' && rec.displayName !== '' ? { displayName: rec.displayName } : {}),
     ...(typeof rec.description === 'string' && rec.description !== '' ? { description: rec.description } : {}),
+    ...(typeof rec.model === 'string' && rec.model !== '' ? { model: rec.model } : {}),
   };
 }
 
@@ -407,6 +422,8 @@ export interface ManualRegisterInput {
   displayName?: string;
   /** 一句话描述（可选） */
   description?: string;
+  /** 指定模型（可选；如 claude 的 sonnet / opencode 的 provider/model） */
+  model?: string;
 }
 
 /** 手动注册校验失败错误码（http 层映射 400，UI 直接展示） */
@@ -421,6 +438,7 @@ export class ManualRegisterError extends Error {
 
 const DISPLAY_NAME_MAX = 100;
 const DESCRIPTION_MAX = 500;
+const MODEL_MAX = 100;
 
 /** 模板查表：id → KnownAgentDef（手动注册/CLI/HTTP 共用） */
 export function findKnownAgent(id: string): KnownAgentDef | undefined {
@@ -445,6 +463,10 @@ export function upsertManualEntry(input: ManualRegisterInput, homeDir?: string):
       `displayName ≤ ${DISPLAY_NAME_MAX} 字、description ≤ ${DESCRIPTION_MAX} 字`,
     );
   }
+  const model = (input.model ?? '').trim();
+  if (model.length > MODEL_MAX) {
+    throw new ManualRegisterError('too_long', `model ≤ ${MODEL_MAX} 字`);
+  }
   const agents = readExternalAgentsCache(homeDir);
   const idx = agents.findIndex((e) => e.id === def.id);
   const entry: ExternalAgentCacheEntry = {
@@ -455,14 +477,27 @@ export function upsertManualEntry(input: ManualRegisterInput, homeDir?: string):
     tier: def.tier,
     enabled: true,
     lastProbeAt: idx >= 0 && agents[idx].manual === true ? agents[idx].lastProbeAt : '',
-    manual: true,
-    displayName,
-    description,
+    ...buildManualFields({ displayName, description, model }),
   };
   if (idx >= 0) agents[idx] = entry;
   else agents.push(entry);
   writeExternalAgentsCache(agents, homeDir);
   return entry;
+}
+
+/** 手动条目构建（upsert 与 detect 写回共用：model 空串 = 清除，条件展开保持旧条目键形状） */
+function buildManualFields(input: { displayName?: string; description?: string; model?: string }): {
+  manual: true;
+  displayName?: string;
+  description?: string;
+  model?: string;
+} {
+  return {
+    manual: true,
+    ...(input.displayName && input.displayName !== '' ? { displayName: input.displayName } : {}),
+    ...(input.description && input.description !== '' ? { description: input.description } : {}),
+    ...(input.model && input.model !== '' ? { model: input.model } : {}),
+  };
 }
 
 /** 移除手动注册条目（仅 manual=true 可移除；探测缓存条目由探测自维护）；不存在返回 false */
@@ -477,16 +512,25 @@ export function removeManualEntry(id: string, homeDir?: string): boolean {
 
 /** DetectedAgent → ExternalAgentSpec（纯函数，Task 10 的 stream-json 适配器消费） */
 export function detectedToSpec(detected: DetectedAgent): ExternalAgentSpec {
+  const model = detected.model;
+  const modelFrag = model !== undefined && detected.def.modelArgs ? detected.def.modelArgs(model) : undefined;
   return {
     id: detected.def.id,
     kind: detected.def.kind,
     command: detected.command,
     // args 是运行期基参数：stream-json 适配器（Task 10）按协议自行组装 -p/--output-format 等，
     // detect 阶段不预填，避免协议知识泄漏进探测层；F-56：protocolArgs（acp 子命令/flag 等
-    // 模板级协议入口）是用户注册时可见的固定形态，随 def 透传
-    args: [...(detected.def.protocolArgs ?? [])],
+    // 模板级协议入口）是用户注册时可见的固定形态，随 def 透传；
+    // F-56 指定模型：ACP 系模板经 modelArgs 折叠进 args（opencode 的 -m 须在 acp 之前），
+    // stream-json/app-server-jsonl 模板不设 modelArgs——模型 flag 由适配器按 spec.model 组装
+    args: [
+      ...(modelFrag?.before ?? []),
+      ...(detected.def.protocolArgs ?? []),
+      ...(modelFrag?.after ?? []),
+    ],
     tier: detected.def.tier,
     version: detected.version,
+    model,
     permissionArgs: detected.def.permissionArgs,
     resumeArgs: detected.def.resumeArgs,
     mcpArgs: detected.def.mcpArgs,
@@ -551,8 +595,8 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
     const idx = working.findIndex((e) => e.id === def.id);
     if (hit !== null) {
       detected.push(hit);
-      // F-56：手动注册三字段只增不抹——探测命中刷新 command/version/lastProbeAt，
-      // 但 manual/displayName/description 一律沿用既有条目（AC-56-5：探测不覆盖手动条目）
+      // F-56：手动注册字段只增不抹——探测命中刷新 command/version/lastProbeAt，
+      // manual/displayName/description/model 一律沿用既有条目（AC-56-5：探测不覆盖手动条目）
       const prev = idx >= 0 ? working[idx] : undefined;
       const entry: ExternalAgentCacheEntry = {
         id: def.id,
@@ -562,9 +606,10 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
         tier: def.tier,
         enabled: true,
         lastProbeAt: new Date().toISOString(),
-        manual: prev?.manual === true,
-        displayName: prev?.displayName,
-        description: prev?.description,
+        ...(prev?.manual === true ? { manual: true } : {}),
+        ...(prev?.displayName ? { displayName: prev.displayName } : {}),
+        ...(prev?.description ? { description: prev.description } : {}),
+        ...(prev?.model ? { model: prev.model } : {}),
       };
       if (idx >= 0) working[idx] = entry;
       else working.push(entry);

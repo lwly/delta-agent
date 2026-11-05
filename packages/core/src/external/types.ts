@@ -18,6 +18,8 @@ export interface ExternalAgentSpec {
   args: string[];
   tier: ExternalTier;
   version: string;
+  /** F-56：指定模型（external.json 手动条目/缓存携带；ACP 系折叠进 args，B/C 适配器自行组装 flag） */
+  model?: string;
   /** 三档权限对应的追加 flags（plan 档必须为空数组或只读 flags） */
   permissionArgs: { plan: string[]; default: string[]; yolo: string[] };
   resumeArgs?: (sessionId: string) => string[];

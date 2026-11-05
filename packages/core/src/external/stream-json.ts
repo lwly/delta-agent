@@ -101,6 +101,8 @@ export class StreamJsonExternalAdapter implements ExternalAgentAdapter {
         req.prompt,
         ...STREAM_JSON_ARGS,
         ...(this.spec.permissionArgs[req.permissionMode] ?? []),
+        // F-56：指定模型（spec.model 来自 external.json 手动条目；claude --help 实测 --model flag）
+        ...(this.spec.model ? ['--model', this.spec.model] : []),
         // MCP 透传（设计稿 §6）：engine 生成临时配置文件后经 mcpArgs 展开传入
         ...(req.mcpConfigPath && this.spec.mcpArgs ? this.spec.mcpArgs(req.mcpConfigPath) : []),
         ...(req.resumeSessionId && this.spec.resumeArgs ? this.spec.resumeArgs(req.resumeSessionId) : []),

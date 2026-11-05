@@ -54,6 +54,7 @@ const picked = ref<ExternalAgentTemplate | null>(null);
 const formName = ref('');
 const formCommand = ref('');
 const formDesc = ref('');
+const formModel = ref('');
 const submitting = ref(false);
 const formError = ref('');
 
@@ -79,6 +80,7 @@ function pickTemplate(t: ExternalAgentTemplate) {
   formName.value = t.label;
   formCommand.value = t.executable;
   formDesc.value = '';
+  formModel.value = '';
   formError.value = '';
   wizardStep.value = 2;
 }
@@ -93,6 +95,7 @@ async function submitRegister() {
       command: formCommand.value,
       displayName: formName.value,
       description: formDesc.value,
+      model: formModel.value,
     });
     wizardOpen.value = false;
     await load();
@@ -138,6 +141,7 @@ async function removeManual(a: ExternalAgentInfo) {
           <span class="agent-cmd mono" :title="a.command">{{ a.command }}</span>
           <span class="agent-ver">{{ a.version }}</span>
           <span class="tag tier" :title="a.kind === 'reserved' ? 'Tier D：协议适配预留，暂不可执行' : `Tier ${a.tier} 协议`">Tier {{ a.tier }}</span>
+          <span v-if="a.model" class="tag model" :title="`指定模型：${a.model}`">⚙ {{ a.model }}</span>
           <span class="tag src" :title="`来源：${a.command}`">{{ sourceLabel(a.source) }}</span>
           <button v-if="a.manual" class="btn danger" title="移除手动注册条目" @click="removeManual(a)">移除</button>
         </div>
@@ -198,6 +202,11 @@ async function removeManual(a: ExternalAgentInfo) {
           <label for="ext-desc">描述（可选）</label>
           <textarea id="ext-desc" v-model="formDesc" rows="2" maxlength="500" placeholder="这个 agent 用来做什么"></textarea>
         </div>
+        <div class="field">
+          <label for="ext-model">模型（可选）</label>
+          <input id="ext-model" v-model="formModel" type="text" class="mono" placeholder="该 agent 使用的模型 ID" maxlength="100" />
+          <p class="field-hint">留空 = 用该 CLI 的默认模型。claude/codebuddy 为 --model，opencode 为 -m（provider/model），codex 走 -c model=…。</p>
+        </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <div class="form-ops">
           <button class="btn" @click="wizardStep = 1">← 上一步</button>
@@ -237,6 +246,7 @@ async function removeManual(a: ExternalAgentInfo) {
 .agent-ver { font-size: 12px; color: var(--text); }
 .tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; }
 .tag.tier { background: var(--accent-soft); color: var(--accent); }
+.tag.model { background: var(--bg-hover); color: var(--accent); }
 .tag.src { background: var(--bg-hover); color: var(--text-dim); }
 
 .row-caps { display: flex; gap: 14px; flex-wrap: wrap; }

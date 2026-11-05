@@ -1243,6 +1243,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
             command: body?.command === undefined ? undefined : String(body.command),
             displayName: body?.displayName === undefined ? undefined : String(body.displayName),
             description: body?.description === undefined ? undefined : String(body.description),
+            model: body?.model === undefined ? undefined : String(body.model),
           });
           return json(res, 200, { ok: true, entry });
         } catch (e) {
@@ -1279,6 +1280,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
             manual: d.manual === true,
             displayName: d.displayName,
             description: d.description,
+            model: d.model,
             label: d.def.label,
           })),
         });
