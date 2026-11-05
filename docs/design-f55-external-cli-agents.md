@@ -309,4 +309,9 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
 
 | Agent | 协议 / spec 版本 | `initialize` capability 字段 | `session/update` chunk 枚举 | `request_permission` option 形状 | `session/cancel` 语义 | CLI flags 实测 | 实测日期 |
 | ----- | -------------- | -------------------------- | -------------------------- | ------------------------------ | -------------------- | ------------- | ------- |
-| （待 P1 实测回填） | | | | | | | |
+| （fixture：fake-acp-agent.mjs） | ACP / protocolVersion 1（JSON-RPC 2.0 over stdio，换行分隔） | 已验证：initialize→agentCapabilities 协商（版本不一致宽容处理） | agent_message_chunk / agent_thought_chunk / tool_call / tool_call_update / plan，未知值忽略 | `{optionId, name?, kind: allow_once\|allow_always\|reject_once\|reject_always}`，回 `{outcome:{outcome:'selected', optionId}}` | 通知形式 `{sessionId}`，agent 停止后自然退出 | N/A（fixture） | 2026-11-05 |
+| Claude Code 2.1.168 | 无原生 ACP 标志（`claude --help` 无 acp 项）——需 Zed `claude-code-acp` 包装器方可作为 Tier A 接入 | 待真机实测 | 待真机实测 | 待真机实测 | 待真机实测 | 待真机实测 | 2026-11-05（探测） |
+| cursor-agent（本机） | 二进制损坏（dyld Symbol not found），本机不可测 | — | — | — | — | — | 2026-11-05（探测） |
+| codex-cli 0.162.0-alpha.17.2 | `app-server` 子命令存在（Tier C，P3 范围） | — | — | — | — | 待 P3 实测 | 2026-11-05（探测） |
+
+> 真机端到端 smoke（P1 出口标准「至少 1 个真实 ACP agent」）因本机无可用 ACP 原生 agent 而未执行；fixture 全场景覆盖协议语义。待用户机器具备条件（安装 claude-code-acp 或其他 ACP agent）后按本表回填。
