@@ -19,6 +19,8 @@ import { spawnExternal } from './spawn.js';
 import { registerExternalAdapterFactory } from './registry.js';
 import { StreamJsonExternalAdapter } from './stream-json.js';
 import { CodexExternalAdapter } from './codex.js';
+import { AcpExternalAdapter } from './acp.js';
+import { ReservedExternalAdapter } from './reserved.js';
 import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalTier } from './types.js';
 
 /** 探测超时（设计稿 §10：`command --version` 超时 3s，失败静默跳过） */
@@ -38,6 +40,13 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
   probeArgs: string[];
   /** 登录态存在性检查文件（相对 HOME；只判断存在，不解析内容，§10） */
   loginStateFiles: string[];
+  // ── F-56 手动注册向导字段 ──
+  /** 模板展示名（Web 向导卡片 / 手动条目 displayName 缺省值） */
+  label: string;
+  /** 模板一句话描述（Web 向导卡片） */
+  description: string;
+  /** 协议入口参数（adapter 组装启动行时前置：cursor/opencode ['acp']、codebuddy ['--acp']；探测层不做协议知识） */
+  protocolArgs?: string[];
 };
 
 /**
@@ -50,6 +59,8 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     kind: 'stream-json-jsonl',
     tier: 'B',
     executable: 'claude',
+    label: 'Claude Code',
+    description: 'Anthropic 官方 CLI，stream-json 双向协议（Tier B）',
     probeArgs: ['--version'],
     loginStateFiles: ['.claude.json'],
     permissionArgs: {
@@ -67,6 +78,8 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     kind: 'app-server-jsonl',
     tier: 'C',
     executable: 'codex',
+    label: 'Codex CLI',
+    description: 'OpenAI Codex CLI，app-server v2 JSON-RPC 协议（Tier C）',
     probeArgs: ['--version'],
     // 弱判定：'.codex/auth.json' 是正式登录态文件；'.codex' 目录存在只说明「曾初始化过」
     // （auth.json 可能不存在但目录在）。任一存在即视为已登录，不解析内容（§10 只判存在性）。
@@ -83,19 +96,82 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     // resume 走协议 thread/resume（threadId），不经 CLI flags——resumeArgs 不设
     // MCP 透传：P3 不做（schema 有 config/mcpServer 等方法，P4+ 再议）——mcpArgs 不设
   },
+  // ── F-56 新增 4 个模板（PASI-87；协议矩阵经 2026-11-05 本机实测 + 官方文档核实）──
+  {
+    // CodeBuddy Code：`--acp` 以 ndJsonStream 在 stdio 上跑 ACP（--help 实测），Tier A 复用 ACP 适配器
+    id: 'cli:codebuddy',
+    kind: 'acp',
+    tier: 'A',
+    executable: 'codebuddy',
+    label: 'CodeBuddy Code',
+    description: '腾讯 CodeBuddy CLI，--acp stdio ACP 协议（Tier A）',
+    protocolArgs: ['--acp'],
+    probeArgs: ['--version'],
+    loginStateFiles: ['.codebuddy'],
+    permissionArgs: {
+      // --permission-mode plan 实测存在（--help）
+      plan: ['--permission-mode', 'plan'],
+      default: [],
+      yolo: ['--dangerously-skip-permissions'],
+    },
+  },
+  {
+    // cursor-agent：`cursor-agent acp` 子命令（官方文档 cursor.com/docs/cli/acp，JSON-RPC 2.0 over stdio）
+    id: 'cli:cursor-agent',
+    kind: 'acp',
+    tier: 'A',
+    executable: 'cursor-agent',
+    label: 'Cursor CLI',
+    description: 'Cursor Agent CLI，acp 子命令 stdio ACP 协议（Tier A）',
+    protocolArgs: ['acp'],
+    probeArgs: ['--version'],
+    loginStateFiles: ['.cursor'],
+    // agent/plan/ask 三模式由 ACP 会话内协商（无启动 flags），permissionArgs 留空
+    permissionArgs: { plan: [], default: [], yolo: [] },
+  },
+  {
+    // opencode：`opencode acp` 子命令（官方文档 opencode.ai/docs/acp，JSON-RPC over stdio 协议 v1）
+    id: 'cli:opencode',
+    kind: 'acp',
+    tier: 'A',
+    executable: 'opencode',
+    label: 'OpenCode',
+    description: 'OpenCode CLI，acp 子命令 stdio ACP 协议（Tier A）',
+    protocolArgs: ['acp'],
+    probeArgs: ['--version'],
+    loginStateFiles: ['.local/share/opencode/auth.json', '.local/share/opencode', '.config/opencode'],
+    permissionArgs: { plan: [], default: [], yolo: [] },
+  },
+  {
+    // dsh（DeepSeek Harness）：cordis 插件栈启动器，无标准 ACP/stream-json 入口——Tier D 预留档，
+    // 可注册/可探测，启动时 ReservedExternalAdapter 报 external_unsupported_protocol（AC-56-4）
+    id: 'cli:dsh',
+    kind: 'reserved',
+    tier: 'D',
+    executable: 'dsh',
+    label: 'DSH',
+    description: 'DeepSeek Harness（cordis 插件栈）——注册与探测可用，协议适配预留（Tier D）',
+    probeArgs: ['--version'],
+    loginStateFiles: ['.dsh'],
+    permissionArgs: { plan: [], default: [], yolo: [] },
+  },
 ];
 
-/** 优先级来源（探测命中顺序，供 doctor/UI 展示与测试断言） */
-export type DetectSource = 'env' | 'cache' | 'path';
+/** 优先级来源（探测命中顺序，供 doctor/UI 展示与测试断言）；'manual' = F-56 手动注册条目 */
+export type DetectSource = 'env' | 'manual' | 'cache' | 'path';
 
 /** detectExternalAgents 的单条产出 */
 export interface DetectedAgent {
   def: KnownAgentDef;
   /** 探测到的可执行路径（env/缓存路径原样；PATH 命中为绝对路径候选） */
   command: string;
-  /** probe 输出的版本串（首个非空 stdout 行） */
+  /** probe 输出的版本串（首个非空 stdout 行）；手动条目 probe 失败时为缓存中的过期版本串 */
   version: string;
   source: DetectSource;
+  /** F-56：手动注册条目附加信息（manual 命中时带出，供 UI 展示） */
+  manual?: boolean;
+  displayName?: string;
+  description?: string;
 }
 
 export interface DetectOptions {
@@ -107,7 +183,7 @@ export interface DetectOptions {
   probePathEnv?: string;
 }
 
-/** external.json 中单个 agent 条目（固定 schema，AC-55-9 白名单字段） */
+/** external.json 中单个 agent 条目（固定 schema；F-56 扩展手动注册字段，仍为白名单制，AC-55-9） */
 export interface ExternalAgentCacheEntry {
   id: string;
   kind: string;
@@ -116,6 +192,12 @@ export interface ExternalAgentCacheEntry {
   tier: ExternalTier;
   enabled: boolean;
   lastProbeAt: string;
+  /** F-56：手动注册条目（探测不覆盖、探测失败不移除，AC-56-5） */
+  manual?: boolean;
+  /** F-56：手动注册的展示名（模型选择器/面板优先展示） */
+  displayName?: string;
+  /** F-56：手动注册的一句话描述（向导第 2 步「描述」字段） */
+  description?: string;
 }
 
 /** 外部 agent 显式路径环境变量名：id `cli:claude-code` → `DELTA_EXTERNAL_CLAUDE_CODE_PATH` */
@@ -190,10 +272,13 @@ function tryPaths(def: KnownAgentDef, pathEnv?: string): string[] {
 }
 
 /**
- * 三级优先级解析（§10）：env 显式路径 > external.json 缓存（enabled=true）> PATH 探测。
- * 命中 1/2 仍要 probe 拿 version：
+ * 四级优先级解析（§10 + F-56）：env 显式路径 > 手动注册条目（manual=true）> external.json
+ * 探测缓存（enabled=true）> PATH 探测。
+ * 命中仍要 probe 拿 version：
  *   - env 显式路径 probe 失败 → warn 并放弃该 agent（用户显式指定即明确意图，不降级 PATH）；
- *   - 缓存条目 probe 失败 → warn 并降级尝试 PATH（缓存只是上次探测的快照，非显式意图）。
+ *   - 手动条目 probe 失败 → warn 并以缓存 version 产出 DetectedAgent（手动注册 = 明确意图：
+ *     AC-56-5 探测不覆盖/不移除手动条目；version 可能过期，注册时未探测成功即为空串）；
+ *   - 探测缓存条目 probe 失败 → warn 并降级尝试 PATH（缓存只是上次探测的快照，非显式意图）。
  */
 async function resolveCommand(
   def: KnownAgentDef,
@@ -211,7 +296,23 @@ async function resolveCommand(
     return null;
   }
 
-  // 2) external.json 缓存
+  // 2) 手动注册条目（F-56）：显式意图，probe 失败不移除、不降级，以缓存 version 呈现
+  const manualEntry = o.cached.find((e) => e.id === def.id && e.manual === true);
+  if (manualEntry?.command) {
+    const version = await probeAgent(def, manualEntry.command, { probeTimeoutMs: o.probeTimeoutMs });
+    const extras = {
+      manual: true,
+      displayName: manualEntry.displayName,
+      description: manualEntry.description,
+    };
+    if (version !== null) return { def, command: manualEntry.command, version, source: 'manual', ...extras };
+    warn(
+      `外部 agent ${def.id}：手动注册条目探测失败（command=${manualEntry.command}），保留条目并沿用上次版本串「${manualEntry.version}」`,
+    );
+    return { def, command: manualEntry.command, version: manualEntry.version, source: 'manual', ...extras };
+  }
+
+  // 3) external.json 探测缓存
   const cachedEntry = o.cached.find((e) => e.id === def.id && e.enabled);
   if (cachedEntry?.command) {
     const version = await probeAgent(def, cachedEntry.command, { probeTimeoutMs: o.probeTimeoutMs });
@@ -219,7 +320,7 @@ async function resolveCommand(
     warn(`外部 agent ${def.id}：external.json 缓存条目失效（command=${cachedEntry.command}），降级尝试 PATH 探测`);
   }
 
-  // 3) PATH 探测（静默：探测失败是常态，不 warn）
+  // 4) PATH 探测（静默：探测失败是常态，不 warn）
   for (const candidate of tryPaths(def, o.probePathEnv)) {
     const version = await probeAgent(def, candidate, { probeTimeoutMs: o.probeTimeoutMs });
     if (version !== null) return { def, command: candidate, version, source: 'path' };
@@ -227,13 +328,11 @@ async function resolveCommand(
   return null;
 }
 
-/** AC-55-9 白名单：external.json 固定 schema 字段，任何外部注入的额外字段（token/key/secret）一律丢弃 */
-const CACHE_FIELDS = ['id', 'kind', 'command', 'version', 'tier', 'enabled', 'lastProbeAt'] as const;
-
 function whitelistEntry(raw: unknown): ExternalAgentCacheEntry | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const rec = raw as Record<string, unknown>;
   if (typeof rec.id !== 'string' || typeof rec.command !== 'string') return null;
+  // F-56 三字段条件展开：无手动信息的条目回读形状与 F-55 完全一致（键不增），旧缓存文件零迁移
   return {
     id: rec.id,
     kind: typeof rec.kind === 'string' ? rec.kind : 'stream-json-jsonl',
@@ -242,6 +341,9 @@ function whitelistEntry(raw: unknown): ExternalAgentCacheEntry | null {
     tier: (typeof rec.tier === 'string' ? rec.tier : 'B') as ExternalTier,
     enabled: rec.enabled === true,
     lastProbeAt: typeof rec.lastProbeAt === 'string' ? rec.lastProbeAt : '',
+    ...(rec.manual === true ? { manual: true } : {}),
+    ...(typeof rec.displayName === 'string' && rec.displayName !== '' ? { displayName: rec.displayName } : {}),
+    ...(typeof rec.description === 'string' && rec.description !== '' ? { description: rec.description } : {}),
   };
 }
 
@@ -293,6 +395,86 @@ export function checkLoginState(def: KnownAgentDef, homeDir: string = os.homedir
   return def.loginStateFiles.some((f) => fs.existsSync(path.join(homeDir, f)));
 }
 
+// ── F-56 手动注册（PASI-87）：模板查表 + upsert/remove ──────────────────────────
+
+/** 手动注册输入（Web 向导第 2 步 / CLI agents add 的载荷） */
+export interface ManualRegisterInput {
+  /** 模板 id（必须在 KNOWN_AGENTS 中，决定 kind/tier/permissionArgs 等协议元数据） */
+  templateId: string;
+  /** 可执行命令（绝对路径或 PATH 裸名；缺省 = 模板 executable） */
+  command?: string;
+  /** 展示名（缺省 = 模板 label） */
+  displayName?: string;
+  /** 一句话描述（可选） */
+  description?: string;
+}
+
+/** 手动注册校验失败错误码（http 层映射 400，UI 直接展示） */
+export class ManualRegisterError extends Error {
+  constructor(
+    public readonly code: 'unknown_template' | 'empty_command' | 'too_long',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const DISPLAY_NAME_MAX = 100;
+const DESCRIPTION_MAX = 500;
+
+/** 模板查表：id → KnownAgentDef（手动注册/CLI/HTTP 共用） */
+export function findKnownAgent(id: string): KnownAgentDef | undefined {
+  return KNOWN_AGENTS.find((d) => d.id === id);
+}
+
+/**
+ * 手动注册 / 更新一个外部 agent 条目（upsert：同模板 id 覆盖，v1 一个模板一个手动条目）。
+ * 写 external.json（manual=true 条目探测不覆盖不移除，AC-56-5）；不做版本探测——
+ * version 置空串，下次 detect 探测成功后回填。
+ */
+export function upsertManualEntry(input: ManualRegisterInput, homeDir?: string): ExternalAgentCacheEntry {
+  const def = findKnownAgent(input.templateId);
+  if (!def) throw new ManualRegisterError('unknown_template', `未知模板 id：${input.templateId}`);
+  const command = (input.command ?? def.executable).trim();
+  if (command === '') throw new ManualRegisterError('empty_command', 'command 不能为空');
+  const displayName = (input.displayName ?? def.label).trim();
+  const description = (input.description ?? '').trim();
+  if (displayName.length > DISPLAY_NAME_MAX || description.length > DESCRIPTION_MAX) {
+    throw new ManualRegisterError(
+      'too_long',
+      `displayName ≤ ${DISPLAY_NAME_MAX} 字、description ≤ ${DESCRIPTION_MAX} 字`,
+    );
+  }
+  const agents = readExternalAgentsCache(homeDir);
+  const idx = agents.findIndex((e) => e.id === def.id);
+  const entry: ExternalAgentCacheEntry = {
+    id: def.id,
+    kind: def.kind,
+    command,
+    version: idx >= 0 ? (agents[idx].manual === true ? agents[idx].version : '') : '',
+    tier: def.tier,
+    enabled: true,
+    lastProbeAt: idx >= 0 && agents[idx].manual === true ? agents[idx].lastProbeAt : '',
+    manual: true,
+    displayName,
+    description,
+  };
+  if (idx >= 0) agents[idx] = entry;
+  else agents.push(entry);
+  writeExternalAgentsCache(agents, homeDir);
+  return entry;
+}
+
+/** 移除手动注册条目（仅 manual=true 可移除；探测缓存条目由探测自维护）；不存在返回 false */
+export function removeManualEntry(id: string, homeDir?: string): boolean {
+  const agents = readExternalAgentsCache(homeDir);
+  const idx = agents.findIndex((e) => e.id === id && e.manual === true);
+  if (idx < 0) return false;
+  agents.splice(idx, 1);
+  writeExternalAgentsCache(agents, homeDir);
+  return true;
+}
+
 /** DetectedAgent → ExternalAgentSpec（纯函数，Task 10 的 stream-json 适配器消费） */
 export function detectedToSpec(detected: DetectedAgent): ExternalAgentSpec {
   return {
@@ -300,8 +482,9 @@ export function detectedToSpec(detected: DetectedAgent): ExternalAgentSpec {
     kind: detected.def.kind,
     command: detected.command,
     // args 是运行期基参数：stream-json 适配器（Task 10）按协议自行组装 -p/--output-format 等，
-    // detect 阶段不预填，避免协议知识泄漏进探测层
-    args: [],
+    // detect 阶段不预填，避免协议知识泄漏进探测层；F-56：protocolArgs（acp 子命令/flag 等
+    // 模板级协议入口）是用户注册时可见的固定形态，随 def 透传
+    args: [...(detected.def.protocolArgs ?? [])],
     tier: detected.def.tier,
     version: detected.version,
     permissionArgs: detected.def.permissionArgs,
@@ -335,16 +518,15 @@ export async function ensureExternalAdapters(opts: DetectOptions = {}): Promise<
   const detected = await detectExternalAgents(opts);
   const registered: DetectedAgent[] = [];
   for (const d of detected) {
-    // ACP（Tier A）detect 条目 P4 落地时补工厂：ACP 协议适配器尚未实现，静默落到
-    // StreamJsonExternalAdapter 会在运行期协议错配——warn 跳过注册，不进返回清单。
-    if (d.def.kind === 'acp') {
-      warn(`外部 agent ${d.def.id} 为 ACP 协议，适配器工厂 P4 落地时补，暂跳过注册`);
-      continue;
-    }
     // 按 kind 选适配器工厂（协议知识归 adapter，探测层只分派）
-    registerDetected(d, (spec) =>
-      spec.kind === 'app-server-jsonl' ? new CodexExternalAdapter(spec) : new StreamJsonExternalAdapter(spec),
-    );
+    // F-56：ACP（Tier A）工厂落地（acp.ts P4 已实现）；'reserved'（Tier D）走 stub 适配器，
+    // 运行期报 external_unsupported_protocol，正常事件流呈现（AC-56-4）
+    registerDetected(d, (spec) => {
+      if (spec.kind === 'app-server-jsonl') return new CodexExternalAdapter(spec);
+      if (spec.kind === 'acp') return new AcpExternalAdapter(spec);
+      if (spec.kind === 'reserved') return new ReservedExternalAdapter(spec);
+      return new StreamJsonExternalAdapter(spec);
+    });
     registered.push(d);
   }
   return registered;
@@ -369,6 +551,9 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
     const idx = working.findIndex((e) => e.id === def.id);
     if (hit !== null) {
       detected.push(hit);
+      // F-56：手动注册三字段只增不抹——探测命中刷新 command/version/lastProbeAt，
+      // 但 manual/displayName/description 一律沿用既有条目（AC-56-5：探测不覆盖手动条目）
+      const prev = idx >= 0 ? working[idx] : undefined;
       const entry: ExternalAgentCacheEntry = {
         id: def.id,
         kind: def.kind,
@@ -377,11 +562,15 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
         tier: def.tier,
         enabled: true,
         lastProbeAt: new Date().toISOString(),
+        manual: prev?.manual === true,
+        displayName: prev?.displayName,
+        description: prev?.description,
       };
       if (idx >= 0) working[idx] = entry;
       else working.push(entry);
     } else if (idx >= 0) {
-      working.splice(idx, 1); // 探测失败：移除缓存条目 + 静默跳过
+      // 探测失败：移除缓存条目 + 静默跳过（手动条目在 resolveCommand 第 2 级必然命中，不会走到这里）
+      working.splice(idx, 1);
     }
   }
 

@@ -71,7 +71,16 @@ import {
 } from '../market/install.js';
 import { readMarketSources, validateMarketSources, writeMarketSources } from '../market/registry.js';
 // F-55 外部 Agent（/api/external-agents 只读端点：探测 + 三档支持度 + 登录态存在性）
-import { checkLoginState, ensureExternalAdapters, type DetectedAgent } from '../external/detect.js';
+// F-56 增补：GET templates（向导第 1 步模板网格）+ POST（手动注册）+ DELETE（移除手动条目）
+import {
+  checkLoginState,
+  ensureExternalAdapters,
+  KNOWN_AGENTS,
+  ManualRegisterError,
+  removeManualEntry,
+  upsertManualEntry,
+  type DetectedAgent,
+} from '../external/detect.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -119,6 +128,13 @@ export interface ServeOptions {
    * 真探测会跑 `--version` 子进程并写 ~/.delta/external.json，单测不能触碰真实 HOME/PATH）。
    */
   externalDetect?: () => Promise<DetectedAgent[]>;
+  /**
+   * F-56 手动注册入口（缺省 upsertManualEntry 真写 ~/.delta/external.json；测试注入隔离）。
+   * 抛 ManualRegisterError 时映射 400。
+   */
+  externalRegister?: typeof upsertManualEntry;
+  /** F-56 手动条目移除入口（缺省 removeManualEntry；测试注入隔离） */
+  externalRemove?: typeof removeManualEntry;
   /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
@@ -1204,7 +1220,41 @@ export function createWebServer(opts: ServeOptions): http.Server {
         }
       }
 
-      // ── F-55 外部 Agent（Web 设置页「外部 Agent」面板：只读展示，不提供安装/卸载，设计稿 §10/§16）──
+      // ── F-55 外部 Agent（Web 设置页「外部 Agent」面板）；F-56 增补手动注册三端点 ──
+      // GET /api/external-agents/templates —— 向导第 1 步：内置模板网格（6 CLI）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'external-agents' && parts[2] === 'templates' && parts.length === 3) {
+        return json(res, 200, {
+          templates: KNOWN_AGENTS.map((d) => ({
+            id: d.id,
+            label: d.label,
+            description: d.description,
+            executable: d.executable,
+            kind: d.kind,
+            tier: d.tier,
+          })),
+        });
+      }
+      // POST /api/external-agents —— 手动注册（upsert：同模板 id 覆盖）
+      if (method === 'POST' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 2) {
+        const body = await readBody(req);
+        try {
+          const entry = (opts.externalRegister ?? upsertManualEntry)({
+            templateId: String(body?.templateId ?? ''),
+            command: body?.command === undefined ? undefined : String(body.command),
+            displayName: body?.displayName === undefined ? undefined : String(body.displayName),
+            description: body?.description === undefined ? undefined : String(body.description),
+          });
+          return json(res, 200, { ok: true, entry });
+        } catch (e) {
+          if (e instanceof ManualRegisterError) return err(res, 400, `${e.code}: ${e.message}`);
+          return err(res, 400, (e as Error).message);
+        }
+      }
+      // DELETE /api/external-agents/:id —— 移除手动注册条目（manual=true 才可移除）
+      if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 3) {
+        const removed = (opts.externalRemove ?? removeManualEntry)(decodeURIComponent(parts[2]));
+        return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'no such manual entry' });
+      }
       // GET /api/external-agents —— 探测（失败静默）→ DetectedAgent[] 配 loginState 与三档支持度。
       // plan/yolo 支持度按 permissionArgs 非空判定（探测层事实，不查 registry）。
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 2) {
@@ -1222,9 +1272,14 @@ export function createWebServer(opts: ServeOptions): http.Server {
             version: d.version,
             source: d.source,
             tier: d.def.tier,
+            kind: d.def.kind,
             loginState: checkLoginState(d.def),
             planSupported: d.def.permissionArgs.plan.length > 0,
             yoloSupported: d.def.permissionArgs.yolo.length > 0,
+            manual: d.manual === true,
+            displayName: d.displayName,
+            description: d.description,
+            label: d.def.label,
           })),
         });
       }

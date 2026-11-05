@@ -212,16 +212,34 @@ export interface HubEvent {
   [key: string]: unknown;
 }
 
-/** F-55 探测到的外部 Agent 条目（GET /api/external-agents，只读） */
+/** F-55 探测到的外部 Agent 条目（GET /api/external-agents）；F-56 增补手动注册展示字段 */
 export interface ExternalAgentInfo {
   id: string;
   command: string;
   version: string;
-  source: 'env' | 'cache' | 'path';
-  tier: 'A' | 'B' | 'C';
+  source: 'env' | 'manual' | 'cache' | 'path';
+  tier: 'A' | 'B' | 'C' | 'D';
+  kind?: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl' | 'reserved';
   loginState: boolean;
   planSupported: boolean;
   yoloSupported: boolean;
+  /** F-56：手动注册条目 */
+  manual?: boolean;
+  /** F-56：手动注册展示名（优先于 label 展示） */
+  displayName?: string;
+  description?: string;
+  /** F-56：模板展示名（探测命中时来自模板定义） */
+  label?: string;
+}
+
+/** F-56 向导第 1 步：内置模板条目（GET /api/external-agents/templates） */
+export interface ExternalAgentTemplate {
+  id: string;
+  label: string;
+  description: string;
+  executable: string;
+  kind: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl' | 'reserved';
+  tier: 'A' | 'B' | 'C' | 'D';
 }
 
 async function request<T>(method: string, p: string, body?: unknown): Promise<T> {
@@ -886,6 +904,17 @@ export const api = {
   // F-55 外部 Agent 探测清单（设置页「外部 Agent」面板：只读展示，不提供安装/卸载）
   externalAgents: () =>
     request<{ agents: ExternalAgentInfo[] }>('GET', '/api/external-agents'),
+  // F-56 手动注册：模板网格 / 注册（upsert）/ 移除
+  externalAgentTemplates: () =>
+    request<{ templates: ExternalAgentTemplate[] }>('GET', '/api/external-agents/templates'),
+  registerExternalAgent: (input: {
+    templateId: string;
+    command?: string;
+    displayName?: string;
+    description?: string;
+  }) => request<{ ok: boolean; entry: unknown }>('POST', '/api/external-agents', input),
+  removeExternalAgent: (id: string) =>
+    request<{ ok: boolean }>('DELETE', `/api/external-agents/${encodeURIComponent(id)}`),
 
   // F-47 Web 内置终端（node-pty 可选能力；不可用时 available:false 由 UI 降级）
   terminalStatus: () =>

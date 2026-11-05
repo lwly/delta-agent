@@ -1,19 +1,27 @@
 <script setup lang="ts">
-// 设置页·外部 Agent 面板（F-55，设计稿 §10/§5.2）：探测到的外部 CLI Agent 只读展示——
+// 设置页·外部 Agent 面板（F-55，设计稿 §10/§5.2）：探测到的外部 CLI Agent 展示——
 // 版本/来源/登录态 + plan/yolo 档支持度。不提供安装/卸载（delta 只探测不安装，§10/§16）。
+// F-56（PASI-87）：增补手动注册——「添加外部 Agent」两步向导（第 1 步模板网格点选，
+// 第 2 步显示名称/命令/描述，交互模式对齐 Multica 自定义运行时向导）+ 手动条目移除。
 // AC-55-7：拉取失败静默显示空态文案，不弹错误。
 import { onMounted, ref } from 'vue';
-import { api, type ExternalAgentInfo } from '../../api/client';
+import ModalShell from '../ModalShell.vue';
+import { api, type ExternalAgentInfo, type ExternalAgentTemplate } from '../../api/client';
 
 const loading = ref(false);
 const agents = ref<ExternalAgentInfo[]>([]);
-/** 探测时间为挂载时刻的快照（本面板只读，无刷新编辑态，重新进入 tab 即重挂载） */
+/** 探测时间为挂载时刻的快照（重新进入 tab 即重挂载） */
 const probedAt = ref('');
 
 /** 环境变量提示（空态用）：id `cli:claude-code` → DELTA_EXTERNAL_CLAUDE_CODE_PATH */
 function envPathName(id: string): string {
   const bare = id.replace(/^[a-z]+:/i, '');
   return `DELTA_EXTERNAL_${bare.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_PATH`;
+}
+
+/** 展示名优先级：手动 displayName > 模板 label > 稳定 id（AC-56-2） */
+function displayLabel(a: ExternalAgentInfo): string {
+  return a.displayName || a.label || a.id;
 }
 
 async function load() {
@@ -33,7 +41,75 @@ async function load() {
 onMounted(load);
 
 function sourceLabel(s: ExternalAgentInfo['source']): string {
-  return s === 'env' ? '环境变量' : s === 'cache' ? '缓存' : 'PATH';
+  return s === 'env' ? '环境变量' : s === 'manual' ? '手动注册' : s === 'cache' ? '缓存' : 'PATH';
+}
+
+// ── F-56 两步注册向导 ──
+const wizardOpen = ref(false);
+const wizardStep = ref<1 | 2>(1);
+const templates = ref<ExternalAgentTemplate[]>([]);
+const templatesLoading = ref(false);
+/** 第 2 步表单 */
+const picked = ref<ExternalAgentTemplate | null>(null);
+const formName = ref('');
+const formCommand = ref('');
+const formDesc = ref('');
+const submitting = ref(false);
+const formError = ref('');
+
+async function openWizard() {
+  wizardOpen.value = true;
+  wizardStep.value = 1;
+  picked.value = null;
+  formError.value = '';
+  templatesLoading.value = true;
+  try {
+    const res = await api.externalAgentTemplates();
+    templates.value = res.templates;
+  } catch {
+    templates.value = []; // 静默空态（AC-55-7 精神）
+  } finally {
+    templatesLoading.value = false;
+  }
+}
+
+/** 第 1 步点选模板 → 第 2 步表单（名称/命令预填模板缺省值，描述留空） */
+function pickTemplate(t: ExternalAgentTemplate) {
+  picked.value = t;
+  formName.value = t.label;
+  formCommand.value = t.executable;
+  formDesc.value = '';
+  formError.value = '';
+  wizardStep.value = 2;
+}
+
+async function submitRegister() {
+  if (!picked.value || submitting.value) return;
+  submitting.value = true;
+  formError.value = '';
+  try {
+    await api.registerExternalAgent({
+      templateId: picked.value.id,
+      command: formCommand.value,
+      displayName: formName.value,
+      description: formDesc.value,
+    });
+    wizardOpen.value = false;
+    await load();
+  } catch (e) {
+    formError.value = (e as Error).message; // 400 校验错误就地展示，不弹全局错误
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function removeManual(a: ExternalAgentInfo) {
+  try {
+    await api.removeExternalAgent(a.id);
+    await load();
+  } catch {
+    // 移除失败静默（仅手动条目可移除，探测缓存条目按钮不出现）
+  }
 }
 </script>
 
@@ -43,11 +119,13 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
       <div>
         <h2 class="panel-title">外部 Agent</h2>
         <p class="panel-sub">
-          探测本机已安装的外部 CLI Agent（<code>claude</code> / <code>codex</code>）。delta 只探测不安装，
+          探测本机已安装的外部 CLI Agent，或手动注册（<code>claude</code> / <code>codex</code> /
+          <code>codebuddy</code> / <code>cursor-agent</code> / <code>opencode</code> / <code>dsh</code>）。
           新建会话时可在模型选择器中以 <code>cli:</code> 前缀选用。
         </p>
       </div>
       <div class="head-ops">
+        <button class="btn" @click="openWizard">＋ 添加</button>
         <button class="btn" :disabled="loading" @click="load">↻ 重新探测</button>
       </div>
     </header>
@@ -56,12 +134,14 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
     <div class="rows">
       <div v-for="a in agents" :key="a.id" class="row">
         <div class="row-main">
-          <code class="agent-id mono">{{ a.id }}</code>
+          <code class="agent-id mono" :title="a.id">{{ displayLabel(a) }}</code>
           <span class="agent-cmd mono" :title="a.command">{{ a.command }}</span>
           <span class="agent-ver">{{ a.version }}</span>
-          <span class="tag tier" :title="a.tier === 'B' ? 'Tier B：stream-json 协议' : 'Tier C：app-server 协议'">Tier {{ a.tier }}</span>
+          <span class="tag tier" :title="a.kind === 'reserved' ? 'Tier D：协议适配预留，暂不可执行' : `Tier ${a.tier} 协议`">Tier {{ a.tier }}</span>
           <span class="tag src" :title="`来源：${a.command}`">{{ sourceLabel(a.source) }}</span>
+          <button v-if="a.manual" class="btn danger" title="移除手动注册条目" @click="removeManual(a)">移除</button>
         </div>
+        <p v-if="a.description" class="row-desc">{{ a.description }}</p>
         <div class="row-caps">
           <span class="cap" :class="{ ok: a.loginState, miss: !a.loginState }">
             登录态 {{ a.loginState ? '✓' : '✗' }}
@@ -73,10 +153,11 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
             yolo 档 {{ a.yoloSupported ? '✓' : '✗' }}
           </span>
         </div>
-        <p v-if="!a.loginState" class="login-hint">未检测到登录态：请运行对应 CLI 完成登录（delta 只探测不代登录）</p>
+        <p v-if="!a.loginState && !a.manual" class="login-hint">未检测到登录态：请运行对应 CLI 完成登录（delta 只探测不代登录）</p>
+        <p v-if="a.kind === 'reserved'" class="login-hint">协议适配预留（Tier D）：可注册与探测，执行能力待后续版本。</p>
       </div>
       <div v-if="agents.length === 0 && !loading" class="empty-wrap">
-        <p class="empty">未探测到外部 Agent——delta 只探测不安装。</p>
+        <p class="empty">未探测到外部 Agent——可点「＋ 添加」手动注册。</p>
         <p class="empty-sub">
           如已安装但未探测到，可设置显式路径环境变量：
           <code class="mono">{{ envPathName('cli:claude-code') }}</code> /
@@ -84,6 +165,48 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
         </p>
       </div>
     </div>
+
+    <!-- F-56 两步注册向导：第 1 步模板网格，第 2 步配置表单（交互模式对齐 Multica 自定义运行时向导） -->
+    <ModalShell v-if="wizardOpen" :title="wizardStep === 1 ? '添加外部 Agent · 选择基础运行时' : '添加外部 Agent · 配置运行时'" :width="560" @close="wizardOpen = false">
+      <div v-if="wizardStep === 1" class="tpl-grid-wrap">
+        <p v-if="templatesLoading" class="empty">模板加载中…</p>
+        <p v-else-if="templates.length === 0" class="empty">模板加载失败——请重试</p>
+        <div v-else class="tpl-grid">
+          <button v-for="t in templates" :key="t.id" class="tpl-card" @click="pickTemplate(t)">
+            <span class="tpl-label">{{ t.label }}</span>
+            <code class="mono tpl-exec">{{ t.executable }}</code>
+            <span class="tag tier">Tier {{ t.tier }}</span>
+            <span class="tpl-desc">{{ t.description }}</span>
+          </button>
+        </div>
+      </div>
+      <div v-else-if="picked" class="form">
+        <div class="field">
+          <label>基础运行时</label>
+          <div class="base-readonly"><span class="tpl-label">{{ picked.label }}</span><code class="mono">{{ picked.id }}</code><span class="tag tier">Tier {{ picked.tier }}</span></div>
+        </div>
+        <div class="field">
+          <label for="ext-name">显示名称</label>
+          <input id="ext-name" v-model="formName" type="text" placeholder="模板名" maxlength="100" />
+        </div>
+        <div class="field">
+          <label for="ext-cmd">命令</label>
+          <input id="ext-cmd" v-model="formCommand" type="text" class="mono" placeholder="可执行命令（绝对路径或 PATH 裸名）" />
+          <p class="field-hint">注册后即写入 external.json，下次探测以此命令为准。</p>
+        </div>
+        <div class="field">
+          <label for="ext-desc">描述（可选）</label>
+          <textarea id="ext-desc" v-model="formDesc" rows="2" maxlength="500" placeholder="这个 agent 用来做什么"></textarea>
+        </div>
+        <p v-if="formError" class="form-error">{{ formError }}</p>
+        <div class="form-ops">
+          <button class="btn" @click="wizardStep = 1">← 上一步</button>
+          <button class="btn primary" :disabled="submitting || formName.trim() === '' || formCommand.trim() === ''" @click="submitRegister">
+            {{ submitting ? '注册中…' : '注册外部 Agent' }}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
 
     <!-- 能力降级固定说明（设计稿 §5.2/§10）：显式声明，不弹错误 -->
     <p class="foot-note">
@@ -132,4 +255,39 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
 .foot-note code { font-family: var(--mono); color: var(--text-dim); }
 .probe-meta { font-size: 10.5px; color: var(--text-faint); }
 .mono { font-family: var(--mono); }
+
+/* ── F-56 两步向导 ── */
+.tpl-grid-wrap { min-height: 200px; }
+.tpl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tpl-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+  padding: 12px 14px; cursor: pointer; text-align: left; color: var(--text);
+}
+.tpl-card:hover { border-color: var(--accent); }
+.tpl-label { font-size: 13px; font-weight: 600; }
+.tpl-exec { font-size: 11px; color: var(--text-dim); }
+.tpl-desc { font-size: 11px; color: var(--text-faint); line-height: 1.5; }
+.tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; }
+.tag.tier { background: var(--accent-soft); color: var(--accent); }
+.row-desc { font-size: 11.5px; color: var(--text-dim); margin: 0; }
+.btn.danger { color: var(--orange); }
+.form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 12px; color: var(--text-dim); }
+.field input, .field textarea {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  color: var(--text); padding: 7px 10px; font-size: 12.5px; resize: vertical;
+}
+.field input.mono { font-family: var(--mono); }
+.field-hint { font-size: 11px; color: var(--text-faint); margin: 0; }
+.base-readonly {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  padding: 8px 10px; font-size: 12.5px;
+}
+.base-readonly code { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+.form-error { font-size: 12px; color: var(--orange); margin: 0; }
+.form-ops { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 </style>

@@ -5,13 +5,14 @@
 //   - engine/external.ts 只懂映射（ExternalEvent → AgentEvent + 落库语义）
 // 本文件只定义两边的公共类型，不包含任何协议解析 / spawn / 映射逻辑。
 
-export type ExternalTier = 'A' | 'B' | 'C';
+// F-56：Tier D 为「预留档」——模板可注册/可探测，但协议适配器未实现（启动时明确报错不静默）
+export type ExternalTier = 'A' | 'B' | 'C' | 'D';
 
 export interface ExternalAgentSpec {
   /** 稳定 id，同时也是会话 model 字段的值：cli:claude-code / cli:codex / acp:<cmd> */
   id: string;
-  /** 'app-server-jsonl'：Codex app-server v2 协议（JSON-RPC 2.0 over stdio，换行分隔） */
-  kind: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl';
+  /** 'reserved'：F-56 预留档（如 dsh cordis 插件栈），无标准协议适配器——启动报 external_unsupported_protocol */
+  kind: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl' | 'reserved';
   /** 绝对路径（detect 阶段解析，避免 PATH 漂移） */
   command: string;
   args: string[];

@@ -157,6 +157,18 @@ export { ScriptedExternalAdapter } from './external/scripted.js';
 // F-55 Tier A 外部适配器：ACP（JSON-RPC over stdio；spec 由调用方构建，detect 归 P2）
 export { AcpExternalAdapter } from './external/acp.js';
 
+// F-56 Tier D 预留档 stub 适配器（可注册/可探测，执行时报 external_unsupported_protocol）
+export { ReservedExternalAdapter } from './external/reserved.js';
+
+// F-56 手动注册（PASI-87）：upsert/remove（KNOWN_AGENTS / KnownAgentDef 已在下方 detect 导出块）
+export {
+  ManualRegisterError,
+  upsertManualEntry,
+  removeManualEntry,
+  findKnownAgent,
+} from './external/detect.js';
+export type { ManualRegisterInput } from './external/detect.js';
+
 // F-55 Tier B 外部适配器：Claude stream-json（claude -p --output-format stream-json 的 stdout JSONL）
 export { StreamJsonExternalAdapter } from './external/stream-json.js';
 

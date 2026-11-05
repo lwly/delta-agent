@@ -48,6 +48,7 @@ import {
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
 import { doctorCommand } from './doctor.js';
+import { agentsAddCommand, agentsListCommand, agentsTemplatesCommand, agentsRemoveCommand } from './agents.js';
 import {
   sandboxStatusCommand,
   sandboxEnableCommand,
@@ -433,10 +434,39 @@ models
     console.log('✔ 模型路由已停用');
   });
 
+// ── delta agents：F-56 外部 Agent 手动注册（与 Web 向导共用 external.json）─────────
+
+const agents = program.command('agents').description('F-56 外部 Agent 手动注册（模板 / 注册 / 列表 / 移除）');
+agents
+  .command('templates')
+  .description('列出内置外部 Agent 模板（向导第 1 步的可选项）')
+  .action(() => agentsTemplatesCommand());
+agents
+  .command('add')
+  .description('手动注册外部 Agent（upsert：同模板 id 覆盖）')
+  .argument('<templateId>', '模板 id（见 delta agents templates）')
+  .option('--command <command>', '可执行命令（绝对路径或 PATH 裸名；缺省 = 模板 executable）')
+  .option('--name <name>', '显示名称（缺省 = 模板 label）')
+  .option('--description <text>', '一句话描述（可选）')
+  .action(
+    async (
+      templateId: string,
+      opts: { command?: string; name?: string; description?: string },
+    ) => agentsAddCommand({ templateId, command: opts.command, name: opts.name, description: opts.description }),
+  );
+agents
+  .command('list')
+  .description('列出 external.json 全部条目（手动注册 + 探测缓存）')
+  .action(() => agentsListCommand());
+agents
+  .command('remove')
+  .description('移除手动注册条目（探测缓存条目由探测自动维护）')
+  .argument('<id>', '条目 id（如 cli:codebuddy）')
+  .action((id: string) => agentsRemoveCommand(id));
+
 // ── delta memory：L2 动态记忆管理（memory-design §8）────────────────────
 
 const memory = program.command('memory').description('管理 L2 长期动态记忆（memories 表）');
-
 memory
   .command('list')
   .description('列出记忆条目（默认全局 + 全部 scope 汇总）')
