@@ -83,9 +83,16 @@ export async function* runExternalAgent(
   // MCP 透传（设计稿 §6）：spec 声明了 mcpArgs 才生成临时配置文件（delta- 前缀别名），
   // 经 mcpConfigPath 交给 adapter 展开 --mcp-config 类参数；finally（收尾区）在 done 产出后、
   // return 前删除临时文件——覆盖正常收尾 / abort / 消费方提前 break 全部路径。
-  const mcpFile = adapter.spec.mcpArgs
-    ? buildDeltaMcpFile({ projectRoot: ctx.toolContext.projectRoot, sessionId: ctx.sessionId })
-    : null;
+  // 构建失败（如损坏的 mcp.json）降级为无透传继续：MCP 是增值能力，不因它阻断外部会话
+  // （审查修复：原实现位于 try 外，异常会绕过 done 必达）。
+  let mcpFile: ReturnType<typeof buildDeltaMcpFile> | null = null;
+  try {
+    mcpFile = adapter.spec.mcpArgs
+      ? buildDeltaMcpFile({ projectRoot: ctx.toolContext.projectRoot, sessionId: ctx.sessionId })
+      : null;
+  } catch (e) {
+    yield { type: 'error', message: `MCP 配置透传失败（已跳过，继续运行）：${(e as Error).message}`, fatal: false };
+  }
 
   try {
     const stream = adapter.run({

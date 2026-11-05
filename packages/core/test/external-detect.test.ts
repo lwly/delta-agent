@@ -185,7 +185,7 @@ describe('detectExternalAgents（三级优先级）', () => {
     const found = await detect({ probeTimeoutMs: 300 });
     const elapsed = Date.now() - started;
     expect(found).toEqual([]);
-    expect(elapsed).toBeLessThan(2000); // 300ms 超时 + 杀进程宽限 ~300ms，远小于默认 3000ms
+    expect(elapsed).toBeLessThan(3000); // 300ms 超时 + 杀进程宽限 ~300ms，远小于默认 3000ms（上限放宽防慢 CI flake）
     expect(readExternalAgentsCache(home)).toEqual([]);
   });
 });

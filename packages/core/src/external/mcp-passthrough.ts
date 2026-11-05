@@ -61,8 +61,10 @@ export function buildDeltaMcpFile(opts: { projectRoot: string; sessionId: string
   // sessionId 只用作文件名令牌：过滤掉文件系统不安全字符（不参与任何路径解析）
   const safeSessionId = opts.sessionId.replace(/[^a-zA-Z0-9._-]/g, '-') || 'session';
   const configPath = path.join(os.tmpdir(), `${TMP_FILE_PREFIX}${safeSessionId}.json`);
-  // 0600：透传文件可能含解密后的 MCP headers（第三方凭据），仅限本用户可读
+  // 0600：透传文件可能含解密后的 MCP headers（第三方凭据），仅限本用户可读。
+  // chmodSync 兜底：同 sessionId 复用旧文件时，writeFileSync 的 mode 只在创建时生效。
   fs.writeFileSync(configPath, `${JSON.stringify({ [CLAUDE_MCP_TOP_KEY]: servers }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  fs.chmodSync(configPath, 0o600);
 
   return {
     configPath,
