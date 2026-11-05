@@ -79,8 +79,8 @@ function buildResumeFallbackPrompt(history: ChatMessage[], input: string): strin
  * 会话续跑（§8）：ctx.externalResume 存在时把令牌作为 resumeSessionId 传给 adapter；
  * 首轮运行命中 isResumeTokenFailure 时自动重建（丢弃令牌，以 delta 历史摘要 + 本次
  * 输入为 prompt 重跑一轮，最多一轮 fallback，不无限重试），见 consumeAdapterRun。
- * resume 路径首轮事件先缓冲后透传：降级时首轮 fatal error 降级为 fatal:false，
- * 保证重建成功后整个 turn 不以 fatal 告终（headless 不记 failed）。
+ * resume 路径仅握手期缓冲（external_session 到达前的事件）：收到 external_session 即证明
+ * 令牌有效，立刻 flush 缓冲并切换实时透传——长任务的 text_delta/tool 事件不再延迟到轮结束。
  */
 export async function* runExternalAgent(
   ctx: RunContext,
@@ -141,24 +141,49 @@ export async function* runExternalAgent(
 
   try {
     // 首轮：带 resume 令牌续跑（全新会话 resumeToken 为 undefined）。
-    // resume 路径（externalResume 存在）缓冲首轮事件：令牌失效降级时首轮上游 fatal error
-    // 必须降级为 fatal:false 再透传（AC-55-8——降级重建成功后 headless 不得因首轮 fatal
-    // 记 fatalMessage / failed 退出码）。失效场景首轮很快结束、事件极少，缓冲开销可忽略；
-    // 非 resume 场景完全不缓冲，逐字节透传行为不变。
-    let resumeToken = ctx.externalResume?.externalId;
+    // resume 路径（externalResume 存在）仅在握手期缓冲：external_session 到达即证明令牌
+    // 有效（失效谓词 isResumeTokenFailure 要求 !externalSeen，此后正确性不受影响），
+    // 立刻 flush 缓冲并切换实时透传——令牌有效时长任务（数分钟）的 text_delta/tool 事件
+    // 不再整轮缓冲到 done（P3 审查修复）。失效场景收不到 external_session、首轮很快结束，
+    // 缓冲事件极少，fatal 降级语义不变；非 resume 场景完全不缓冲，逐字节透传行为不变。
+    const resumeToken = ctx.externalResume?.externalId;
     const buffered: AgentEvent[] = [];
     let first: ExternalRunOutcome;
     if (resumeToken === undefined) {
       first = yield* consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, undefined);
     } else {
-      const gen = consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, resumeToken);
+      // externalSeen 翻转经 onExternalSeen 回调同步通知（outcome 只在流结束时返回，中途拿不到）
+      let streaming = false;
+      let externalSeen = false;
+      const gen = consumeAdapterRun(
+        ctx,
+        adapter,
+        input,
+        permissionMode,
+        mcpFile?.configPath ?? undefined,
+        usageTotal,
+        resumeToken,
+        () => {
+          externalSeen = true;
+        },
+      );
       for (;;) {
         const next = await gen.next();
         if (next.done) {
           first = next.value;
           break;
         }
+        if (streaming) {
+          yield next.value; // 令牌已被上游证实有效：后续事件实时透传，不再缓冲
+          continue;
+        }
         buffered.push(next.value);
+        if (externalSeen) {
+          // 握手完成：先 flush 缓冲（保序），再切换实时透传
+          for (const ev of buffered) yield ev;
+          buffered.length = 0;
+          streaming = true;
+        }
       }
     }
 
@@ -170,7 +195,7 @@ export async function* runExternalAgent(
         else yield ev;
       }
       yield { type: 'error', message: RESUME_FALLBACK_NOTICE, fatal: false };
-      resumeToken = undefined; // 丢弃失效令牌重跑
+      // 丢弃失效令牌重跑（resumeToken 仅作首轮入参，重跑显式传 undefined）
       yield* consumeAdapterRun(
         ctx,
         adapter,
@@ -178,7 +203,7 @@ export async function* runExternalAgent(
         permissionMode,
         mcpFile?.configPath ?? undefined,
         usageTotal,
-        resumeToken,
+        undefined,
       );
     } else {
       // 非失效（首轮成功 / abort / 无令牌判定不命中）：缓冲事件原样 flush
@@ -204,6 +229,8 @@ async function* consumeAdapterRun(
   mcpConfigPath: string | undefined,
   usageTotal: Usage,
   resumeSessionId: string | undefined,
+  // 收到 external_session 的同步通知（resume 缓冲路径用它即时切换实时透传）
+  onExternalSeen?: () => void,
 ): AsyncGenerator<AgentEvent, ExternalRunOutcome> {
   /** tool_use 打点：id → 收到时间，tool_result 时算耗时；无配对 start 则 ms=0 */
   const toolStarts = new Map<string, number>();
@@ -349,6 +376,7 @@ async function* consumeAdapterRun(
           // 可能返回新 id——claude --resume 会返回新 session_id），上报即覆盖持久化，
           // 下一轮 hub/headless 读到最新值即可，本轮内不热切换。缺省（无回调）忽略。
           outcome.externalSeen = true;
+          onExternalSeen?.();
           ctx.onExternalSession?.(ev.id);
           break;
         case 'error':

@@ -813,7 +813,8 @@ export class SessionHub {
         // 下一轮 send 读到最新令牌；持久化失败不阻塞运行（降级路径可重建上下文）
         onExternalSession: (externalId) => {
           try {
-            service.setSessionExternal(sessionId, externalId, session.model || 'cli:');
+            // 外部会话 model 恒非空（isExternalModel 前缀判定才进外部引擎路径），直接透传
+            service.setSessionExternal(sessionId, externalId, session.model);
           } catch {
             // 持久化失败不阻塞运行
           }

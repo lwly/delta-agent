@@ -330,13 +330,21 @@ export function registerDetected(
  */
 export async function ensureExternalAdapters(opts: DetectOptions = {}): Promise<DetectedAgent[]> {
   const detected = await detectExternalAgents(opts);
+  const registered: DetectedAgent[] = [];
   for (const d of detected) {
+    // ACP（Tier A）detect 条目 P4 落地时补工厂：ACP 协议适配器尚未实现，静默落到
+    // StreamJsonExternalAdapter 会在运行期协议错配——warn 跳过注册，不进返回清单。
+    if (d.def.kind === 'acp') {
+      warn(`外部 agent ${d.def.id} 为 ACP 协议，适配器工厂 P4 落地时补，暂跳过注册`);
+      continue;
+    }
     // 按 kind 选适配器工厂（协议知识归 adapter，探测层只分派）
     registerDetected(d, (spec) =>
       spec.kind === 'app-server-jsonl' ? new CodexExternalAdapter(spec) : new StreamJsonExternalAdapter(spec),
     );
+    registered.push(d);
   }
-  return detected;
+  return registered;
 }
 
 /**

@@ -298,7 +298,8 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       : {}),
     onExternalSession: (externalId) => {
       try {
-        service.setSessionExternal(session.id, externalId, session.model || 'cli:');
+        // 外部会话 model 恒非空（isExternalModel 前缀判定才进外部引擎路径），直接透传
+        service.setSessionExternal(session.id, externalId, session.model);
       } catch {
         // 持久化失败不阻塞运行（降级路径可重建上下文）
       }

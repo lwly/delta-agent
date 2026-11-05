@@ -288,6 +288,68 @@ describe('降级不触发（防误伤）', () => {
   });
 });
 
+// ── 3b. resume 有效实时透传（P3 审查修复）─────────────────────────────────────
+
+describe('resume 有效实时透传（P3 审查修复）', () => {
+  it('resume 令牌有效 → external_session 后 text_delta 实时透传（不等 adapter 流耗尽）', async () => {
+    // 双门闩验证：textGate 放行后 text_delta 必须在 doneGate 放行（adapter 流耗尽）之前
+    // 到达消费方。若仍是整轮缓冲，text_delta 会卡在 doneGate 上直至测试超时——
+    // 用门闩而非事件顺序断言，是因为缓冲与实时两种实现在消费侧的事件序列完全相同，
+    // 只有「中间事件先于流结束到达」这一时序差异可区分。
+    let releaseText!: () => void;
+    const textGate = new Promise<void>((r) => { releaseText = r; });
+    let releaseDone!: () => void;
+    const doneGate = new Promise<void>((r) => { releaseDone = r; });
+    let adapterFinished = false;
+
+    const adapter: ExternalAgentAdapter = {
+      spec: baseSpec(),
+      run: async function* () {
+        yield { type: 'external_session', id: 'cli-sess-live' };
+        await textGate;
+        yield { type: 'text', text: 'live' };
+        await doneGate;
+        yield { type: 'done', exitCode: 0 };
+        adapterFinished = true;
+      },
+    };
+    registerExternalAdapter(adapter);
+    const ctx = makeCtx({ externalResume: { externalId: 'tok-ok', agentId: MODEL } });
+    const gen = runExternalAgent(ctx, [], '继续任务');
+
+    expect((await gen.next()).value).toMatchObject({ type: 'turn_start' });
+    releaseText!();
+    // doneGate 未放行（adapter 流尚未耗尽）时 text_delta 即已到达 → 实时透传
+    const textEv = await gen.next();
+    expect(textEv.value).toMatchObject({ type: 'text_delta', text: 'live' });
+    expect(adapterFinished).toBe(false);
+    releaseDone!();
+    expect((await gen.next()).value).toMatchObject({ type: 'done' });
+    expect((await gen.next()).done).toBe(true);
+  });
+
+  it('resume 有效 → 握手期缓冲事件保序 flush 在实时事件之前，不触发降级', async () => {
+    const adapter = multiRunAdapter([
+      [
+        { type: 'error', message: '握手期事件', fatal: false },
+        { type: 'external_session', id: 'cli-sess-9' },
+        { type: 'text', text: '实时段' },
+        { type: 'done', exitCode: 0 },
+      ],
+    ]);
+    registerExternalAdapter(adapter);
+    const ctx = makeCtx({ externalResume: { externalId: 'tok-ok', agentId: MODEL } });
+    const events = await collect(ctx, [], '继续任务');
+
+    // external_session 前的事件（error）缓冲，收到 external_session 后 flush 并实时透传
+    expect(events.map((e) => e.type)).toEqual(['turn_start', 'error', 'text_delta', 'done']);
+    expect(events.some((e) => e.type === 'error' && e.message === '握手期事件')).toBe(true);
+    // 令牌有效（externalSeen=true）→ 无降级提示、只跑一轮
+    expect(events.some((e) => e.type === 'error' && e.message.includes(RESUME_NOTICE))).toBe(false);
+    expect(adapter.captures).toHaveLength(1);
+  });
+});
+
 // ── 4. 持久化（store 层）────────────────────────────────────────────────────
 
 describe('resume 令牌持久化（store）', () => {
