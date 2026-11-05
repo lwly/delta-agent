@@ -187,7 +187,7 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
 | stderr  | 全量捕获环形缓冲（最近 200 行），进程异常时随 `error` 事件带出前 20 行，其余落 `debug` 日志                                                                                |
 | 取消      | `AbortSignal` → 先发协议取消（ACP `session/cancel`），300ms 后仍未退则杀进程组：POSIX `kill(-pid)`，Windows `taskkill /T /F /PID`                              |
 | 超时      | 无全局超时（长任务是常态）；`ctx.maxTurns` 不适用，改用「无事件静默 10 分钟」健康检查，命中记 `sandbox_notice` 同类提示                                                             |
-| 孤儿清理    | 适配器实例注册到 `serve` 的 dispose 列表，与 F-54 `BackgroundTaskManager` 同一收尾路径                                                                        |
+| 孤儿清理    | 适配器实例注册到 `serve` 的 dispose 列表，与 F-54 `BackgroundTaskManager` 同一收尾路径（**实现偏差**：P4 落地为进程级全局 lifecycle 追踪（`external/lifecycle.ts` 的 track/untrack/cancelAllExternalRuns），engine 不感知 serve，dispose 在 `server.close()` 之后全杀——比实例级注册更稳，每 run 独立实例下进程句柄即取消入口）                                                                        |
 | Windows | `command` 解析到 `.cmd`/`.ps1` shim 时必须 `shell: true`，参数走 `JSON.stringify` 单引号包法避免空格拆分；`detect` 阶段依次尝试 `claude.cmd` / `claude.bat` / `claude` |
 
 ---

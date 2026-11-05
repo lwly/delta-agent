@@ -473,9 +473,12 @@ describe('runExternalAgent（F-55 事件映射引擎）', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // F-55 P4 多外部 agent 并发（工厂语义注册表）+ dispose 全杀（AC-55-5）
 // 设计稿 §13 出口标准：两会话并行不串事件；AC-55-5：serve dispose 后无孤儿进程。
-// 注：并入本文件而非独立 external-concurrent.test.ts——本机 Node v22.23.2 的
-// threads pool worker teardown（CppHeap::DetachIsolate）在测试文件达到 112 个时
-// 必现 SIGSEGV（环境缺陷，与测试内容无关，见交付摘要），保持 111 个文件规避。
+// 注：并入本文件而非独立 external-concurrent.test.ts——本机（Node v22.23.2，
+// threads pool）全量 vitest run 的 worker teardown（CppHeap::DetachIsolate）
+// 存在**资源累积型 SIGSEGV**（P4 审查实测 111 文件也 5 跑 4 崩、崩点漂移，
+// 并非精确文件数阈值；2026-10-29 起即有同签名 crash report，环境缺陷与测试
+// 内容无关）。可靠规避：全量验证加 `--isolate=false`（实测稳定）；forks 池
+// 会踩沙箱 TMPDIR 的 vite-node ssr 缓存 ENOENT，node v20 亦挂，不可替代。
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -649,11 +652,15 @@ describe('F-55 P4 dispose 全杀（AC-55-5：serve dispose 后无孤儿进程）
     const drainA = collect(makeCtx({ model: 'cli:long', projectRoot: tmpDir }), 'a');
     const drainB = collect(makeCtx({ model: 'cli:long', projectRoot: tmpDir }), 'b');
 
-    // 等 fixture 进程都起来并打印 pid（证明 engine 的 trackExternalRun 已生效）
-    await vi.waitFor(() => {
-      expect(instances).toHaveLength(2);
-      expect(instances.every((i) => i.pid !== null)).toBe(true);
-    });
+    // 等 fixture 进程都起来并打印 pid（证明 engine 的 trackExternalRun 已生效）；
+    // 显式 3s 超时：慢机上两次 node spawn 打印 pid 可能贴默认 1s 线（P4 审查 nit）
+    await vi.waitFor(
+      () => {
+        expect(instances).toHaveLength(2);
+        expect(instances.every((i) => i.pid !== null)).toBe(true);
+      },
+      { timeout: 3000 },
+    );
 
     const startedAt = Date.now();
     await cancelAllExternalRuns();
