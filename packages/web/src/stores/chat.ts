@@ -557,8 +557,18 @@ export const useChatStore = defineStore('chat', {
       }
     },
     /** 会话级权限模式切换（仅影响后续运行；yolo 放行所有写/执行操作） */
-    async setPermissionMode(mode: 'plan' | 'default' | 'yolo') {
+    /** F-56：切换当前会话模型（含 cli:/acp: 外部 Agent）——落库 + 本地元信息即时更新，下一条消息生效 */
+    async setSessionModel(model: string) {
+      if (!this.sessionId || !this.sessionMeta) return;
       try {
+        await api.setSessionModel(this.sessionId, model);
+        this.sessionMeta.model = model;
+      } catch (e) {
+        this.notice(`✘ 模型切换失败：${(e as Error).message}`);
+      }
+    },
+
+    async setPermissionMode(mode: 'plan' | 'default' | 'yolo') {      try {
         await api.setPermission(this.sessionId, mode);
         this.permissionMode = mode;
         const label = mode === 'plan' ? '只读（写/执行类工具将被拒绝）'

@@ -220,6 +220,18 @@ describe('renameSession', () => {
   });
 });
 
+describe('setSessionModel（F-56：会话模型中途切换，含外部 Agent id）', () => {
+  it('切换生效（cli: 外部 id）；空串回退默认；不存在报错', () => {
+    const p = svc.ensureProject('/tmp/proj-model');
+    const s = svc.createSession(p.id, { title: 'm' });
+    svc.setSessionModel(s.id, 'cli:codebuddy');
+    expect(svc.getSession(s.id)!.model).toBe('cli:codebuddy');
+    svc.setSessionModel(s.id, '');
+    expect(svc.getSession(s.id)!.model).toBe('');
+    expect(() => svc.setSessionModel('nope', 'cli:x')).toThrow(/not found/);
+  });
+});
+
 describe('回收站批量彻底清除', () => {
   it('purgeTrashBatch：混合 project+session 全部成功', () => {
     const p1 = svc.ensureProject('/tmp/proj-a');

@@ -906,7 +906,9 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (method === 'PATCH' && parts.length === 3) {
           const body = await readBody(req);
           try {
-            service.renameSession(sessionId, String(body.title ?? ''));
+            // F-56：title / model 均为可选——model 切换即改会话引擎（下一条消息生效）
+            if (body.model !== undefined) service.setSessionModel(sessionId, String(body.model));
+            if (body.title !== undefined) service.renameSession(sessionId, String(body.title));
             return json(res, 200, { ok: true });
           } catch (e) {
             return err(res, 404, (e as Error).message);

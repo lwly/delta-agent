@@ -355,6 +355,15 @@ export class SessionService {
   }
 
   /**
+   * F-56：切换会话模型（Web 模型选择器选定即生效——hub 按 session.model 在每条消息
+   * 运行时判定引擎，cli:/acp: 外部 id 与 Provider 模型名均可；空串 = 回退默认模型）。
+   */
+  setSessionModel(id: string, model: string): void {
+    if (!this.store.getSession(id)) throw new Error('session not found');
+    this.store.touchSession(id, { model });
+  }
+
+  /**
    * 删除会话：默认软删除（回收站 30 天）。
    * PASI-9：执行中的会话禁止删除（调用方应先暂停或停止），直接抛错；
    * 项目级联删除 / 回收站彻底清除路径会先 abort 再走到这里，不受影响。

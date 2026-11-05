@@ -880,6 +880,8 @@ export const api = {
   getMessageContent: (id: string, seq: number) =>
     request<{ seq: number; message: ChatMessage }>('GET', `/api/sessions/${id}/messages/${seq}/content`),
   renameSession: (id: string, title: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { title }),
+  // F-56：切换会话模型（含 cli:/acp: 外部 id；空串 = 回退默认模型）——下一条消息生效
+  setSessionModel: (id: string, model: string) => request<{ ok: boolean }>('PATCH', `/api/sessions/${id}`, { model }),
   // F-46 会话分叉：copy-on-write 复制 [0, after_index) 前缀 → 新会话；run=true 以 content 触发重跑
   forkSession: (id: string, afterIndex: number, opts?: { content?: string; run?: boolean }) =>
     request<{ ok: boolean; session_id: string; run: boolean }>('POST', `/api/sessions/${id}/fork`, {

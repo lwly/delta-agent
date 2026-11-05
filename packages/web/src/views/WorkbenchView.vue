@@ -529,7 +529,14 @@ function onModelChange(ev: Event) {
   const v = (ev.target as HTMLSelectElement).value;
   preferredModel.value = v;
   localStorage.setItem('yz.preferredModel', v);
-  chat.notice(`已记录模型偏好：${v}（对新建对话生效）`);
+  const label = modelOptions.value.find((o) => o.value === v)?.label ?? v;
+  // F-56：有打开的会话 → 即时切换该会话模型（下一条消息生效，含外部 Agent）；无会话 → 仅记录偏好
+  if (chat.sessionMeta) {
+    void chat.setSessionModel(v);
+    chat.notice(`已切换当前会话模型：${label}（下一条消息生效）`);
+  } else {
+    chat.notice(`已记录模型偏好：${label}（对新建对话生效）`);
+  }
 }
 
 // ── F-55 外部会话降级提示条（AC-55-7：能力降级是显式常驻提示，不弹错误）──

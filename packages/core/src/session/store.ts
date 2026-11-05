@@ -254,11 +254,13 @@ export class SessionStore {
       .run(externalId, agentId, new Date().toISOString(), sessionId);
   }
 
-  touchSession(id: string, patch: { title?: string; status?: string }): void {
+  touchSession(id: string, patch: { title?: string; status?: string; model?: string }): void {
     const sets: string[] = ['updated_at = ?'];
     const vals: unknown[] = [new Date().toISOString()];
     if (patch.title !== undefined) { sets.push('title = ?'); vals.push(patch.title); }
     if (patch.status !== undefined) { sets.push('status = ?'); vals.push(patch.status); }
+    // F-56：会话模型可中途切换（含 cli:/acp: 外部 id；空串 = 回退默认模型）
+    if (patch.model !== undefined) { sets.push('model = ?'); vals.push(patch.model); }
     vals.push(id);
     this.db.prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   }
