@@ -145,6 +145,9 @@ export { AcpExternalAdapter } from './external/acp.js';
 // F-55 Tier B 外部适配器：Claude stream-json（claude -p --output-format stream-json 的 stdout JSONL）
 export { StreamJsonExternalAdapter } from './external/stream-json.js';
 
+// F-55 Tier C 外部适配器：Codex app-server v2（JSON-RPC over stdio，换行分隔）
+export { CodexExternalAdapter } from './external/codex.js';
+
 // F-55 MCP 配置透传（§6）：delta MCP 合并视图 → delta- 前缀别名临时文件（engine 收尾 cleanup）
 export { buildDeltaMcpFile } from './external/mcp-passthrough.js';
 

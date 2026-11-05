@@ -10,7 +10,8 @@ export type ExternalTier = 'A' | 'B' | 'C';
 export interface ExternalAgentSpec {
   /** 稳定 id，同时也是会话 model 字段的值：cli:claude-code / cli:codex / acp:<cmd> */
   id: string;
-  kind: 'acp' | 'stream-json-jsonl';
+  /** 'app-server-jsonl'：Codex app-server v2 协议（JSON-RPC 2.0 over stdio，换行分隔） */
+  kind: 'acp' | 'stream-json-jsonl' | 'app-server-jsonl';
   /** 绝对路径（detect 阶段解析，避免 PATH 漂移） */
   command: string;
   args: string[];

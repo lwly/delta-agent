@@ -18,6 +18,7 @@ import { userConfigDir } from '../paths.js';
 import { spawnExternal } from './spawn.js';
 import { registerExternalAdapter } from './registry.js';
 import { StreamJsonExternalAdapter } from './stream-json.js';
+import { CodexExternalAdapter } from './codex.js';
 import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalTier } from './types.js';
 
 /** 探测超时（设计稿 §10：`command --version` 超时 3s，失败静默跳过） */
@@ -27,7 +28,7 @@ export const PROBE_TIMEOUT_MS = 3000;
 const EXTERNAL_CACHE_FILE = 'external.json';
 
 /**
- * 已知外部 agent 定义（P2 只有 claude-code；codex 留 P3，见计划文档 P3 阶段）。
+ * 已知外部 agent 定义。
  * 元素类型 = ExternalAgentSpec 去掉 command/version/args（探测期未知）+ 探测专用字段。
  */
 export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'args'> & {
@@ -40,8 +41,8 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
 };
 
 /**
- * 已知 agent 清单。P2 只含 claude-code（Tier B，stream-json-jsonl，实测 claude 2.1.168 flags）。
- * P3 占位（不实现）：{ id: 'cli:codex', kind: 'stream-json-jsonl', tier: 'C', executable: 'codex', ... }
+ * 已知外部 agent 清单（P2 起 claude-code，P3 起 codex）。
+ * 元素类型 = ExternalAgentSpec 去掉 command/version/args（探测期未知）+ 探测专用字段。
  */
 export const KNOWN_AGENTS: KnownAgentDef[] = [
   {
@@ -58,6 +59,29 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     },
     resumeArgs: (sessionId) => ['--resume', sessionId],
     mcpArgs: (configPath) => ['--mcp-config', configPath],
+  },
+  {
+    // Codex app-server v2（JSON-RPC over stdio）。'app-server' 子命令由 CodexExternalAdapter
+    // 按协议静态携带（协议知识不进探测层，与 stream-json 自行组装 '-p' 同原则），故此处无 args。
+    id: 'cli:codex',
+    kind: 'app-server-jsonl',
+    tier: 'C',
+    executable: 'codex',
+    probeArgs: ['--version'],
+    // 弱判定：'.codex/auth.json' 是正式登录态文件；'.codex' 目录存在只说明「曾初始化过」
+    // （auth.json 可能不存在但目录在）。任一存在即视为已登录，不解析内容（§10 只判存在性）。
+    loginStateFiles: ['.codex/auth.json', '.codex'],
+    permissionArgs: {
+      // Codex 无只读 plan 模式（schema/flags 实测均无）→ 空数组，映射引擎 external_no_plan_mode
+      // 门禁拒绝 plan 档启动（设计稿 §5.1 能力降级显式告知）。
+      plan: [],
+      // default 档不追加 flags：上游审批请求走 adapter 桥接确认流（codex.ts handleServerRequest）
+      default: [],
+      // codex --help 实测存在（0.162.0-alpha.17.2）：跳过全部确认并无沙箱执行
+      yolo: ['--dangerously-bypass-approvals-and-sandbox'],
+    },
+    // resume 走协议 thread/resume（threadId），不经 CLI flags——resumeArgs 不设
+    // MCP 透传：P3 不做（schema 有 config/mcpServer 等方法，P4+ 再议）——mcpArgs 不设
   },
 ];
 
@@ -307,7 +331,10 @@ export function registerDetected(
 export async function ensureExternalAdapters(opts: DetectOptions = {}): Promise<DetectedAgent[]> {
   const detected = await detectExternalAgents(opts);
   for (const d of detected) {
-    registerDetected(d, (spec) => new StreamJsonExternalAdapter(spec));
+    // 按 kind 选适配器工厂（协议知识归 adapter，探测层只分派）
+    registerDetected(d, (spec) =>
+      spec.kind === 'app-server-jsonl' ? new CodexExternalAdapter(spec) : new StreamJsonExternalAdapter(spec),
+    );
   }
   return detected;
 }

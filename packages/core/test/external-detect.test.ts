@@ -66,7 +66,9 @@ function makeEntry(command: string): ExternalAgentCacheEntry {
 }
 
 async function detect(opts: Partial<DetectOptions> = {}): Promise<DetectedAgent[]> {
-  return detectExternalAgents({ homeDir: home, ...opts });
+  // PATH 缺省隔离为空串（tryPaths 对空 PATH 直接返回空）：KNOWN_AGENTS 含 cli:codex 后，
+  // 真机装了 codex/claude 的环境不能泄进探测结果；显式传 probePathEnv 的用例照常覆盖
+  return detectExternalAgents({ homeDir: home, probePathEnv: '', ...opts });
 }
 
 beforeEach(() => {
@@ -74,12 +76,14 @@ beforeEach(() => {
   home = path.join(tmpRoot, 'home');
   fs.mkdirSync(home, { recursive: true });
   delete process.env[ENV_NAME];
+  delete process.env[externalEnvPathName("cli:codex")];
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env[ENV_NAME];
+  delete process.env[externalEnvPathName("cli:codex")];
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -270,7 +274,7 @@ describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组
     const cmd = writeWrapper('claude-ensure', VERSION_CLI, '2.1.168-ensure');
     process.env[ENV_NAME] = cmd;
 
-    const found = await ensureExternalAdapters({ homeDir: home });
+    const found = await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
     expect(found).toHaveLength(1);
     expect(found[0]!.command).toBe(cmd);
     expect(found[0]!.version).toBe('2.1.168-ensure');
@@ -291,7 +295,7 @@ describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组
     const cmd = writeWrapper('claude-ensure-fail', VERSION_FAIL, 'ignored');
     process.env[ENV_NAME] = cmd;
 
-    const found = await ensureExternalAdapters({ homeDir: home });
+    const found = await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
     expect(found).toEqual([]);
     expect(readExternalAgentsCache(home)).toEqual([]);
     expect(resolveExternalAdapter('cli:claude-code')).toBe(before);
@@ -301,9 +305,9 @@ describe('ensureExternalAdapters（detect → StreamJson 工厂 → registry 组
     const cmd = writeWrapper('claude-ensure-twice', VERSION_CLI, '9.9.9-twice');
     process.env[ENV_NAME] = cmd;
 
-    await ensureExternalAdapters({ homeDir: home });
+    await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
     const first = resolveExternalAdapter('cli:claude-code');
-    await ensureExternalAdapters({ homeDir: home });
+    await ensureExternalAdapters({ homeDir: home, probePathEnv: "" });
     const second = resolveExternalAdapter('cli:claude-code');
     expect(first).toBeInstanceOf(StreamJsonExternalAdapter);
     expect(second).toBeInstanceOf(StreamJsonExternalAdapter);

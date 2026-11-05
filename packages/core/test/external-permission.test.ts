@@ -268,5 +268,27 @@ describe('runExternalAgent 权限桥接（F-55 §5.1 三档映射）', () => {
       expect(errs).toHaveLength(1);
       expect(errs[0]).toMatchObject({ fatal: false });
     });
+
+    it("Tier C（cli:codex，app-server-jsonl）+ plan 档 + permissionArgs.plan=[] → external_no_plan_mode 拒绝启动", async () => {
+      // Codex 无只读 plan 模式（设计稿 §5.1 Tier C 弱权限）：零适配器代码，靠同一门禁拒绝
+      const adapter = scriptAdapter([{ type: 'done', exitCode: 0 }], {
+        spec: { id: 'cli:codex', kind: 'app-server-jsonl', tier: 'C' },
+      });
+      registerExternalAdapter(adapter);
+      const events = await collect(makeCtx({ model: 'cli:codex', permissions: new PermissionState({ mode: 'plan' }) }));
+
+      const errs = events.filter((e) => e.type === 'error');
+      expect(errs).toHaveLength(1);
+      expect(errs[0]).toMatchObject({
+        type: 'error',
+        message: 'external_no_plan_mode: 外部 agent cli:codex 不支持只读档，拒绝启动（plan 档）',
+        fatal: true,
+      });
+      expect(events.at(-1)).toEqual({
+        type: 'done',
+        usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      });
+      expect(adapter.captures).toHaveLength(0); // adapter.run 未被调用
+    });
   });
 });
