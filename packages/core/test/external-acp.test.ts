@@ -255,6 +255,19 @@ describe('AcpExternalAdapter（F-55 Tier A：JSON-RPC over stdio）', () => {
     expect(adapter.stderrTail().join('\n')).toContain('recv: session/cancel');
   });
 
+  it('prompt 回包即本轮结束：常驻 agent 不退出也照样 done（cursor-agent「答完不停」回归）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [update('agent_message_chunk', { content: { type: 'text', text: 'hello' } })],
+      keepAlive: true, // fixture 回包后不退出：done 必须由适配器在回包时立即产出
+    });
+    expect(events).toEqual([
+      { type: 'external_session', id: 'fake-acp-session-1' },
+      { type: 'text', text: 'hello' },
+      { type: 'done', exitCode: 0 },
+    ]);
+  });
+
   it('exit 非 0 且无产出 → done exit N（fatal 判定归映射引擎，本层只透传）', async () => {
     const adapter = new AcpExternalAdapter(makeSpec());
     const events = await runScenario(adapter, { steps: [{ type: 'exit', code: 3 }] });

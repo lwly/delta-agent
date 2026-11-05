@@ -70,6 +70,8 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
   private nextId = 1;
   private sessionId: string | null = null;
   private exitSeen = false;
+  /** 本轮 turn 是否已宣告结束（prompt 回包到达 / 驱动失败收尾）；防 dispatch 重复发 done */
+  private turnDone = false;
 
   stderrTail(): string[] {
     return this.lastProc?.stderrTail() ?? [];
@@ -109,6 +111,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     this.nextId = 1;
     this.sessionId = null;
     this.exitSeen = false;
+    this.turnDone = false;
 
     const proc = spawnExternal({
       command: this.spec.command,
@@ -156,7 +159,8 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
         } else if (ev.type === 'exit') {
           this.exitSeen = true;
           rejectAllPending(`外部 agent 进程已退出（exit ${ev.code ?? -1}）`);
-          push({ type: 'done', exitCode: ev.code ?? -1 });
+          // turn 已宣告结束时不再重复发 done（常驻 agent 是被 cancel 收杀的，退出码无意义）
+          if (!this.turnDone) push({ type: 'done', exitCode: ev.code ?? -1 });
           return;
         }
         // stderr_line：已进环形缓冲（stderrTail 透传），不上抛
@@ -187,12 +191,18 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
         if (typeof sessionId !== 'string') throw new Error('session/new 回包缺少 sessionId');
         this.sessionId = sessionId;
         push({ type: 'external_session', id: sessionId });
+        // prompt 回包到达 = 本轮 turn 结束（ACP 语义，stopReason 随回包返回）。
+        // cursor-agent / opencode 等 ACP agent 是常驻 JSON-RPC 服务，答完不会退出进程
+        //（旧实现等 exit 才发 done → UI 永远停在「运行中」，cursor-agent 实测回归）。
+        // 故回包即发 done 结束本轮；常驻进程由消费方 break → run() finally 的 cancel()
+        // 收杀（onAbort 先发 session/cancel 通知，宽限期后杀进程组，幂等）。
         await this.request('session/prompt', {
           sessionId,
           prompt: [{ type: 'text', text: req.prompt }],
         });
-        // prompt result 到达：停发新请求，关 stdin 让 agent 自然退出（exit 事件 → done 由行分派产出）
-        proc.endStdin();
+        this.turnDone = true;
+        proc.endStdin(); // 一次性 CLI（答完自退）借此外正常收敛；常驻 agent 不受影响
+        push({ type: 'done', exitCode: 0 });
       } catch (err) {
         if (req.signal.aborted) return; // abort 路径：done 由行分派产出，abort 语义归映射引擎
         if (this.exitSeen) return; // 进程已退出：done 已带退出码，不再补 error
@@ -201,7 +211,10 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
           message: `ACP 会话失败：${err instanceof Error ? err.message : String(err)}`,
           fatal: true,
         });
-        proc.endStdin(); // 尽量让进程自行收敛；不退由消费方 abort / cancel 兜底
+        // 失败同样立即收尾：常驻 agent 收到协议错误后未必自退，不能等 exit（同上回归）
+        this.turnDone = true;
+        proc.endStdin();
+        push({ type: 'done', exitCode: 1 });
       }
     };
     void driver();

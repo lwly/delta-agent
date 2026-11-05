@@ -113,6 +113,8 @@ async function runSteps(promptId) {
     }
   }
   send({ jsonrpc: '2.0', id: promptId, result: { stopReason: scenario.stopReason ?? 'end_turn' } });
+  // keepAlive: true → 回包后不退出（模拟 cursor-agent 等常驻 ACP agent，回归「答完不停」）
+  if (scenario.keepAlive === true) return;
   finish(scenario.exitCode ?? 0);
 }
 
