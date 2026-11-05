@@ -261,6 +261,7 @@ describe('StreamJsonExternalAdapter（F-55 Tier B：claude stream-json JSONL）'
       'do things',
       '--output-format',
       'stream-json',
+      '--verbose',
       '--mcp-config',
       '/tmp/delta-mcp-s1.json',
       '--resume',
@@ -283,6 +284,6 @@ describe('StreamJsonExternalAdapter（F-55 Tier B：claude stream-json JSONL）'
       makeSpec({ permissionArgs: { plan: ['--permission-mode', 'plan'], default: [], yolo: ['--dangerously-skip-permissions'] } }),
     );
     await runScenario(adapter, { lines: [] }, { permissionMode: 'plan' });
-    expect(spawnedArgs(adapter)).toEqual(['-p', 'hi', '--output-format', 'stream-json', '--permission-mode', 'plan']);
+    expect(spawnedArgs(adapter)).toEqual(['-p', 'hi', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'plan']);
   });
 });

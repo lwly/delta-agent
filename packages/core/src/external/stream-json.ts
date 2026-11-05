@@ -36,8 +36,8 @@ const PROVIDER_ENV_WHITELIST = [
 /** claude 自家配置变量前缀（如 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC 等） */
 const CLAUDE_ENV_PREFIX = 'CLAUDE_CODE_';
 
-/** stream-json 输出格式的固定参数片段 */
-const STREAM_JSON_ARGS = ['--output-format', 'stream-json'] as const;
+/** stream-json 输出格式的固定参数片段（claude 2.1.168 实测：--print 下必须叠加 --verbose，否则报错退出） */
+const STREAM_JSON_ARGS = ['--output-format', 'stream-json', '--verbose'] as const;
 
 /** stream-json 线上消息的宽松形状（只声明用到的部分，未知字段宽容） */
 interface StreamJsonMessage {
@@ -110,6 +110,10 @@ export class StreamJsonExternalAdapter implements ExternalAgentAdapter {
         : undefined,
     });
     this.lastProc = proc;
+
+    // prompt 走 argv，立即关 stdin：claude -p 会等 stdin 数据 3s 才继续（实测警告
+    // "no stdin data received in 3s"），关闭后零等待；Tier B 不用 --input-format。
+    proc.endStdin();
 
     try {
       for await (const ev of proc.events) {
