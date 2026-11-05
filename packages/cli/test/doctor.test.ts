@@ -126,6 +126,41 @@ describe('collectDoctorChecks（offline 注入 home）', () => {
   });
 });
 
+describe('collectDoctorChecks 外部 Agent 节（F-55 §10 / §5.2）', () => {
+  it('外部检查项齐备：probe / login / capabilities / env 恒存在（permissions 项仅在探测命中时出现），且状态不为 fail', async () => {
+    const h = path.join(tmpRoot, 'home-external');
+    mkdirSync(path.join(h, '.delta'), { recursive: true });
+    const results = await collectDoctorChecks({ homeDir: h, offline: true, probeTimeoutMs: 1500 });
+    const byId = new Map(results.map((r) => [r.id, r]));
+    for (const id of ['external-probe', 'external-login', 'external-capabilities', 'external-env']) {
+      expect(byId.has(id)).toBe(true);
+    }
+    // 探测不到是常态：外部项永不 fail（不影响退出码聚合）
+    for (const r of results.filter((r) => r.id.startsWith('external-'))) {
+      expect(r.status).not.toBe('fail');
+    }
+  });
+
+  it('能力降级声明固定文案：沙箱 / 内置 Function / 压缩与蒸馏 / 订阅不计费（AC-55-7 doctor 部分）', async () => {
+    const h = path.join(tmpRoot, 'home-external-caps');
+    mkdirSync(path.join(h, '.delta'), { recursive: true });
+    const results = await collectDoctorChecks({ homeDir: h, offline: true, probeTimeoutMs: 1500 });
+    const caps = results.find((r) => r.id === 'external-capabilities')!;
+    expect(caps.detail).toContain('不使用 delta 沙箱');
+    expect(caps.detail).toContain('内置 Function 不可注入');
+    expect(caps.detail).toContain('无上下文压缩与记忆蒸馏');
+    expect(caps.detail).toContain('usage.billing=subscription');
+  });
+
+  it('环境变量提示：含 DELTA_EXTERNAL_CLAUDE_CODE_PATH 展示', async () => {
+    const h = path.join(tmpRoot, 'home-external-env');
+    mkdirSync(path.join(h, '.delta'), { recursive: true });
+    const results = await collectDoctorChecks({ homeDir: h, offline: true, probeTimeoutMs: 1500 });
+    const env = results.find((r) => r.id === 'external-env')!;
+    expect(env.detail).toContain('DELTA_EXTERNAL_CLAUDE_CODE_PATH');
+  });
+});
+
 describe('MIN_NODE_VERSION', () => {
   it('与 README/根 package.json 的环境要求一致（>= 20）', () => {
     expect(MIN_NODE_VERSION).toBe('20.0.0');

@@ -70,6 +70,8 @@ import {
   type MarketEntry,
 } from '../market/install.js';
 import { readMarketSources, validateMarketSources, writeMarketSources } from '../market/registry.js';
+// F-55 外部 Agent（/api/external-agents 只读端点：探测 + 三档支持度 + 登录态存在性）
+import { checkLoginState, ensureExternalAdapters, type DetectedAgent } from '../external/detect.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -112,6 +114,11 @@ export interface ServeOptions {
    * 缺省不提供：GET/DELETE /api/sessions/:id/background-tasks* 返回 501（能力未装配口径）。
    */
   backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /**
+   * F-55 外部 Agent 探测入口（缺省 ensureExternalAdapters；测试注入隔离探测副作用——
+   * 真探测会跑 `--version` 子进程并写 ~/.delta/external.json，单测不能触碰真实 HOME/PATH）。
+   */
+  externalDetect?: () => Promise<DetectedAgent[]>;
   /**
    * 本地 server 鉴权 token（桌面宿主用；CLI serve 缺省不鉴权保持现状）。
    * 配置后所有请求（/api 与静态资源）必须携带 `x-delta-auth` 请求头
@@ -1195,6 +1202,31 @@ export function createWebServer(opts: ServeOptions): http.Server {
             return err(res, 400, (e as Error).message);
           }
         }
+      }
+
+      // ── F-55 外部 Agent（Web 设置页「外部 Agent」面板：只读展示，不提供安装/卸载，设计稿 §10/§16）──
+      // GET /api/external-agents —— 探测（失败静默）→ DetectedAgent[] 配 loginState 与三档支持度。
+      // plan/yolo 支持度按 permissionArgs 非空判定（探测层事实，不查 registry）。
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 2) {
+        let detected: DetectedAgent[] = [];
+        try {
+          detected = await (opts.externalDetect ?? ensureExternalAdapters)();
+        } catch {
+          // 探测异常静默为空态（AC-55-7 精神：面板显示空态文案，不弹错误）
+          detected = [];
+        }
+        return json(res, 200, {
+          agents: detected.map((d) => ({
+            id: d.def.id,
+            command: d.command,
+            version: d.version,
+            source: d.source,
+            tier: d.def.tier,
+            loginState: checkLoginState(d.def),
+            planSupported: d.def.permissionArgs.plan.length > 0,
+            yoloSupported: d.def.permissionArgs.yolo.length > 0,
+          })),
+        });
       }
 
       // ── memory（记忆里程碑：F-06a 记忆面板 + 工具共用同一存储）───────────────

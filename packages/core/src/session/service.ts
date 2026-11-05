@@ -189,6 +189,15 @@ export class SessionService {
     this.store.setSessionExpert(id, patch);
   }
 
+  /**
+   * F-55（§8）：写入外部会话 resume 令牌（external_session 上报时透传，覆盖式更新）。
+   * 持久化失败由调用方（hub/headless 的 onExternalSession）兜底吞掉，不阻塞运行。
+   */
+  setSessionExternal(sessionId: string, externalId: string, agentId: string): void {
+    if (!this.store.getSession(sessionId)) throw new Error('session not found');
+    this.store.setSessionExternal(sessionId, externalId, agentId);
+  }
+
   getHistory(sessionId: string): ChatMessage[] {
     return this.store.getMessages(sessionId);
   }
@@ -309,8 +318,16 @@ export class SessionService {
     };
   }
 
-  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model = ''): void {
-    this.store.recordUsage(sessionId, turn, input, output, costUsd, model);
+  recordUsage(
+    sessionId: string,
+    turn: number,
+    input: number,
+    output: number,
+    costUsd: number,
+    model = '',
+    billing: 'metered' | 'subscription' = 'metered',
+  ): void {
+    this.store.recordUsage(sessionId, turn, input, output, costUsd, model, billing);
   }
 
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void {

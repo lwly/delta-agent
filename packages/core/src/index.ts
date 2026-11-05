@@ -92,6 +92,8 @@ export { DeepSeekProvider } from './llm/providers/deepseek.js';
 export { QwenProvider } from './llm/providers/qwen.js';
 export { ProviderManager, type ProviderView } from './llm/manager.js';
 export { ScriptedFakeProvider, type FakeProviderMode } from './llm/fake-provider.js';
+// F-55 外部 CLI Agent：虚拟 model id 的占位 Provider（外部会话不可走 LLMProvider）
+export { UnavailableProvider } from './llm/placeholders.js';
 export { PROVIDER_DEFAULT_MODELS, defaultModelFor } from './llm/defaults.js';
 export {
   ModelRouter,
@@ -112,6 +114,82 @@ export {
   type RoutingRule,
   type RoutingConfig,
 } from './llm/keychain.js';
+
+// F-55 外部 CLI Agent 适配层：类型契约（adapter 只懂协议，engine/external.ts 只懂映射）
+// 详见 docs/design-f55-external-cli-agents.md §3
+export type {
+  ExternalTier,
+  ExternalAgentSpec,
+  ExternalEvent,
+  ExternalAgentAdapter,
+} from './external/types.js';
+
+// F-55 外部进程生命周期底座（§9）：spawn / 杀进程组 / stderr 环形缓冲，纯进程层不做协议解析
+export {
+  spawnExternal,
+  MAX_LINE_BYTES,
+  STDERR_RING_LINES,
+  ABORT_KILL_DELAY_MS,
+} from './external/spawn.js';
+export type { SpawnOptions, ProcEvent, SpawnedProcess } from './external/spawn.js';
+
+// F-55 外部 adapter 注册表：hub 引擎分派与 runExternalAgent 按 ctx.model（cli:*/acp:* 虚拟 id）解析
+// （P4 工厂语义：resolveExternalAdapter 返回工厂，每 run 独立实例——并发会话状态隔离）
+export {
+  registerExternalAdapter,
+  registerExternalAdapterFactory,
+  resolveExternalAdapter,
+  isExternalModel,
+} from './external/registry.js';
+
+// F-55 外部 agent 运行追踪（AC-55-5）：serve dispose 全杀在跑的外部 agent 子进程
+// （与 F-54 BackgroundTaskManager.killAll 同一 dispose 收尾语义）
+export {
+  trackExternalRun,
+  untrackExternalRun,
+  cancelAllExternalRuns,
+} from './external/lifecycle.js';
+export type { ExternalRunHandle } from './external/lifecycle.js';
+
+// F-55 Scripted 外部适配器（测试/e2e 专用；DELTA_FAKE_CLI 命中时模块加载即自动注册）
+export { ScriptedExternalAdapter } from './external/scripted.js';
+
+// F-55 Tier A 外部适配器：ACP（JSON-RPC over stdio；spec 由调用方构建，detect 归 P2）
+export { AcpExternalAdapter } from './external/acp.js';
+
+// F-55 Tier B 外部适配器：Claude stream-json（claude -p --output-format stream-json 的 stdout JSONL）
+export { StreamJsonExternalAdapter } from './external/stream-json.js';
+
+// F-55 Tier C 外部适配器：Codex app-server v2（JSON-RPC over stdio，换行分隔）
+export { CodexExternalAdapter } from './external/codex.js';
+
+// F-55 MCP 配置透传（§6）：delta MCP 合并视图 → delta- 前缀别名临时文件（engine 收尾 cleanup）
+export { buildDeltaMcpFile } from './external/mcp-passthrough.js';
+
+// F-55 外部 agent 探测与 external.json 持久化（§10 + AC-55-9 白名单 schema）：
+// 探测/持久化/接缝（detectedToSpec + 工厂注入 registerDetected）+ ensureExternalAdapters
+// 组合入口（Task 11：detect → StreamJsonExternalAdapter 工厂 → registry 注册）
+export {
+  KNOWN_AGENTS,
+  PROBE_TIMEOUT_MS,
+  detectExternalAgents,
+  ensureExternalAdapters,
+  probeAgent,
+  detectedToSpec,
+  registerDetected,
+  checkLoginState,
+  externalEnvPathName,
+  readExternalAgentsCache,
+  writeExternalAgentsCache,
+} from './external/detect.js';
+export type {
+  KnownAgentDef,
+  DetectedAgent,
+  DetectSource,
+  DetectOptions,
+  ExternalAgentCacheEntry,
+} from './external/detect.js';
+
 
 export { ToolRegistry } from './tools/registry.js';
 export type { AgentTool, ToolContext, ToolDanger, SubagentRuntime } from './tools/types.js';
@@ -187,6 +265,8 @@ export {
 } from './tools/permissions.js';
 
 export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
+// F-55 外部 CLI Agent 事件映射引擎（ExternalEvent → AgentEvent，不 import 协议解析）
+export { runExternalAgent } from './engine/external.js';
 export {
   runHeadless,
   headlessExitCode,

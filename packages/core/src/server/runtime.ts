@@ -26,6 +26,7 @@ import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
 import { TerminalManager } from './terminal.js';
 import { BackgroundTaskManager } from '../session/background-tasks.js';
+import { cancelAllExternalRuns } from '../external/lifecycle.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
@@ -194,9 +195,14 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      // 先停 accepting（server.close 立即返回、等待存量连接收尾）：全杀子进程的
+      // 数百 ms 窗口内不再接受新的运行，避免新外部 run 不在全杀快照而成孤儿
+      server.close();
       terminal.killAll(); // F-47：serve 退出全杀 pty（防孤儿 shell 进程）
       backgroundTasks.killAll(); // F-54：serve 退出全杀后台任务（防孤儿命令进程）
-      server.close();
+      // F-55 AC-55-5：serve 退出全杀运行中的外部 agent 子进程（防孤儿 CLI 进程；
+      // 与 backgroundTasks.killAll 同一 dispose 收尾语义，内部单项容错不阻塞其余步骤）
+      await cancelAllExternalRuns();
       await mcp.disconnectAll().finally(() => service.close());
     },
   };

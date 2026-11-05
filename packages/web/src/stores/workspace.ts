@@ -82,13 +82,15 @@ export const useWorkspaceStore = defineStore('workspace', {
     async createSession(opts?: { title?: string; model?: string; mode?: string; expert?: string }) {
       if (!this.activeProjectId) throw new Error('未选择项目');
       const s = await api.createSession(this.activeProjectId, opts);
-      await this.selectProject(this.activeProjectId);
+      // 项目徽标的 session_count 来自 /api/projects 快照——新建会话必须同步刷新，
+      // 否则侧栏项目数量停在进入页面时的旧值（+1 不生效）
+      await Promise.all([this.selectProject(this.activeProjectId), this.refreshProjects()]);
       return s;
     },
     async removeSession(id: string, hard = false) {
       await api.removeSession(id, hard);
-      await this.selectProject(this.activeProjectId);
-      await this.refreshTrash();
+      // 同 createSession：软删/硬删后项目徽标数量要 -1，需刷新 /api/projects 快照
+      await Promise.all([this.selectProject(this.activeProjectId), this.refreshProjects(), this.refreshTrash()]);
     },
     async removeProject(id: string, confirmName: string, hard = false) {
       await api.removeProject(id, confirmName, hard);

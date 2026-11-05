@@ -47,7 +47,7 @@ describe('v5 迁移', () => {
   it('空库 → user_version=5，sessions 含两新列与索引', async () => {
     const store = new SessionStore(await tmpDb());
     try {
-      expect(store.schemaVersion).toBe(5);
+      expect(store.schemaVersion).toBe(6);
       expect(hasColumn(store.db, 'sessions', 'expert')).toBe(true);
       expect(hasColumn(store.db, 'sessions', 'expert_type')).toBe(true);
       const idx = store.db
@@ -85,7 +85,7 @@ describe('v5 迁移', () => {
 
     const store = new SessionStore(file);
     try {
-      expect(currentSchemaVersion(store.db)).toBe(5);
+      expect(currentSchemaVersion(store.db)).toBe(6);
       expect(hasColumn(store.db, 'sessions', 'expert')).toBe(true);
       const idx = store.db
         .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sessions_expert'")

@@ -93,7 +93,8 @@ export interface HeadlessOutcome {
 export interface HeadlessService {
   appendMessage(sessionId: string, m: ChatMessage): void;
   getHistory(sessionId: string): ChatMessage[];
-  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model?: string): void;
+  /** F-55：billing 为用量口径（'metered' 按量 / 'subscription' 订阅内未计量），引擎事件透传 */
+  recordUsage(sessionId: string, turn: number, input: number, output: number, costUsd: number, model?: string, billing?: 'metered' | 'subscription'): void;
   recordCompaction(sessionId: string, before: number, after: number, summary: string): void;
 }
 
@@ -252,6 +253,8 @@ export async function runHeadless(
               ev.usage.outputTokens,
               ev.usage.costUsd ?? 0,
               ev.model ?? ctx.model,
+              // F-55：billing 口径随事件透传（外部引擎发 'subscription'，内置引擎缺省 'metered'）
+              ev.billing,
             );
           }
           break;

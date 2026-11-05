@@ -1,0 +1,272 @@
+/**
+ * F-55 Tier A ACP 适配器单测（docs/design-f55-external-cli-agents.md §2/§3/§9）：
+ *  - 全部走 spawnExternal + fake-acp-agent.mjs fixture（JSON-RPC over stdio），零网络、零真实 CLI；
+ *  - 场景经 FAKE_ACP_SCRIPT env 注入 fixture（adapter 镜像为子进程 env，对齐 DELTA_FAKE_CLI 先例）；
+ *  - fatal 判定归映射引擎（engine/external.ts），本层只透传退出码。
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { AcpExternalAdapter } from '../src/external/acp.js';
+import type { ExternalAgentSpec, ExternalEvent } from '../src/external/types.js';
+
+const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-acp-agent.mjs');
+const NODE = process.execPath;
+
+let tmp: string;
+beforeEach(async () => {
+  tmp = await mkdtemp(path.join(os.tmpdir(), 'yz-ext-acp-'));
+});
+afterEach(async () => {
+  delete process.env.FAKE_ACP_SCRIPT;
+  await rm(tmp, { recursive: true, force: true });
+});
+
+function makeSpec(): ExternalAgentSpec {
+  return {
+    id: 'acp:fake',
+    kind: 'acp',
+    command: NODE,
+    args: [FIXTURE],
+    tier: 'A',
+    version: 'fake',
+    // fixture 无权限 flags 语义，三档全空
+    permissionArgs: { plan: [], default: [], yolo: [] },
+  };
+}
+
+async function writeScenario(scenario: Record<string, unknown>): Promise<string> {
+  const p = path.join(tmp, `scenario-${Math.random().toString(36).slice(2)}.json`);
+  await writeFile(p, JSON.stringify(scenario));
+  return p;
+}
+
+interface RunOptions {
+  signal?: AbortSignal;
+  prompt?: string;
+}
+
+/** 跑一轮会话并收集事件（done 即止） */
+async function runScenario(adapter: AcpExternalAdapter, scenario: Record<string, unknown>, opts: RunOptions = {}): Promise<ExternalEvent[]> {
+  const events: ExternalEvent[] = [];
+  for await (const ev of startScenario(adapter, scenario, opts)) {
+    events.push(ev);
+    if (ev.type === 'done') break;
+  }
+  return events;
+}
+
+/** 写场景文件 + 置 FAKE_ACP_SCRIPT 后返回原始事件迭代器（供测试中途 abort / respondPermission） */
+async function* startScenario(adapter: AcpExternalAdapter, scenario: Record<string, unknown>, opts: RunOptions = {}): AsyncGenerator<ExternalEvent> {
+  const scenarioPath = await writeScenario(scenario);
+  process.env.FAKE_ACP_SCRIPT = scenarioPath;
+  yield* adapter.run({
+    prompt: opts.prompt ?? 'hi',
+    cwd: tmp,
+    permissionMode: 'default',
+    signal: opts.signal ?? new AbortController().signal,
+  });
+}
+
+const update = (sessionUpdate: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  type: 'update',
+  params: { sessionId: 'fake-acp-session-1', update: { sessionUpdate, ...extra } },
+});
+
+describe('AcpExternalAdapter（F-55 Tier A：JSON-RPC over stdio）', () => {
+  it('握手 + 一轮完整会话：external_session → text → done exit 0', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [update('agent_message_chunk', { content: { type: 'text', text: 'hello' } })],
+    });
+    expect(events).toEqual([
+      { type: 'external_session', id: 'fake-acp-session-1' },
+      { type: 'text', text: 'hello' },
+      { type: 'done', exitCode: 0 },
+    ]);
+  });
+
+  it('thinking chunk → thinking ExternalEvent（protocolVersion 不一致也宽容不报错）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      protocolVersion: 99, // 版本协商宽容：agent 返回不同 version 不报错
+      steps: [update('agent_thought_chunk', { content: { type: 'text', text: 'pondering' } })],
+    });
+    expect(events).toContainEqual({ type: 'thinking', text: 'pondering' });
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
+  });
+
+  it('tool_call + tool_call_update(completed/failed) → tool_use + tool_result；in_progress/pending 忽略', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [
+        update('tool_call', { toolCallId: 't1', title: 'Bash', kind: 'execute', rawInput: { cmd: 'ls' } }),
+        update('tool_call_update', { toolCallId: 't1', status: 'in_progress' }), // 中间态：忽略
+        update('tool_call_update', { toolCallId: 't1', status: 'completed', output: { content: [{ type: 'text', text: 'out-ok' }] } }),
+        update('tool_call', { toolCallId: 't2', title: 'Edit', rawInput: { file: 'a.ts' } }),
+        update('tool_call_update', { toolCallId: 't2', status: 'pending' }), // 中间态：忽略
+        update('tool_call_update', {
+          toolCallId: 't2',
+          status: 'failed',
+          output: { content: [{ type: 'text', text: 'boom' }, { type: 'image', data: 'xxx' }] },
+        }),
+      ],
+    });
+    expect(events).toEqual([
+      { type: 'external_session', id: 'fake-acp-session-1' },
+      { type: 'tool_use', id: 't1', name: 'Bash', argsJson: '{"cmd":"ls"}' },
+      { type: 'tool_result', id: 't1', ok: true, content: 'out-ok' },
+      { type: 'tool_use', id: 't2', name: 'Edit', argsJson: '{"file":"a.ts"}' },
+      { type: 'tool_result', id: 't2', ok: false, content: 'boom\n{"type":"image","data":"xxx"}' },
+      { type: 'done', exitCode: 0 },
+    ]);
+  });
+
+  it('plan 通知 → plan ExternalEvent（缺 status 宽容为 pending）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [
+        update('plan', {
+          entries: [
+            { content: 'step1', status: 'completed' },
+            { content: 'step2', status: 'in_progress' },
+            { content: 'step3' },
+          ],
+        }),
+      ],
+    });
+    expect(events).toContainEqual({
+      type: 'plan',
+      steps: [
+        { title: 'step1', status: 'completed' },
+        { title: 'step2', status: 'in_progress' },
+        { title: 'step3', status: 'pending' },
+      ],
+    });
+  });
+
+  it('未知 sessionUpdate 忽略不崩；非法 JSON 行 → error fatal:false 且会话继续', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [
+        update('future_unknown_thing', { foo: 1 }), // 未知类型：忽略
+        { type: 'raw', text: '{"not-json' }, // 非法 JSON：error fatal:false
+        update('agent_message_chunk', { content: { type: 'text', text: 'after' } }),
+      ],
+    });
+    const errors = events.filter((e): e is Extract<ExternalEvent, { type: 'error' }> => e.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].fatal).toBe(false);
+    expect(errors[0].message).toContain('{"not-json');
+    expect(events.filter((e) => e.type === 'text')).toEqual([{ type: 'text', text: 'after' }]);
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
+  });
+
+  it('permission_request → respondPermission(allow_session) 回包 optionId 对应 allow_always', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events: ExternalEvent[] = [];
+    for await (const ev of startScenario(adapter, {
+      steps: [
+        update('tool_call', { toolCallId: 't1', title: 'Bash', kind: 'execute', rawInput: { cmd: 'rm' } }),
+        {
+          type: 'request_permission',
+          params: {
+            sessionId: 'fake-acp-session-1',
+            toolCall: { toolCallId: 't1', title: 'Bash', kind: 'execute', rawInput: { cmd: 'rm' } },
+            options: [
+              { optionId: 'opt-allow-once', name: 'Allow once', kind: 'allow_once' },
+              { optionId: 'opt-allow-always', name: 'Allow always', kind: 'allow_always' },
+              { optionId: 'opt-reject', name: 'Reject', kind: 'reject_once' },
+            ],
+          },
+        },
+      ],
+    })) {
+      events.push(ev);
+      if (ev.type === 'permission_request') {
+        expect(ev.tool).toBe('Bash');
+        expect(ev.argsJson).toBe('{"cmd":"rm"}');
+        expect(ev.options).toEqual(['opt-allow-once', 'opt-allow-always', 'opt-reject']);
+        // id = JSON-RPC 请求 id 字符串化；allow_session → 期望选中 allow_always 类 option
+        expect(ev.id).toMatch(/^\d+$/);
+        adapter.respondPermission(ev.id, 'allow_session');
+      }
+      if (ev.type === 'done') break;
+    }
+    // fixture 把收到的 outcome 回显进下一条 message chunk 的 text
+    const outcomeText = events.find((e) => e.type === 'text' && String((e as { text: string }).text).startsWith('permission-outcome:'));
+    expect(outcomeText).toBeDefined();
+    expect((outcomeText as { text: string }).text).toBe(
+      'permission-outcome:{"outcome":"selected","optionId":"opt-allow-always"}',
+    );
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
+  });
+
+  it('respondPermission 对未知 id / 已答复 id 均静默不崩（重复应答只回一次）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    expect(() => adapter.respondPermission('no-such-id', 'allow')).not.toThrow();
+
+    let answered = 0;
+    const events: ExternalEvent[] = [];
+    for await (const ev of startScenario(adapter, {
+      steps: [
+        {
+          type: 'request_permission',
+          params: {
+            sessionId: 'fake-acp-session-1',
+            toolCall: { toolCallId: 't1', title: 'Bash', kind: 'execute' },
+            options: [
+              { optionId: 'opt-allow-once', name: 'Allow once', kind: 'allow_once' },
+              { optionId: 'opt-reject', name: 'Reject', kind: 'reject_once' },
+            ],
+          },
+        },
+      ],
+    })) {
+      events.push(ev);
+      if (ev.type === 'permission_request') {
+        answered++;
+        adapter.respondPermission(ev.id, 'reject');
+        adapter.respondPermission(ev.id, 'allow'); // 已答复：静默忽略，fixture 只收到一次回包
+      }
+      if (ev.type === 'done') break;
+    }
+    expect(answered).toBe(1);
+    const outcomes = events.filter((e) => e.type === 'text' && String((e as { text: string }).text).startsWith('permission-outcome:'));
+    expect(outcomes).toHaveLength(1);
+    expect((outcomes[0] as { text: string }).text).toBe(
+      'permission-outcome:{"outcome":"selected","optionId":"opt-reject"}',
+    );
+  });
+
+  it('abort：session/cancel 通知到达 fixture（stderr 记录）→ 进程退出 → done', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const ac = new AbortController();
+    const events: ExternalEvent[] = [];
+    for await (const ev of startScenario(adapter, { steps: [{ type: 'delay', ms: 10000 }] }, { signal: ac.signal })) {
+      events.push(ev);
+      if (ev.type === 'external_session') ac.abort(); // 会话建立后立刻 abort
+      if (ev.type === 'done') break;
+    }
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
+    // fixture 收到 session/cancel 通知后写 stderr 并退出
+    expect(adapter.stderrTail().join('\n')).toContain('recv: session/cancel');
+  });
+
+  it('exit 非 0 且无产出 → done exit N（fatal 判定归映射引擎，本层只透传）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, { steps: [{ type: 'exit', code: 3 }] });
+    expect(events).toEqual([
+      { type: 'external_session', id: 'fake-acp-session-1' },
+      { type: 'done', exitCode: 3 },
+    ]);
+  });
+
+  it('stderrTail 透传 fixture 的 stderr 输出（环形缓冲非空）', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    await runScenario(adapter, { steps: [{ type: 'stderr', text: 'acp-stderr-marker' }] });
+    expect(adapter.stderrTail().join('\n')).toContain('acp-stderr-marker');
+  });
+});

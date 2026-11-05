@@ -518,6 +518,26 @@ function onModelChange(ev: Event) {
   chat.notice(`已记录模型偏好：${v}（对新建对话生效）`);
 }
 
+// ── F-55 外部会话降级提示条（AC-55-7：能力降级是显式常驻提示，不弹错误）──
+// 前缀判定与 core isExternalModel（external/registry.ts）对齐；web 不依赖 @delta/core，本地实现。
+function isExternalModelId(model: string | undefined | null): boolean {
+  return typeof model === 'string' && /^(cli|acp):/.test(model);
+}
+const externalModel = computed(() => {
+  const m = chat.sessionMeta?.model;
+  return isExternalModelId(m) ? m! : '';
+});
+// 关闭态按 model id 记 localStorage：关闭 A 后切到外部 Agent B 仍提示一次（同 A 恢复会话不再打扰）
+const EXTERNAL_BAR_KEY = 'yz.externalSessionBarDismissed';
+const externalBarDismissed = ref(localStorage.getItem(EXTERNAL_BAR_KEY) ?? '');
+const showExternalBar = computed(
+  () => externalModel.value !== '' && externalBarDismissed.value !== externalModel.value,
+);
+function dismissExternalBar() {
+  externalBarDismissed.value = externalModel.value;
+  localStorage.setItem(EXTERNAL_BAR_KEY, externalBarDismissed.value);
+}
+
 function askRemoveProject(p: { id: string; name: string }) {
   projectMenuFor.value = '';
   removeTarget.value = { kind: 'project', id: p.id, name: p.name };
@@ -1593,6 +1613,11 @@ watch(
         <!-- F-54 后台任务条：有运行中任务时显示，展开可停止/删除 -->
         <BackgroundTasksBar />
         <div class="composer-wrap">
+          <!-- F-55 外部会话降级提示条：常驻不自动消失，可关闭（关闭态存 localStorage） -->
+          <div v-if="showExternalBar" class="external-bar">
+            <span class="eb-text">外部 Agent 会话（{{ externalModel }}）：不使用 delta 沙箱 · 内置工具不可用 · 无压缩/记忆蒸馏 · 订阅内不计费</span>
+            <button class="eb-close" type="button" title="关闭提示" @click="dismissExternalBar">×</button>
+          </div>
           <div class="composer" :class="{ resizing: composerResizing, degraded: chat.running }">
             <!-- 运行中顶部细提示行 -->
             <div v-if="chat.running" class="composer-hint">Agent 运行中，输入与工具栏暂不可用 · 停止后可继续</div>
@@ -2305,6 +2330,20 @@ watch(
 
 /* ══════════ 输入区 ══════════ */
 .composer-wrap { padding: 0 24px 10px; }
+/* F-55 外部会话降级提示条（info 条视觉：accent 软底 + 常驻，可关闭） */
+.external-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px; padding: 7px 12px;
+  border: 1px solid var(--accent-border); border-radius: 8px;
+  background: var(--accent-soft); font-size: 12px; color: var(--text-dim);
+}
+.eb-text { flex: 1; min-width: 0; line-height: 1.5; }
+.eb-close {
+  flex: none; width: 20px; height: 20px; line-height: 1;
+  border: none; border-radius: 6px; background: transparent;
+  color: var(--text-dim); font-size: 14px; cursor: pointer;
+}
+.eb-close:hover { background: var(--bg-hover); color: var(--text); }
 .composer {
   max-width: 860px; margin: 0 auto; position: relative;
   background: var(--bg-elevated); border: 1px solid var(--border);

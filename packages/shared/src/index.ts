@@ -99,6 +99,8 @@ export interface Plan {
   /** Reviewer 打回 / Planner 调整时递增 */
   revision: number;
   createdAt: number;
+  /** F-55：外部 agent 的计划（占位节点，禁止编辑/重执行） */
+  external?: boolean;
 }
 
 export interface ReviewFailure {
@@ -196,7 +198,7 @@ export type AgentEvent =
    */
   | { type: 'sandbox_notice'; kind: 'degraded' | 'pulled' | 'unavailable' | 'gc_suggest'; detail: string }
   /** F-31：usage 事件附带当轮模型（引擎填 ctx.model；老消费端可忽略） */
-  | { type: 'usage'; usage: Usage; model?: string }
+  | { type: 'usage'; usage: Usage; model?: string; billing?: 'metered' | 'subscription' }
   /**
    * F-39：专家团成员委派开始（不落库；回放靠 tool 消息 content 的 `[expert:<id>]` 前缀）。
    * goal = 目标摘要（≤120 字，来自 task 的 description / prompt 前 120 字）。

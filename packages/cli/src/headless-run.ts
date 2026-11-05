@@ -30,13 +30,17 @@ import {
   prepareImages,
   describeImage,
   ImageError,
+  ensureExternalAdapters,
   resolveProviderFromEnv,
+  runExternalAgent,
   runHeadless,
   runMultiAgent,
   runPlanExecute,
   runReAct,
+  isExternalModel,
   modeSegment,
   createDesktopNotifier,
+  UnavailableProvider,
   userConfigDir,
   type AgentEvent,
   type ChatMessage,
@@ -84,13 +88,19 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   }
 
   // provider（失败 → 退出码 1）
+  // F-55：外部会话（cli:/acp: 前缀虚拟 model）本就无 Provider Key 可解析——入口先按
+  // 显式 model / DELTA_MODEL 预判跳过解析；resume 会话的 model 可能落在 session 里，
+  // session 就绪后还会按 session.model 复判（见下），以复判结果为准
+  const isExternalInput = isExternalModel(opts.model ?? process.env.DELTA_MODEL ?? '');
   let provider;
-  try {
-    provider = await resolveProviderFromEnv(opts.provider);
-  } catch (e) {
-    console.error(`✘ ${(e as Error).message}`);
-    process.exitCode = 1;
-    return;
+  if (!isExternalInput) {
+    try {
+      provider = await resolveProviderFromEnv(opts.provider);
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   // MCP：~/.delta/mcp.json + .delta/mcp.json（项目级优先）
@@ -133,21 +143,51 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   }
   service.recoverTasks(session.id);
 
+  // F-55 复判：以 session.model 为准（覆盖 resume 命中外部会话 / 仅 DELTA_MODEL 带前缀等场景）
+  const isExternal = isExternalModel(session.model || '');
+  if (isExternal) {
+    // 外部会话注入占位 Provider：chat() 一经迭代即抛 external_agent_no_llm，
+    // 保持 RunContext.provider 必填契约（design-f55 §11.1）；此处不再解析环境 Key。
+    // isExternal 为真时 session.model 必非空（正则对空串不命中），! 断言安全
+    provider = new UnavailableProvider(session.model!);
+  } else if (!provider) {
+    // 入口预判为外部但最终会话是内置引擎（如 resume 未显式指定 model）：此处补解析
+    try {
+      provider = await resolveProviderFromEnv(opts.provider);
+    } catch (e) {
+      console.error(`✘ ${(e as Error).message}`);
+      process.exitCode = 1;
+      service.close();
+      return;
+    }
+  }
+
+  // F-55：外部会话启动前确保 adapter 已注册（Task 11 组合入口：detect 探测 →
+  // StreamJsonExternalAdapter 工厂 → registry 注册）。探测失败静默（detect 内部不抛）；
+  // adapter 未注册时映射引擎发 external_agent_not_found fatal error，走正常事件流。
+  // 副作用：探测结果落 ~/.delta/external.json（design-f55 §10）
+  if (isExternal) await ensureExternalAdapters();
+
   // F-34 项目 onboarding：新注册项目时同步扫描一次，生成静态记忆草案
   // （一次性成本可接受；失败静默——状态留在 pending，下次新项目启动重试）
   if (project.created) {
-    console.error('✨ 新项目已注册：开始 onboarding 扫描…');
-    try {
-      const r = await autoOnboardProject({
-        projectRoot: cwd,
-        provider,
-        model: session.model || defaultModelFor(provider.id),
-      });
-      if (r && !r.skipped) {
-        console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
+    if (isExternal) {
+      // F-55：onboarding 扫描要调 provider.chat，外部会话无 LLM 后端，显式跳过（能力降级不弹错）
+      console.error('外部会话：跳过项目 onboarding');
+    } else {
+      console.error('✨ 新项目已注册：开始 onboarding 扫描…');
+      try {
+        const r = await autoOnboardProject({
+          projectRoot: cwd,
+          provider,
+          model: session.model || defaultModelFor(provider.id),
+        });
+        if (r && !r.skipped) {
+          console.error(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
+        }
+      } catch {
+        console.error('⚠ onboarding 扫描失败（已跳过，可稍后运行 `delta onboarding run`）');
       }
-    } catch {
-      console.error('⚠ onboarding 扫描失败（已跳过，可稍后运行 `delta onboarding run`）');
     }
   }
 
@@ -178,18 +218,21 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
 
   // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型；
   // 目标 provider 构建失败 / 规则缺失 → 回退主模型（预算/用量仍回写任务预算，口径不变）
+  // F-55：外部会话无内置子代理运行时，路由不解析、subagent 不注入（能力显式降级）
   let subProvider = provider;
   let subModel = model;
-  try {
-    const r = new ModelRouter().resolve('subagent');
-    if (r) {
-      if (r.provider) {
-        subProvider = await resolveProviderFromEnv(r.provider);
+  if (!isExternal) {
+    try {
+      const r = new ModelRouter().resolve('subagent');
+      if (r) {
+        if (r.provider) {
+          subProvider = await resolveProviderFromEnv(r.provider);
+        }
+        subModel = r.model;
       }
-      subModel = r.model;
+    } catch {
+      // 回退主模型
     }
-  } catch {
-    // 回退主模型
   }
 
   // F-42：压缩摘要（summarize kind）路由见下方 runLogFile 初始化之后——
@@ -229,20 +272,38 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
       permissions: perms,
       // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写任务预算）
       registry,
-      subagent: {
-        provider: subProvider,
-        model: subModel,
-        budget,
-        budgetConfig: budget.config,
-        windowTokens: 200_000,
-        depth: 0,
-      },
+      // F-55：外部会话不注入 subagent（黑盒 CLI 无法承载内置子代理语义）
+      ...(isExternal
+        ? {}
+        : {
+            subagent: {
+              provider: subProvider,
+              model: subModel,
+              budget,
+              budgetConfig: budget.config,
+              windowTokens: 200_000,
+              depth: 0,
+            },
+          }),
       // F-27 Hook 系统：PreToolUse（可阻断）/ PostToolUse（记录）
       hooks,
     },
     budget,
     windowTokens: 200_000,
     tasks: service.tasks,
+    // F-55 会话续跑（§8）：外部会话注入 resume 令牌（CLI 侧 session id 只作令牌，
+    // 不读其历史文件——单一权威规则）与 external_session 上报持久化回调
+    ...(session.external_id && session.external_agent
+      ? { externalResume: { externalId: session.external_id, agentId: session.external_agent } }
+      : {}),
+    onExternalSession: (externalId) => {
+      try {
+        // 外部会话 model 恒非空（isExternalModel 前缀判定才进外部引擎路径），直接透传
+        service.setSessionExternal(session.id, externalId, session.model);
+      } catch {
+        // 持久化失败不阻塞运行（降级路径可重建上下文）
+      }
+    },
   };
 
   // SIGINT/SIGTERM → 中断（退出码 5）
@@ -270,22 +331,25 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   // F-42：压缩摘要（summarize kind）路由——命中规则时压缩摘要走小模型，用量按 aux model 归因；
   // 规则缺失 / 目标 provider 构建失败 → 回退主模型（与 subagent 路由降级语义一致），
   // 回退时以 debug 级别写入留档（AC-42-4）
-  let summarizeTarget: ReturnType<ModelRouter['resolve']>;
-  try {
-    summarizeTarget = new ModelRouter().resolve('summarize');
-  } catch {
-    summarizeTarget = undefined;
-  }
-  if (summarizeTarget) {
+  // F-55：外部会话上下文由 CLI 进程自管，delta 侧无压缩摘要，路由不解析、不注入
+  if (!isExternal) {
+    let summarizeTarget: ReturnType<ModelRouter['resolve']>;
     try {
-      baseCtx.summarizeRoute = {
-        provider: summarizeTarget.provider ? await resolveProviderFromEnv(summarizeTarget.provider) : provider,
-        model: summarizeTarget.model,
-      };
-    } catch (e) {
-      runLogFile.log(
-        `[DEBUG] summarize 路由目标不可用（provider=${summarizeTarget.provider ?? '主'}，model=${summarizeTarget.model}）→ 回退主模型：${(e as Error).message}`,
-      );
+      summarizeTarget = new ModelRouter().resolve('summarize');
+    } catch {
+      summarizeTarget = undefined;
+    }
+    if (summarizeTarget) {
+      try {
+        baseCtx.summarizeRoute = {
+          provider: summarizeTarget.provider ? await resolveProviderFromEnv(summarizeTarget.provider) : provider,
+          model: summarizeTarget.model,
+        };
+      } catch (e) {
+        runLogFile.log(
+          `[DEBUG] summarize 路由目标不可用（provider=${summarizeTarget.provider ?? '主'}，model=${summarizeTarget.model}）→ 回退主模型：${(e as Error).message}`,
+        );
+      }
     }
   }
   const onEvent = (ev: AgentEvent) => {
@@ -328,7 +392,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   }
 
   const outcome = await runHeadless(
-    { base: baseCtx, service, engine: dispatchEngine(engineMode), externalSignal: external.signal, onEvent },
+    { base: baseCtx, service, engine: dispatchEngine(engineMode, isExternal), externalSignal: external.signal, onEvent },
     task,
     images,
   );
@@ -398,10 +462,13 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   process.exitCode = headlessExitCode(outcome.status);
 }
 
-/** M5 模式 → 引擎分发（与 TUI App 同构）。 */
+/** M5 模式 → 引擎分发（与 TUI App 同构）；F-55 外部会话走 ExternalEvent→AgentEvent 映射引擎。 */
 function dispatchEngine(
   mode: EngineMode,
+  isExternal: boolean,
 ): (ctx: RunContext, history: ChatMessage[], input: string, images?: MessageImage[]) => AsyncIterable<AgentEvent> {
+  // 外部会话优先于模式：plan/multi 等 DAG 语义黑盒 CLI 无法承载（design-f55 §16）
+  if (isExternal) return runExternalAgent;
   switch (mode) {
     case 'plan-execute':
       return runPlanExecute;
