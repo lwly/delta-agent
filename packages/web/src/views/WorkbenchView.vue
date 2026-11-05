@@ -529,14 +529,9 @@ function onModelChange(ev: Event) {
   const v = (ev.target as HTMLSelectElement).value;
   preferredModel.value = v;
   localStorage.setItem('yz.preferredModel', v);
-  const label = modelOptions.value.find((o) => o.value === v)?.label ?? v;
-  // F-56：有打开的会话 → 即时切换该会话模型（下一条消息生效，含外部 Agent）；无会话 → 仅记录偏好
-  if (chat.sessionMeta) {
-    void chat.setSessionModel(v);
-    chat.notice(`已切换当前会话模型：${label}（下一条消息生效）`);
-  } else {
-    chat.notice(`已记录模型偏好：${label}（对新建对话生效）`);
-  }
+  // F-56：有打开的会话 → 即时切换该会话模型（下一条消息生效，含外部 Agent）；
+  // 无会话 → 仅记录偏好（对新建对话生效）。切换状态直接反映在选择器本身，不打 toast。
+  if (chat.sessionMeta) void chat.setSessionModel(v);
 }
 
 // ── F-55 外部会话降级提示条（AC-55-7：能力降级是显式常驻提示，不弹错误）──
@@ -1201,17 +1196,6 @@ function applyAcAt(i: number) {
 }
 
 // ── 空态示例提示词：点击填入输入框（不自动发送，焦点 + 光标置尾）──
-const EMPTY_PROMPTS = ['帮我审查这段代码', '创建一个 Vue3 组件', '解释这个报错原因'] as const;
-function fillPrompt(text: string) {
-  input.value = text;
-  void nextTick(() => {
-    const ta = composerEl.value;
-    if (!ta) return;
-    ta.focus();
-    const pos = input.value.length;
-    ta.setSelectionRange(pos, pos);
-  });
-}
 
 /** 提示 chip 点击：插入触发符并打开面板（可发现性） */
 function acTrigger(kind: 'file' | 'skill') {
@@ -1552,24 +1536,6 @@ watch(
             <div v-for="n in chat.notices" :key="n.id" class="event-card">
               <span class="event-ico">ℹ</span>
               <span class="event-text">{{ n.text }}</span>
-            </div>
-
-            <!-- 空对话引导：主标题 + 价值主张 + 示例提示词卡（点击填入不发送）+ 快捷键提示 -->
-            <div v-if="chat.messages.length === 0 && !chat.streamingText" class="chat-empty">
-              <h2 class="ce-title">开始你的第一个任务</h2>
-              <p class="ce-sub">描述任务，Agent 将推理、执行工具并交付结果</p>
-              <div class="ce-cards">
-                <button v-for="t in EMPTY_PROMPTS" :key="t" class="ce-card" type="button" @click="fillPrompt(t)">{{ t }}</button>
-              </div>
-              <p class="ce-kbd-row">
-                <span class="kbd">{{ isMac ? '⌘K' : 'Ctrl K' }}</span> 检索会话
-                <span class="ce-dot">·</span>
-                <span class="kbd">Enter</span> 发送
-                <span class="ce-dot">·</span>
-                <span class="kbd">Shift+Enter</span> 换行
-                <span class="ce-dot">·</span>
-                <span class="kbd">{{ isMac ? '⌘Enter' : 'Ctrl+Enter' }}</span> 发送
-              </p>
             </div>
           </div>
           </div>
@@ -2289,28 +2255,6 @@ watch(
   white-space: pre-wrap; word-break: break-word;
 }
 .event-ico { font-size: 13px; }
-
-/* 空对话引导：居中、窄容器，与 hero 空态共用同一套变量与卡片规范 */
-.chat-empty {
-  display: flex; flex-direction: column; align-items: center;
-  max-width: 560px; margin: 0 auto; padding: 64px 16px 40px;
-  text-align: center;
-}
-.ce-title { font-size: 17px; font-weight: 600; color: var(--text); }
-.ce-sub { margin-top: 8px; font-size: 13px; color: var(--text-dim); }
-.ce-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 22px; }
-.ce-card {
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 14px; font-size: 12.5px; color: var(--text-dim); cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.ce-card:hover { background: var(--bg-hover); border-color: var(--accent-border); color: var(--text); }
-.ce-card:active { background: var(--bg-active); }
-.ce-kbd-row {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
-  margin-top: 28px; font-size: 11.5px; color: var(--text-faint);
-}
-.ce-dot { opacity: 0.5; margin: 0 2px; }
 
 /* ══════════ 审批卡片 ══════════ */
 .cards-zone { padding-top: 0; }
