@@ -310,7 +310,8 @@ export async function probeAgent(
   }
 }
 
-/** PATH 候选解析：POSIX 只试裸名；Windows 依次 .cmd/.bat/.ps1/裸名（§9 shim 约定），只收 existsSync 命中的 */
+/**
+ * PATH 候选解析：POSIX 只试裸名；Windows 依次 .cmd/.bat/.ps1/裸名（§9 shim 约定），只收 existsSync 命中的 */
 function tryPaths(def: KnownAgentDef, pathEnv?: string): string[] {
   const searchPath = pathEnv ?? process.env.PATH ?? '';
   if (searchPath.trim() === '') return [];
@@ -325,6 +326,27 @@ function tryPaths(def: KnownAgentDef, pathEnv?: string): string[] {
     }
   }
   return candidates;
+}
+
+/**
+ * F-56：裸命令名 → 绝对路径（避免 spawn 依赖 serve 进程 PATH 漂移，F-55 §11「detect 阶段
+ * 解析为绝对路径」对手动条目同样生效）。含 '/' 的命令原样返回（用户显式给的路径不动）；
+ * PATH 找不到时原样返回并在调用方 warn——spawn 报 ENOENT 时提示语已可定位。
+ */
+export function resolveCommandPath(command: string, pathEnv?: string): string {
+  if (command.includes('/') || command.includes('\\')) return command;
+  const searchPath = pathEnv ?? process.env.PATH ?? '';
+  if (searchPath.trim() === '') return command;
+  const isWin = process.platform === 'win32';
+  const suffixes = isWin ? ['.cmd', '.bat', '.ps1', ''] : [''];
+  for (const dir of searchPath.split(path.delimiter)) {
+    if (dir === '') continue;
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, command + suffix);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return command;
 }
 
 /**
@@ -355,18 +377,20 @@ async function resolveCommand(
   // 2) 手动注册条目（F-56）：显式意图，probe 失败不移除、不降级，以缓存 version 呈现
   const manualEntry = o.cached.find((e) => e.id === def.id && e.manual === true);
   if (manualEntry?.command) {
-    const version = await probeAgent(def, manualEntry.command, { probeTimeoutMs: o.probeTimeoutMs });
+    // 裸名命令解析为绝对路径（写入路径 = 探测路径 = spawn 路径，杜绝 PATH 漂移）
+    const resolved = resolveCommandPath(manualEntry.command, o.probePathEnv);
+    const version = await probeAgent(def, resolved, { probeTimeoutMs: o.probeTimeoutMs });
     const extras = {
       manual: true,
       displayName: manualEntry.displayName,
       description: manualEntry.description,
       model: manualEntry.model,
     };
-    if (version !== null) return { def, command: manualEntry.command, version, source: 'manual', ...extras };
+    if (version !== null) return { def, command: resolved, version, source: 'manual', ...extras };
     warn(
-      `外部 agent ${def.id}：手动注册条目探测失败（command=${manualEntry.command}），保留条目并沿用上次版本串「${manualEntry.version}」`,
+      `外部 agent ${def.id}：手动注册条目探测失败（command=${resolved}），保留条目并沿用上次版本串「${manualEntry.version}」`,
     );
-    return { def, command: manualEntry.command, version: manualEntry.version, source: 'manual', ...extras };
+    return { def, command: resolved, version: manualEntry.version, source: 'manual', ...extras };
   }
 
   // 3) external.json 探测缓存
@@ -574,11 +598,21 @@ export async function resolveAgentModels(
  * 写 external.json（manual=true 条目探测不覆盖不移除，AC-56-5）；不做版本探测——
  * version 置空串，下次 detect 探测成功后回填。
  */
-export function upsertManualEntry(input: ManualRegisterInput, homeDir?: string): ExternalAgentCacheEntry {
+export function upsertManualEntry(
+  input: ManualRegisterInput,
+  homeDir?: string,
+  opts: { pathEnv?: string } = {},
+): ExternalAgentCacheEntry {
   const def = findKnownAgent(input.templateId);
   if (!def) throw new ManualRegisterError('unknown_template', `未知模板 id：${input.templateId}`);
   const command = (input.command ?? def.executable).trim();
   if (command === '') throw new ManualRegisterError('empty_command', 'command 不能为空');
+  // 裸名 → 绝对路径（F-56：注册即落盘绝对路径，spawn 不依赖 serve 进程 PATH 漂移；
+  // PATH 找不到保持裸名并 warn——用户可能后续再装，探测时会再尝试解析）
+  const resolved = resolveCommandPath(command, opts.pathEnv);
+  if (resolved === command && !command.includes('/') && !command.includes('\\')) {
+    warn(`外部 agent ${input.templateId}：命令「${command}」未在 PATH 中找到，按裸名落盘（启动时若仍不可达将报 ENOENT）`);
+  }
   const displayName = (input.displayName ?? def.label).trim();
   const description = (input.description ?? '').trim();
   if (displayName.length > DISPLAY_NAME_MAX || description.length > DESCRIPTION_MAX) {
@@ -596,7 +630,7 @@ export function upsertManualEntry(input: ManualRegisterInput, homeDir?: string):
   const entry: ExternalAgentCacheEntry = {
     id: def.id,
     kind: def.kind,
-    command,
+    command: resolved,
     version: idx >= 0 ? (agents[idx].manual === true ? agents[idx].version : '') : '',
     tier: def.tier,
     enabled: true,

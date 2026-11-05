@@ -279,7 +279,13 @@ export function spawnExternal(options: SpawnOptions): SpawnedProcess {
   // spawn 失败（ENOENT 等）：收敛为 code null 的 exit，避免上层悬挂；错误信息进环形缓冲
   child.on('error', (err: Error) => {
     if (exitInfo === null) {
-      pushRing(`[delta] spawn failed: ${err.message}`);
+      // ENOENT 给可行动提示：外部 Agent 手动注册的裸名命令依赖 serve 进程 PATH，
+      // 不可达时引导以绝对路径重新注册（F-56 实测：GUI 启动的 serve 常缺用户 PATH）
+      const hint =
+        err.message.includes('ENOENT')
+          ? '（命令不可达：请在设置 → 外部 Agent 重新以绝对路径注册，或检查该 CLI 是否已安装并登录）'
+          : '';
+      pushRing(`[delta] spawn failed: ${err.message}${hint}`);
       exitInfo = { code: null, signal: null };
       finish();
     }

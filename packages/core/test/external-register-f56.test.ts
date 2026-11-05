@@ -202,6 +202,23 @@ describe('upsertManualEntry / removeManualEntry', () => {
     expect(agents[0]!.displayName).toBe('CodeBuddy 自建');
     expect(JSON.stringify(agents[0])).not.toContain('SECRET');
   });
+
+  it('F-56 裸命令名注册 → 解析为绝对路径落盘（PATH 找不到保持裸名）', () => {
+    // PATH 注入：临时目录里放一个假 codebuddy 可执行
+    const binDir = path.join(tmpRoot, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const fake = path.join(binDir, 'codebuddy');
+    fs.writeFileSync(fake, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const entry = upsertManualEntry(
+      { templateId: 'cli:codebuddy', command: 'codebuddy' },
+      home,
+      { pathEnv: binDir },
+    );
+    expect(entry.command).toBe(fake); // 绝对路径落盘，spawn 不依赖 serve 进程 PATH
+    // PATH 找不到 → 保持裸名（用户可能后续再装）
+    const bare = upsertManualEntry({ templateId: 'cli:codebuddy', command: 'codebuddy' }, home, { pathEnv: '' });
+    expect(bare.command).toBe('codebuddy');
+  });
 });
 
 describe('探测合并（AC-56-5：手动优先、不移除、不覆盖手动字段）', () => {
