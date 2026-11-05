@@ -245,10 +245,11 @@ function contentToText(content: unknown[] | undefined): string {
  * Load MCP config: global `~/.delta/mcp.json` merged with project-level
  * `.delta/mcp.json` (project wins on name conflict). Shape:
  * `{ "mcpServers": { "<name>": { "command": "...", ... } | { "url": "...", "headers": {...} } } }`
+ * homeDir 可注入隔离（F-55 MCP 透传测试用；缺省真实 HOME）。
  */
-export function loadMcpConfig(projectRoot?: string): Record<string, McpServerConfig> {
+export function loadMcpConfig(projectRoot?: string, homeDir?: string): Record<string, McpServerConfig> {
   const files: string[] = [
-    path.join(userConfigDir(), FILES.mcp),
+    path.join(userConfigDir(homeDir), FILES.mcp),
   ];
   if (projectRoot) files.push(path.join(projectConfigDir(projectRoot), FILES.mcp));
 

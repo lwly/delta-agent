@@ -142,6 +142,12 @@ export { ScriptedExternalAdapter } from './external/scripted.js';
 // F-55 Tier A 外部适配器：ACP（JSON-RPC over stdio；spec 由调用方构建，detect 归 P2）
 export { AcpExternalAdapter } from './external/acp.js';
 
+// F-55 Tier B 外部适配器：Claude stream-json（claude -p --output-format stream-json 的 stdout JSONL）
+export { StreamJsonExternalAdapter } from './external/stream-json.js';
+
+// F-55 MCP 配置透传（§6）：delta MCP 合并视图 → delta- 前缀别名临时文件（engine 收尾 cleanup）
+export { buildDeltaMcpFile } from './external/mcp-passthrough.js';
+
 // F-55 外部 agent 探测与 external.json 持久化（§10 + AC-55-9 白名单 schema）：
 // 只做探测/持久化/纯接缝（detectedToSpec + 工厂注入 registerDetected），不实现 stream-json 协议适配器（Task 10）
 export {
