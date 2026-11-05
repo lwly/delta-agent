@@ -198,3 +198,75 @@ describe('DELETE /api/external-agents/:id（移除手动条目）', () => {
     expect((await api('DELETE', '/api/external-agents/cli:claude-code')).status).toBe(404);
   });
 });
+
+describe('PATCH /api/external-agents/:id/model（F-56 增补：任意条目改模型）', () => {
+  it('存在条目 → 200 + entry 回显，注入入口收到 (id, model)', async () => {
+    const calls: Array<[string, string]> = [];
+    await startServer({
+      remove: () => true,
+    });
+    // 复用 startServer 的注入口机制：单独起新服务注入 externalSetModel
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const service = new SessionService(path.join(tmp, 'db3.sqlite'));
+    const deps: SessionHubDeps = {
+      service,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => new MockProvider(),
+    };
+    const hub = new SessionHub(deps);
+    const entry: ExternalAgentCacheEntry = {
+      id: 'cli:claude-code', kind: 'stream-json-jsonl', command: '/bin/claude', version: '2.1.0',
+      tier: 'B', enabled: true, lastProbeAt: '', model: 'sonnet',
+    };
+    server = createWebServer({
+      service,
+      hub,
+      port: 0,
+      externalSetModel: (id, model) => {
+        calls.push([id, model]);
+        return id === 'cli:claude-code' ? { ...entry, model: model || undefined } : null;
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    // 设置
+    const set = await api('PATCH', '/api/external-agents/cli:claude-code/model', { model: 'sonnet' });
+    expect(set.status).toBe(200);
+    expect(set.json.ok).toBe(true);
+    expect((set.json.entry as Record<string, unknown>).model).toBe('sonnet');
+    expect(calls).toEqual([['cli:claude-code', 'sonnet']]);
+    // 清除（空串）
+    const clear = await api('PATCH', '/api/external-agents/cli:claude-code/model', { model: '' });
+    expect(clear.status).toBe(200);
+    expect(calls).toEqual([['cli:claude-code', 'sonnet'], ['cli:claude-code', '']]);
+    // 不存在 → 404
+    expect((await api('PATCH', '/api/external-agents/cli:nope/model', { model: 'x' })).status).toBe(404);
+  });
+
+  it('注入入口抛 ManualRegisterError → 400', async () => {
+    await startServer();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const service = new SessionService(path.join(tmp, 'db4.sqlite'));
+    const deps: SessionHubDeps = {
+      service,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => new MockProvider(),
+    };
+    const hub = new SessionHub(deps);
+    server = createWebServer({
+      service,
+      hub,
+      port: 0,
+      externalSetModel: () => {
+        throw new ManualRegisterError('too_long', 'model ≤ 100 字');
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address();
+    base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    const { status, json } = await api('PATCH', '/api/external-agents/cli:claude-code/model', { model: 'x'.repeat(101) });
+    expect(status).toBe(400);
+    expect(String(json.error)).toContain('too_long');
+  });
+});

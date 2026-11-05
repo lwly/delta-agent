@@ -148,3 +148,13 @@ detect 写回时 `manual/displayName/description` 只增不抹：命中刷新 co
 
 - F-55 旧 `external.json`（无 manual 字段）零迁移直接可用；探测缓存条目行为不变。
 - `models list` / `doctor` / 模型选择器走 `cli:` 前缀与 id 匹配，新条目 id 与 F-55 命名规则一致，自动可见。
+
+## 13. 增补：修改模型对全部条目开放（2026-11-05）
+
+手动注册与自动探测（cache/PATH/env 来源）条目**统一支持修改模型**——模型指定是「针对该 CLI 的用户偏好」，与来源无关：
+
+- **core**：`setExternalAgentModel(id, model, homeDir?)`（`detect.ts`）——任意条目 upsert/clear `model` 字段（空串 = 清除；> 100 字抛 `too_long`；条目不存在返回 null）。探测写回的 model 沿用语义本就对所有来源生效，另修复 cache/env/path 命中时既有条目 `model` 未透传进 `DetectedAgent` 的缺口（`detectExternalAgents` 统一合并 `prev.model` → `detectedToSpec` 组装模型 flag）。
+- **HTTP**：`PATCH /api/external-agents/:id/model`（body `{model}`，空串清除）→ 200 entry / 404 不存在 / 400 `too_long`；`ServeOptions.externalSetModel` 注入口（测试隔离）。
+- **Web**：面板每行新增「改模型」按钮（Tier D 预留档除外）→ 弹窗 datalist 组合框（复用 `GET /api/external-agents/models` 动态探测 + 静态合并），当前值回显，留空保存 = 恢复 CLI 默认模型；修改后下次探测/新会话生效。
+- **CLI**：`delta agents set-model <id> [--model <model>]`（与面板共用 `setExternalAgentModel`）。顺带修复既有缺陷：`agents` 未列入裸任务路由白名单 `KNOWN_SUBCOMMANDS`，导致全部 `delta agents *` 子命令被误重写为 `delta run agents …`。
+- **测试**：core `external-register-f56.test.ts` +4（cache 条目改模型/spec 透传/清除不复活/404/超长）、`external-register-api.test.ts` +2（PATCH 200/清除/404/400）。

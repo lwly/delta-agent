@@ -80,6 +80,7 @@ import {
   ManualRegisterError,
   removeManualEntry,
   resolveAgentModels,
+  setExternalAgentModel,
   upsertManualEntry,
   type DetectedAgent,
 } from '../external/detect.js';
@@ -137,6 +138,11 @@ export interface ServeOptions {
   externalRegister?: typeof upsertManualEntry;
   /** F-56 手动条目移除入口（缺省 removeManualEntry；测试注入隔离） */
   externalRemove?: typeof removeManualEntry;
+  /**
+   * F-56 增补：修改任意条目模型入口（缺省 setExternalAgentModel 真写 ~/.delta/external.json；
+   * 测试注入隔离）。手动与探测条目都支持；条目不存在返回 null → 404。
+   */
+  externalSetModel?: typeof setExternalAgentModel;
   /**
    * F-56 模型清单自动获取入口（缺省 resolveAgentModels——真探测会跑 CLI 列举命令，
    * 最长 8s；测试注入隔离）。
@@ -1280,6 +1286,22 @@ export function createWebServer(opts: ServeOptions): http.Server {
       if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'external-agents' && parts.length === 3) {
         const removed = (opts.externalRemove ?? removeManualEntry)(decodeURIComponent(parts[2]));
         return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: 'no such manual entry' });
+      }
+      // PATCH /api/external-agents/:id/model —— 修改任意条目的指定模型（F-56 增补：
+      // 手动与自动探测条目统一支持；body {model}，空串 = 清除恢复 CLI 默认模型）
+      if (method === 'PATCH' && parts[0] === 'api' && parts[1] === 'external-agents' && parts[3] === 'model' && parts.length === 4) {
+        const body = await readBody(req);
+        try {
+          const entry = (opts.externalSetModel ?? setExternalAgentModel)(
+            decodeURIComponent(parts[2]),
+            String(body?.model ?? ''),
+          );
+          if (entry === null) return err(res, 404, `no such agent entry: ${decodeURIComponent(parts[2])}`);
+          return json(res, 200, { ok: true, entry });
+        } catch (e) {
+          if (e instanceof ManualRegisterError) return err(res, 400, `${e.code}: ${e.message}`);
+          return err(res, 400, (e as Error).message);
+        }
       }
       // GET /api/external-agents —— 探测（失败静默）→ DetectedAgent[] 配 loginState 与三档支持度。
       // plan/yolo 支持度按 permissionArgs 非空判定（探测层事实，不查 registry）。

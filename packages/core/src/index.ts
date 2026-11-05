@@ -161,10 +161,12 @@ export { AcpExternalAdapter } from './external/acp.js';
 export { ReservedExternalAdapter } from './external/reserved.js';
 
 // F-56 手动注册（PASI-87）：upsert/remove（KNOWN_AGENTS / KnownAgentDef 已在下方 detect 导出块）
+// F-56 增补：setExternalAgentModel——手动与探测条目都支持修改模型（外部 Agent 面板「改模型」）
 export {
   ManualRegisterError,
   upsertManualEntry,
   removeManualEntry,
+  setExternalAgentModel,
   findKnownAgent,
   resolveAgentModels,
 } from './external/detect.js';

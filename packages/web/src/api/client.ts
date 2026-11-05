@@ -928,6 +928,13 @@ export const api = {
   }) => request<{ ok: boolean; entry: unknown }>('POST', '/api/external-agents', input),
   removeExternalAgent: (id: string) =>
     request<{ ok: boolean }>('DELETE', `/api/external-agents/${encodeURIComponent(id)}`),
+  // F-56 增补：修改任意条目（手动/自动探测）的指定模型；空串 = 清除恢复 CLI 默认模型
+  setExternalAgentModel: (id: string, model: string) =>
+    request<{ ok: boolean; entry: unknown }>(
+      'PATCH',
+      `/api/external-agents/${encodeURIComponent(id)}/model`,
+      { model },
+    ),
 
   // F-47 Web 内置终端（node-pty 可选能力；不可用时 available:false 由 UI 降级）
   terminalStatus: () =>

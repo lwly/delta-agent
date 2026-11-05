@@ -48,7 +48,7 @@ import {
 import { runHeadlessCommand, type RunOptions } from './headless-run.js';
 import { usageCommand, type UsageCommandOptions } from './usage.js';
 import { doctorCommand } from './doctor.js';
-import { agentsAddCommand, agentsListCommand, agentsTemplatesCommand, agentsModelsCommand, agentsRemoveCommand } from './agents.js';
+import { agentsAddCommand, agentsListCommand, agentsSetModelCommand, agentsTemplatesCommand, agentsModelsCommand, agentsRemoveCommand } from './agents.js';
 import {
   sandboxStatusCommand,
   sandboxEnableCommand,
@@ -480,6 +480,14 @@ agents
   .description('移除手动注册条目（探测缓存条目由探测自动维护）')
   .argument('<id>', '条目 id（如 cli:codebuddy）')
   .action((id: string) => agentsRemoveCommand(id));
+agents
+  .command('set-model')
+  .description('修改任意条目（手动/自动探测）的指定模型（空 --model = 清除恢复 CLI 默认）')
+  .argument('<id>', '条目 id（如 cli:claude-code，见 delta agents list）')
+  .option('--model <model>', '指定模型 ID（不传 = 清除）')
+  .action(async (id: string, opts: { model?: string }) =>
+    agentsSetModelCommand({ id, model: opts.model }),
+  );
 
 // ── delta memory：L2 动态记忆管理（memory-design §8）────────────────────
 
@@ -1343,7 +1351,7 @@ marketSource
 
 // ── 裸任务路由：`delta "任务" --json` 等价于 `delta run "任务" --json` ──
 // 首个非选项参数且不是已知子命令时，重写为 run 子命令。
-const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update', 'doctor', 'market']);
+const KNOWN_SUBCOMMANDS = new Set(['run', 'models', 'memory', 'migrate', 'search', 'serve', 'hooks', 'evals', 'usage', 'sandbox', 'notify', 'skill', 'onboarding', 'cron', 'worktree', 'expert', 'mcp', 'help', 'export', 'update', 'doctor', 'market', 'agents']);
 const argv = process.argv.slice(2);
 if (argv.length > 0 && !argv[0]!.startsWith('-') && !KNOWN_SUBCOMMANDS.has(argv[0]!)) {
   process.argv.splice(2, 0, 'run');

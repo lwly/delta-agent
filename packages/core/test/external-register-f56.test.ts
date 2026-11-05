@@ -24,6 +24,7 @@ import {
   readExternalAgentsCache,
   removeManualEntry,
   resolveAgentModels,
+  setExternalAgentModel,
   upsertManualEntry,
   writeExternalAgentsCache,
 } from '../src/external/detect.js';
@@ -157,9 +158,19 @@ describe('upsertManualEntry / removeManualEntry', () => {
   });
 
   it('command 缺省 = 模板 executable；displayName 缺省 = 模板 label', () => {
-    const entry = upsertManualEntry({ templateId: 'cli:opencode' }, home);
-    expect(entry.command).toBe('opencode');
-    expect(entry.displayName).toBe('OpenCode');
+    // PATH 隔离（文件头承诺的「零真实 CLI」）：真机装了 opencode 时 resolveCommand 会把裸名
+    // 解析成绝对路径，断言就不再确定。这里把 PATH 指向空目录，验证「查不到 → 保留裸名」分支。
+    const prevPath = process.env.PATH;
+    const emptyBin = path.join(tmpRoot, 'empty-bin');
+    fs.mkdirSync(emptyBin, { recursive: true });
+    process.env.PATH = emptyBin;
+    try {
+      const entry = upsertManualEntry({ templateId: 'cli:opencode' }, home);
+      expect(entry.command).toBe('opencode');
+      expect(entry.displayName).toBe('OpenCode');
+    } finally {
+      process.env.PATH = prevPath;
+    }
   });
 
   it('未知模板 / 空 command / 超长字段 → ManualRegisterError 明确错误码', () => {
@@ -319,6 +330,48 @@ describe('F-56 指定模型（model 参数）', () => {
     await ensureExternalAdapters({ homeDir: home, probePathEnv: '' });
     const adapter = resolveExternalAdapter('cli:codebuddy')!();
     expect(adapter.spec.args).toEqual(['--acp', '--model', 'glm-5.3']);
+  });
+});
+
+describe('F-56 增补：setExternalAgentModel（手动/探测条目统一改模型）', () => {
+  it('探测缓存条目（非 manual）→ model 写入 external.json；探测命中后 model 透传进 DetectedAgent/spec', async () => {
+    const wrapper = writeWrapper('cb-cache-model', '3.0.0-cache');
+    writeExternalAgentsCache([manualEntry(wrapper, { manual: undefined })], home);
+    // 修改探测缓存条目的模型（与手动条目同一入口）
+    const entry = setExternalAgentModel('cli:codebuddy', 'kimi-k3.1-pro', home)!;
+    expect(entry.manual).toBeUndefined(); // 不改变来源属性
+    expect(entry.model).toBe('kimi-k3.1-pro');
+    expect(readExternalAgentsCache(home)[0]!.model).toBe('kimi-k3.1-pro');
+    // 探测命中（source=cache）→ model 透传进 DetectedAgent，spec.args 带上模型 flag
+    const detected = await detectExternalAgents({ homeDir: home, probePathEnv: '' });
+    const hit = detected.find((d) => d.def.id === 'cli:codebuddy')!;
+    expect(hit.source).toBe('cache');
+    expect(hit.model).toBe('kimi-k3.1-pro');
+    const spec = detectedToSpec(hit);
+    expect(spec.args).toEqual(['--acp', '--model', 'kimi-k3.1-pro']);
+    // 再探测写回仍沿用（探测不抹）
+    expect(readExternalAgentsCache(home).find((e) => e.id === 'cli:codebuddy')!.model).toBe('kimi-k3.1-pro');
+  });
+
+  it('空串 = 清除模型（恢复 CLI 默认）；清除后探测不复活', async () => {
+    writeExternalAgentsCache([manualEntry('/a/cb', { model: 'glm-5.3' })], home);
+    const cleared = setExternalAgentModel('cli:codebuddy', '  ', home)!;
+    expect(cleared.model).toBeUndefined();
+    // 清除（键不写回，回读形状无 model 键）
+    expect(readExternalAgentsCache(home)[0]!.model).toBeUndefined();
+    expect('model' in readExternalAgentsCache(home)[0]!).toBe(false);
+    // 再探测（probe 失败的 manual 条目仍产出 DetectedAgent）——model 保持清除
+    const detected = await detectExternalAgents({ homeDir: home, probePathEnv: '' });
+    expect(detected.find((d) => d.def.id === 'cli:codebuddy')!.model).toBeUndefined();
+  });
+
+  it('条目不存在 → null（HTTP 404 / CLI 报错呈现）', () => {
+    expect(setExternalAgentModel('cli:codebuddy', 'glm-5.3', home)).toBeNull();
+  });
+
+  it('model 超长 → ManualRegisterError too_long', () => {
+    writeExternalAgentsCache([manualEntry('/a/cb')], home);
+    expect(() => setExternalAgentModel('cli:codebuddy', 'x'.repeat(101), home)).toThrow(ManualRegisterError);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   readExternalAgentsCache,
   removeManualEntry,
   resolveAgentModels,
+  setExternalAgentModel,
   upsertManualEntry,
 } from '@delta/core';
 
@@ -105,4 +106,27 @@ export async function agentsRemoveCommand(id: string, opts: { homeDir?: string }
   const removed = removeManualEntry(id, opts.homeDir);
   if (!removed) fail(`未找到手动注册条目：${id}（探测缓存条目由探测自动维护，无需移除）`);
   console.log(`已移除：${id}`);
+}
+
+/**
+ * F-56 增补：修改任意条目（手动/自动探测）的指定模型（与 Web 面板「改模型」共用
+ * core 的 setExternalAgentModel）。--model 不传 = 清除，恢复 CLI 默认模型。
+ */
+export async function agentsSetModelCommand(opts: { id: string; model?: string; homeDir?: string }): Promise<void> {
+  let entry;
+  try {
+    entry = setExternalAgentModel(opts.id, opts.model ?? '', opts.homeDir);
+  } catch (e) {
+    if (e instanceof ManualRegisterError) fail(e.message);
+    throw e;
+  }
+  if (entry === null) {
+    fail(`未找到条目：${opts.id}（该 agent 需先探测命中过，见 delta agents list）`);
+  }
+  console.log(
+    entry.model
+      ? `已更新 ${entry.id} 的指定模型：${entry.model}`
+      : `已清除 ${entry.id} 的指定模型（恢复 CLI 默认模型）`,
+  );
+  console.log('下次探测/新会话生效。');
 }

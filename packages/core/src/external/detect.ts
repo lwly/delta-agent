@@ -4,7 +4,7 @@
 //   - detect：KNOWN_AGENTS 定义 + probeAgent（--version 探测，3s 超时静默跳过）
 //     + 三级优先级解析（env 显式路径 > external.json 缓存 > PATH 探测）
 //     + external.json 白名单读写（AC-55-9：固定 schema，token/key/secret 进不了文件）
-//     + checkLoginState（登录态存在性，只 existsSync 不解析内容）
+//     + checkLoginState（登录态：env → 配置字段 → 文件存在性，只读本地不解析上报）
 //   - 协议接缝：detectedToSpec（DetectedAgent → ExternalAgentSpec 纯函数）与
 //     registerDetected（工厂注入式注册）在此导出；ensureExternalAdapters() 是
 //     「detect + StreamJsonExternalAdapter 工厂 + registry 注册」的组合入口（Task 11）。
@@ -40,6 +40,23 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
   probeArgs: string[];
   /** 登录态存在性检查文件（相对 HOME；只判断存在，不解析内容，§10） */
   loginStateFiles: string[];
+  /**
+   * 登录态判定（JSON 字段版）：有些 CLI 的「已登录」并不体现在某个文件存在，而是写在配置
+   * 文件的字段里（如 cursor 的 `~/.cursor/cli-config.json` → `authInfo.email`，logout 会
+   * 把 authInfo 置空）。设了本字段就优先按它判定，`loginStateFiles` 仅作回落——避免
+   * 「目录一直存在 → 永远显示已登录」的误报（F-56 实测：cursor 的 ~/.cursor 是 IDE 目录）。
+   */
+  loginStateJson?: {
+    /** 配置文件路径（相对 HOME） */
+    file: string;
+    /** 判定路径（点号分隔）；解析后该处存在且非空字符串/非 null 即视为已登录 */
+    path: string;
+  };
+  /**
+   * 登录态的第三判据：环境变量非空即视为已登录（如 cursor 的 CURSOR_API_KEY，CLI 侧
+   * `isAuthenticated` 同样认它）。用于「有 Key = 能跑，但没有落盘登录态」的场景。
+   */
+  loginStateEnv?: string[];
   // ── F-56 手动注册向导字段 ──
   /** 模板展示名（Web 向导卡片 / 手动条目 displayName 缺省值） */
   label: string;
@@ -162,15 +179,29 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
     description: 'Cursor Agent CLI，acp 子命令 stdio ACP 协议（Tier A）',
     protocolArgs: ['acp'],
     modelArgs: (m) => ({ after: ['--model', m] }),
-    models: ['composer-1', 'claude-sonnet-4-5', 'claude-opus-4-1', 'gpt-5', 'gemini-2.5-pro'],
-    // 官方 changelog 实证：`agent models` / `--list-models` 列出全部可用模型（输出为表格，
-    // 解析取首个「形似模型 ID」的 token；本机二进制损坏待实测，解析器从宽）
+    // 静态清单仅作探测失败的回落（2026-11-05 本机实测 `cursor-agent models` 的首批条目）
+    models: ['auto', 'composer-2.5', 'composer-2.5-fast', 'grok-4.7-high', 'grok-4.7-high-fast'],
+    // `cursor-agent models` 实测输出：每行 `<model-id> - <显示名>`（首行 "Available models" 表头）。
+    // 不能用 parseModelTokens 的白名单式 token 过滤：显示名（Auto / Composer / Grok…）会被
+    // /i 的正则一并收进来，故改成「行首 id + 空格-空格」的锚定解析。
     modelsProbe: {
       args: ['models'],
-      parse: (stdout) => parseModelTokens(stdout, /^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)?$/i),
+      parse: (stdout) => {
+        const out: string[] = [];
+        for (const line of stdout.split(/\r?\n/)) {
+          const m = /^\s*([a-z0-9][a-z0-9._-]*)\s+-\s+\S/i.exec(line);
+          if (m && !out.includes(m[1]!)) out.push(m[1]!);
+        }
+        return out;
+      },
     },
     probeArgs: ['--version'],
-    loginStateFiles: ['.cursor'],
+    // 登录态：`~/.cursor` 是 IDE 目录、一直在，拿它判登录必然误报（F-56 实测踩过）。
+    // 真源是 CLI 自己的 cli-config.json（login 写入 authInfo，logout 置空）；
+    // 走 API Key 鉴权的场景则由环境变量兜底（CLI 侧 isAuthenticated 同样认 CURSOR_API_KEY）。
+    loginStateFiles: [],
+    loginStateJson: { file: '.cursor/cli-config.json', path: 'authInfo.email' },
+    loginStateEnv: ['CURSOR_API_KEY'],
     // agent/plan/ask 三模式由 ACP 会话内协商（无启动 flags），permissionArgs 留空
     permissionArgs: { plan: [], default: [], yolo: [] },
   },
@@ -470,11 +501,34 @@ export function writeExternalAgentsCache(agents: ExternalAgentCacheEntry[], home
 }
 
 /**
- * 登录态存在性检查（§10）：loginStateFiles 相对 HOME 逐个 existsSync，任一存在即 true。
- * 只判断存在，不解析内容、不复制、不上报。
+ * 登录态检查（§10）：三条判据，按可靠性从高到低——
+ *   1. `loginStateEnv` 环境变量非空（有 Key 就能跑，即便没落盘登录态）；
+ *   2. `loginStateJson` 指定配置文件的字段非空（cursor：cli-config.json → authInfo.email）；
+ *   3. `loginStateFiles` 相对 HOME 逐个 existsSync，任一存在即 true（只判存在，不解析内容）。
+ * 只读本地配置，不上报任何内容；解析失败一律当 false，绝不抛错。
  */
 export function checkLoginState(def: KnownAgentDef, homeDir: string = os.homedir()): boolean {
+  if (def.loginStateEnv?.some((k) => (process.env[k] ?? '').trim() !== '')) return true;
+  if (def.loginStateJson) {
+    const value = readJsonField(path.join(homeDir, def.loginStateJson.file), def.loginStateJson.path);
+    if (value !== undefined) return true;
+    if (def.loginStateFiles.length === 0) return false; // 只认 JSON 字段的模板不做文件回落
+  }
   return def.loginStateFiles.some((f) => fs.existsSync(path.join(homeDir, f)));
+}
+
+/** 读 JSON 文件按点号路径取值；文件缺失/解析失败/字段为空 → undefined（永不抛错） */
+function readJsonField(file: string, dotted: string): unknown {
+  try {
+    let cur: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const key of dotted.split('.')) {
+      if (cur === null || typeof cur !== 'object') return undefined;
+      cur = (cur as Record<string, unknown>)[key];
+    }
+    return cur === null || cur === undefined || cur === '' ? undefined : cur;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── F-56 手动注册（PASI-87）：模板查表 + upsert/remove ──────────────────────────
@@ -668,6 +722,28 @@ export function removeManualEntry(id: string, homeDir?: string): boolean {
   return true;
 }
 
+/**
+ * F-56 增补：修改任意条目的指定模型（手动注册 / 探测缓存 / PATH 命中都支持——
+ * 模型指定是「针对该 CLI 的用户偏好」，与来源无关，external.json 写回时 model 字段
+ * 对所有来源沿用既有值，探测不会抹掉）。
+ * 空串 = 清除（恢复 CLI 默认模型）；> MODEL_MAX 字抛 ManualRegisterError('too_long')；
+ * 条目不存在（该 agent 尚未探测命中过）返回 null，由调用方（HTTP→404 / CLI→报错）呈现。
+ */
+export function setExternalAgentModel(id: string, model: string, homeDir?: string): ExternalAgentCacheEntry | null {
+  const trimmed = model.trim();
+  if (trimmed.length > MODEL_MAX) {
+    throw new ManualRegisterError('too_long', `model ≤ ${MODEL_MAX} 字`);
+  }
+  const agents = readExternalAgentsCache(homeDir);
+  const idx = agents.findIndex((e) => e.id === id);
+  if (idx < 0) return null;
+  // 条件展开保持键形状：空串 = 清除（键不写回），非空 = upsert
+  const { model: _prev, ...rest } = agents[idx]!;
+  agents[idx] = trimmed !== '' ? { ...rest, model: trimmed } : rest;
+  writeExternalAgentsCache(agents, homeDir);
+  return agents[idx]!;
+}
+
 /** DetectedAgent → ExternalAgentSpec（纯函数，Task 10 的 stream-json 适配器消费） */
 export function detectedToSpec(detected: DetectedAgent): ExternalAgentSpec {
   const model = detected.model;
@@ -751,11 +827,16 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
       probePathEnv: opts.probePathEnv,
     });
     const idx = working.findIndex((e) => e.id === def.id);
+    const prev = idx >= 0 ? working[idx] : undefined;
     if (hit !== null) {
+      // F-56 增补：model 沿用对**所有来源**生效——手动分支在 resolveCommand 已带出
+      // manualEntry.model；cache/env/path 命中也要把既有条目的 model 透传进 DetectedAgent
+      //（detectedToSpec 据此组装模型 flag），否则改了模型的探测条目重启后 flag 丢失。
+      // 用户清除 model 后 prev.model 为 undefined，不会复活。
+      if (hit.model === undefined && prev?.model) hit.model = prev.model;
       detected.push(hit);
       // F-56：手动注册字段只增不抹——探测命中刷新 command/version/lastProbeAt，
       // manual/displayName/description/model 一律沿用既有条目（AC-56-5：探测不覆盖手动条目）
-      const prev = idx >= 0 ? working[idx] : undefined;
       const entry: ExternalAgentCacheEntry = {
         id: def.id,
         kind: def.kind,

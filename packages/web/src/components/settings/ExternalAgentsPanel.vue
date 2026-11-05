@@ -6,6 +6,7 @@
 // AC-55-7：拉取失败静默显示空态文案，不弹错误。
 import { onMounted, ref } from 'vue';
 import ModalShell from '../ModalShell.vue';
+import ModelCombobox from './ModelCombobox.vue';
 import { api, type ExternalAgentInfo, type ExternalAgentTemplate } from '../../api/client';
 
 const loading = ref(false);
@@ -135,6 +136,57 @@ async function removeManual(a: ExternalAgentInfo) {
     // 移除失败静默（仅手动条目可移除，探测缓存条目按钮不出现）
   }
 }
+
+// ── F-56 增补：修改模型（手动与自动探测条目统一支持）──
+const editOpen = ref(false);
+const editAgent = ref<ExternalAgentInfo | null>(null);
+const editModel = ref('');
+const editSaving = ref(false);
+const editError = ref('');
+/** 编辑弹窗的模型下拉候选（同注册向导：动态探测 + 静态清单合并，静默降级） */
+const editOptions = ref<string[]>([]);
+const editSource = ref<'' | 'probed' | 'static'>('');
+const editLoading = ref(false);
+
+function openEdit(a: ExternalAgentInfo) {
+  editAgent.value = a;
+  editModel.value = a.model ?? '';
+  editError.value = '';
+  editOpen.value = true;
+  void loadEditOptions(a);
+}
+
+/** 拉取该 agent 的候选模型：agent id 即模板 id（cli:*），命令用条目当前 command */
+async function loadEditOptions(a: ExternalAgentInfo) {
+  editLoading.value = true;
+  editSource.value = '';
+  try {
+    const res = await api.externalAgentModels(a.id, a.command);
+    editOptions.value = res.models;
+    editSource.value = res.source;
+  } catch {
+    editOptions.value = [];
+    editSource.value = '';
+  } finally {
+    editLoading.value = false;
+  }
+}
+
+async function submitEditModel() {
+  if (!editAgent.value || editSaving.value) return;
+  editSaving.value = true;
+  editError.value = '';
+  try {
+    // 空串 = 清除模型，恢复 CLI 默认模型（后端 PATCH 语义）
+    await api.setExternalAgentModel(editAgent.value.id, editModel.value.trim());
+    editOpen.value = false;
+    await load();
+  } catch (e) {
+    editError.value = (e as Error).message; // 400/404 就地展示，不弹全局错误
+  } finally {
+    editSaving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -164,6 +216,12 @@ async function removeManual(a: ExternalAgentInfo) {
           <span class="tag tier" :title="a.kind === 'reserved' ? 'Tier D：协议适配预留，暂不可执行' : `Tier ${a.tier} 协议`">Tier {{ a.tier }}</span>
           <span v-if="a.model" class="tag model" :title="`指定模型：${a.model}`">⚙ {{ a.model }}</span>
           <span class="tag src" :title="`来源：${a.command}`">{{ sourceLabel(a.source) }}</span>
+          <button
+            v-if="a.kind !== 'reserved'"
+            class="btn"
+            :title="a.model ? `当前模型：${a.model}，点击修改` : '指定该 CLI 启动时使用的模型'"
+            @click="openEdit(a)"
+          >改模型</button>
           <button v-if="a.manual" class="btn danger" title="移除手动注册条目" @click="removeManual(a)">移除</button>
         </div>
         <p v-if="a.description" class="row-desc">{{ a.description }}</p>
@@ -221,11 +279,8 @@ async function removeManual(a: ExternalAgentInfo) {
         </div>
         <div class="field">
           <label for="ext-model">模型（可选）</label>
-          <!-- datalist 组合框：候选 = 自动获取（CLI 列举命令解析）+ 模板静态清单合并，仍可自由输入 -->
-          <input id="ext-model" v-model="formModel" type="text" class="mono" list="ext-model-options" placeholder="下拉选择或直接输入模型 ID" maxlength="100" />
-          <datalist id="ext-model-options">
-            <option v-for="m in modelOptions" :key="m" :value="m" />
-          </datalist>
+          <!-- 自定义组合框：候选 = 自动获取（CLI 列举命令解析）+ 模板静态清单合并，仍可自由输入 -->
+          <ModelCombobox input-id="ext-model" v-model="formModel" :options="modelOptions" :loading="modelLoading" />
           <p class="field-hint">
             <template v-if="modelLoading">正在自动获取 {{ picked?.label }} 支持的模型…</template>
             <template v-else-if="modelSource === 'probed'">已自动获取 {{ modelOptions.length }} 个模型（来自 CLI 实时列举），也可直接输入任意 ID。</template>
@@ -243,6 +298,39 @@ async function removeManual(a: ExternalAgentInfo) {
           <button class="btn" @click="wizardStep = 1">← 上一步</button>
           <button class="btn primary" :disabled="submitting || formName.trim() === '' || formCommand.trim() === ''" @click="submitRegister">
             {{ submitting ? '注册中…' : '注册外部 Agent' }}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+
+    <!-- F-56 增补：修改模型弹窗——手动与自动探测条目统一入口（dsh 预留档除外） -->
+    <ModalShell v-if="editOpen && editAgent" title="修改模型" :width="480" @close="editOpen = false">
+      <div class="form">
+        <div class="field">
+          <label>Agent</label>
+          <div class="base-readonly">
+            <span class="tpl-label">{{ displayLabel(editAgent) }}</span>
+            <code class="mono">{{ editAgent.id }}</code>
+            <span class="tag src">{{ sourceLabel(editAgent.source) }}</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="edit-model">模型（可选）</label>
+          <!-- 自定义组合框：候选 = 自动获取 + 静态清单合并，等值项标「当前」，仍可自由输入 -->
+          <ModelCombobox input-id="edit-model" v-model="editModel" :options="editOptions" :loading="editLoading" />
+          <p class="field-hint">
+            <template v-if="editLoading">正在自动获取支持的模型…</template>
+            <template v-else-if="editSource === 'probed'">已自动获取 {{ editOptions.length }} 个模型（来自 CLI 实时列举），也可直接输入任意 ID。</template>
+            <template v-else-if="editOptions.length > 0">常用模型 {{ editOptions.length }} 个已入下拉（静态建议），也可直接输入任意 ID。</template>
+            <template v-else>留空 = 恢复该 CLI 的默认模型。</template>
+            当前：{{ editAgent.model || '未指定（CLI 默认模型）' }}。修改后下次探测/新会话生效。
+          </p>
+        </div>
+        <p v-if="editError" class="form-error">{{ editError }}</p>
+        <div class="form-ops">
+          <button class="btn" @click="editOpen = false">取消</button>
+          <button class="btn primary" :disabled="editSaving" @click="submitEditModel">
+            {{ editSaving ? '保存中…' : '保存' }}
           </button>
         </div>
       </div>
