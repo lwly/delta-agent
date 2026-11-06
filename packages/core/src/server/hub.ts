@@ -906,7 +906,12 @@ export class SessionHub {
           }
           case 'error':
             // F-41：引擎致命错误留痕（非致命错误引擎自愈，不刷日志）
-            if (ev.fatal) this.log('error', ev.message, sessionId);
+            if (ev.fatal) {
+              this.log('error', ev.message, sessionId);
+              // F-58（§6③/AC3）：致命错误置 runError——onRunFinished 据此把任务收敛为
+              // failed(runtime)；不置值则外部引擎「exit≠0 且无产出」会被误标 done
+              runError = ev.message;
+            }
             break;
           case 'usage': {
             // F-31：逐轮落库（每条 usage 事件一行；子代理用量事件同样计入，口径 = usage 行数）

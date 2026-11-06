@@ -31,6 +31,8 @@ import type {
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { SessionHub, type HubEvent, type SessionHubDeps } from '../src/server/hub.js';
+import { registerExternalAdapter } from '../src/external/registry.js';
+import { ScriptedExternalAdapter } from '../src/external/scripted.js';
 
 // ── 测试脚手架 ───────────────────────────────────────────────────────────────
 
@@ -346,6 +348,44 @@ describe('onRunFinished：done / failed(异常) / aborted 三路径（design §1
     const [, outcome] = spy.mock.calls[0] as [string, { runError?: string; aborted: boolean; durationMs: number }];
     expect(outcome.runError).toContain('resolveProvider boom');
     expect(outcome.aborted).toBe(false);
+  });
+
+  it('failed 路径：外部引擎 error{fatal} → runError 置值（F-58 AC3 收敛链，exit≠0 无产出 → failed(runtime)）', async () => {
+    // 手法说明：外部引擎「exit≠0 且无产出」不发异常，而是沿事件流发 error{fatal:true} + done
+    // （engine/external.ts:441）；hub 必须把 fatal 事件写进 runError，否则 onRunFinished 收到
+    // 空 runError，dispatcher 会把任务误标 done 而非 failed(runtime)。
+    // 走 ScriptedExternalAdapter + fake-cli.mjs（同 external-hub.test.ts 手法，真启子进程）
+    const scenarioPath = path.join(tmp, 'scenario-f58-exit3.json');
+    await fs.writeFile(
+      scenarioPath,
+      JSON.stringify([{ type: 'exit', code: 3 }]),
+    );
+    const prevFakeCli = process.env.DELTA_FAKE_CLI;
+    process.env.DELTA_FAKE_CLI = scenarioPath;
+    registerExternalAdapter(new ScriptedExternalAdapter());
+    try {
+      const spy = vi.fn();
+      const hub = new SessionHub({
+        service,
+        registry: new ToolRegistry(),
+        resolveProvider: async () => {
+          throw new Error('resolveProvider 不应被外部会话调用');
+        },
+        onRunFinished: spy,
+      });
+      const sid = service.createSession(projectId, { model: 'cli:fake', mode: 'react' }).id;
+
+      await hub.send(sid, '退出码非零的任务');
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [, outcome] = spy.mock.calls[0] as [string, { runError?: string; aborted: boolean; durationMs: number }];
+      // engine/external.ts 的 fatal 文案：`外部 agent 进程退出（exit 3）`
+      expect(outcome.runError).toContain('exit 3');
+      expect(outcome.aborted).toBe(false);
+    } finally {
+      if (prevFakeCli === undefined) delete process.env.DELTA_FAKE_CLI;
+      else process.env.DELTA_FAKE_CLI = prevFakeCli;
+    }
   });
 
   it('aborted 路径：运行中 abort → aborted=true', async () => {
