@@ -113,6 +113,16 @@ export interface SessionHubDeps {
    * 缺省不注入：后台执行明确报错引导回同步执行（对齐 task_unavailable 口径）。
    */
   backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /**
+   * F-58 运行结束回调（design-f58 §13）：每次 send 的 finally 里透传收尾状态
+   * { runError, aborted, durationMs }（三值复用 send 作用域既有变量，零新增判定）。
+   * hub 不 import router/（依赖方向红线），Dispatcher 由 runtime 装配时注入本回调；
+   * 缺省 = 调度层未装配，行为与既有完全一致。
+   */
+  onRunFinished?: (
+    sessionId: string,
+    outcome: { runError?: string; aborted: boolean; durationMs: number },
+  ) => void;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -227,6 +237,17 @@ export class SessionHub {
 
   isRunning(sessionId: string): boolean {
     return this.zombieReap(sessionId) ? false : this.running.has(sessionId);
+  }
+
+  /**
+   * F-58 纯读运行态探测（design-f58 §9.3）：与 isRunning 的唯一差别是**不触发 zombieReap**。
+   * 看门狗 L1 专用——isRunning 带副作用：任何已运行超 30 分钟的会话被问一次就会被回收
+   * （running.delete + abort + run_error「僵尸运行清理」），看门狗若调它等于给自己的
+   * Worker 判 30 分钟死刑。isRunning 对 Web 侧栏「删除门禁 / 运行徽标」是正确行为，
+   * 保持原语义不动（裁决 Q4：本特性不改僵尸回收策略）。
+   */
+  peekRunning(sessionId: string): boolean {
+    return this.running.has(sessionId);
   }
 
   /**
@@ -563,6 +584,17 @@ export class SessionHub {
     const project = this.deps.service.getProject(session.project_id);
     if (!project) throw new Error('project not found');
 
+    // F-58 防御性兜底（design-f58 §4.4 拦截点 2）：外部 CLI agent 不能当 Router——
+    // 其 Bash/Edit/Read 是自身进程内内置工具，delta 无法收窄（L-结构层失效），
+    // 结构上不满足「无执行能力」。正常路径进不来（HTTP 层建会话时已校验，T4），
+    // 此处拦绕过校验的直调；在 running 注册前拒绝，不留运行态、不落任何消息。
+    if (session.kind === 'router' && isExternalModel(session.model || '')) {
+      const message = `Router 会话不允许使用外部模型（${session.model}）：外部 agent 的工具集无法收窄，不能担任 Router`;
+      this.publish(sessionId, { type: 'run_error', message });
+      this.log('error', `任务被拒绝：${message}`, sessionId);
+      return;
+    }
+
     this.running.set(sessionId, { ac: new AbortController(), startedAt: Date.now() });
     this.publish(sessionId, { type: 'state', running: true, paused: false });
     // F-41：任务开始（输入截断 200 字符，design-f41 §4）
@@ -682,7 +714,19 @@ export class SessionHub {
         expert?.tools ?? null,
         this.deps.registry.definitions().map((d) => d.name),
       );
-      const runRegistry = restrictRegistry(this.deps.registry, allow.allow);
+      // F-58（design-f58 §4.1 L-结构层）：Router 会话工具集收窄到两个调度工具——
+      // dispatch_task/task_status 本身零执行能力（T4 落地），未注册时 definitions() 自然为空，
+      // 请求体不出现 tools 字段。与专家白名单同时存在时取交集，不得互相覆盖：
+      // 专家收窄是"最多给这些"，Router 收窄是"只许这些"，两者同时生效才保住结构边界。
+      let effectiveAllow = allow.allow;
+      if (session.kind === 'router') {
+        const routerAllow = new Set(['dispatch_task', 'task_status']);
+        effectiveAllow =
+          effectiveAllow === null
+            ? routerAllow
+            : new Set([...effectiveAllow].filter((n) => routerAllow.has(n)));
+      }
+      const runRegistry = restrictRegistry(this.deps.registry, effectiveAllow);
 
       // 预置技能：每会话首轮装载一次（进程级共享 buffer 是已知限制，design §16-1）
       if (expert && expert.skills.length > 0 && this.deps.skills && !this.expertSeeded.has(sessionId)) {
@@ -953,6 +997,18 @@ export class SessionHub {
       }
       // F-27 Stop 钩子：单次任务结束（旁路触发，不影响结果）
       void this.deps.hooks?.emit('Stop', { sessionId, projectId: session.project_id });
+      // F-58：运行结束透传给调度层（design-f58 §13 插入点）——只复用本作用域既有的
+      // runError / abort 信号 / durationMs 三个值，零新增判定；放在 finally 末尾，
+      // 调度层回调里再次 hub.send（pumpDigest）时 running 槽位已释放，不会 409 自锁
+      try {
+        this.deps.onRunFinished?.(sessionId, {
+          runError: runError ?? undefined,
+          aborted: acRef?.signal.aborted ?? false,
+          durationMs,
+        });
+      } catch {
+        // 调度层收敛失败不影响本轮收尾（旁路语义，与 notifyDone 同构）
+      }
     }
   }
 
