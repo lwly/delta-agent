@@ -272,11 +272,13 @@ describe('探测合并（AC-56-5：手动优先、不移除、不覆盖手动字
     expect(hit.source).toBe('manual');
   });
 
-  itPosix('非 manual 缓存条目 probe 失效 → 维持 F-55 语义：降级 PATH（空 PATH 则移除）', async () => {
+  itPosix('非 manual 缓存条目 probe 失效 → 维持 F-55 语义：降级 PATH（空 PATH 则保留条目标 stale）', async () => {
     writeExternalAgentsCache([manualEntry('/nonexistent', { manual: undefined })], home);
     const detected = await detectExternalAgents({ homeDir: home, probePathEnv: '' });
     expect(detected.find((d) => d.def.id === 'cli:codebuddy')).toBeUndefined();
-    expect(readExternalAgentsCache(home).find((e) => e.id === 'cli:codebuddy')).toBeUndefined();
+    // P2 加固：不再 splice（连带丢 model 偏好）——条目保留并标 stale
+    const kept = readExternalAgentsCache(home).find((e) => e.id === 'cli:codebuddy');
+    expect(kept?.stale).toBe(true);
   });
 });
 

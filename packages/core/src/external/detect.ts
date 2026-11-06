@@ -26,6 +26,14 @@ import type { ExternalAgentAdapter, ExternalAgentSpec, ExternalTier } from './ty
 /** 探测超时（设计稿 §10：`command --version` 超时 3s，失败静默跳过） */
 export const PROBE_TIMEOUT_MS = 3000;
 
+/**
+ * 版本串合法性缺省正则（P0 加固）：--version 输出必须含「数字.数字」形态才认命。
+ * npm 同名占位包（假 codebuddy）输出口号文案（如 "Hello, World!"），无任何数字，
+ * 会被挡掉不再误当正品探测命中；现存全部真实 CLI 版本串（claude/codex/cursor/
+ * opencode/codebuddy/dsh）均满足。个别 CLI 版本格式特殊时用 def.versionPattern 覆盖。
+ */
+export const DEFAULT_VERSION_PATTERN = /\d+\.\d+/;
+
 /** external.json 文件名（位于 userConfigDir()，即 ~/.delta/external.json） */
 const EXTERNAL_CACHE_FILE = 'external.json';
 
@@ -38,6 +46,11 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
   executable: string;
   /** 版本探测参数（§10：`command --version`） */
   probeArgs: string[];
+  /**
+   * 版本串合法性正则（P0 加固，可省略）：--version 输出不匹配时视为探到非 CLI 本体
+   * （如 npm 同名占位包），按探测失败静默跳过。缺省 DEFAULT_VERSION_PATTERN。
+   */
+  versionPattern?: RegExp;
   /** 登录态存在性检查文件（相对 HOME；只判断存在，不解析内容，§10） */
   loginStateFiles: string[];
   /**
@@ -161,7 +174,12 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
       },
     },
     probeArgs: ['--version'],
-    loginStateFiles: ['.codebuddy'],
+    // 登录态：真 CLI 的 homeDir 默认 ~/.codebuddy（可被 CODEBUDDY_CONFIG_DIR 覆盖），凭据
+    // 落 ~/.codebuddy/credentials.json。裸判 ~/.codebuddy 目录必然误报——它同时是 WorkBuddy
+    // 自己的配置目录（plugins/mcp.json 等），装了 WorkBuddy 的机器恒为「已登录」（P0 实测踩过）。
+    // 走 API Key 鉴权的场景由环境变量兜底。
+    loginStateFiles: ['.codebuddy/credentials.json'],
+    loginStateEnv: ['CODEBUDDY_AUTH_TOKEN', 'CODEBUDDY_API_KEY'],
     permissionArgs: {
       // --permission-mode plan 实测存在（--help）
       plan: ['--permission-mode', 'plan'],
@@ -285,6 +303,11 @@ export interface ExternalAgentCacheEntry {
   description?: string;
   /** F-56：指定模型（探测缓存条目也可携带；探测写回沿用既有值） */
   model?: string;
+  /**
+   * 探测失败标记（P2 加固）：上次 detect 全路径（缓存/env/PATH）都未命中的既有条目。
+   * 保留条目而不 splice——移除会连带丢用户选的 model 等偏好；下次探测命中重建条目时自然清除。
+   */
+  stale?: boolean;
 }
 
 /** 外部 agent 显式路径环境变量名：id `cli:claude-code` → `DELTA_EXTERNAL_CLAUDE_CODE_PATH` */
@@ -333,6 +356,9 @@ export async function probeAgent(
     const result = await Promise.race([collected, timeoutPromise]);
     if (result === null) return null; // 超时
     if (result.exitCode !== 0 || result.version === null) return null;
+    // P0 加固：版本串须匹配 pattern（缺省须含「数字.数字」）——输出口号文案的同名占位包
+    // 在这里被挡掉，与超时/非零退出同路径按探测失败静默跳过
+    if (!(def.versionPattern ?? DEFAULT_VERSION_PATTERN).test(result.version)) return null;
     return result.version;
   } finally {
     clearTimeout(timer);
@@ -457,6 +483,7 @@ function whitelistEntry(raw: unknown): ExternalAgentCacheEntry | null {
     ...(typeof rec.displayName === 'string' && rec.displayName !== '' ? { displayName: rec.displayName } : {}),
     ...(typeof rec.description === 'string' && rec.description !== '' ? { description: rec.description } : {}),
     ...(typeof rec.model === 'string' && rec.model !== '' ? { model: rec.model } : {}),
+    ...(rec.stale === true ? { stale: true } : {}),
   };
 }
 
@@ -812,8 +839,8 @@ export async function ensureExternalAdapters(opts: DetectOptions = {}): Promise<
 
 /**
  * 探测主入口：对每个 KNOWN_AGENT 走 resolveCommand 三级优先级。
- * 命中 → 产出 DetectedAgent 并更新 external.json（lastProbeAt=now）；
- * 失败 → 从 external.json 移除该条目（取移除的简单方案：条目由 detect 全量维护，enabled 语义留给上层 UI 演进）并静默跳过。
+ * 命中 → 产出 DetectedAgent 并更新 external.json（lastProbeAt=now，stale 随重建清除）；
+ * 失败 → 既有条目保留并标 stale（P2 加固：不 splice，避免连带丢 model 等用户偏好）并静默跳过。
  */
 export async function detectExternalAgents(opts: DetectOptions = {}): Promise<DetectedAgent[]> {
   const cached = readExternalAgentsCache(opts.homeDir);
@@ -853,8 +880,10 @@ export async function detectExternalAgents(opts: DetectOptions = {}): Promise<De
       if (idx >= 0) working[idx] = entry;
       else working.push(entry);
     } else if (idx >= 0) {
-      // 探测失败：移除缓存条目 + 静默跳过（手动条目在 resolveCommand 第 2 级必然命中，不会走到这里）
-      working.splice(idx, 1);
+      // 探测失败：保留条目并标 stale，不再 splice（P2 加固：移除会连带丢用户选的 model
+      // 等偏好；stale 条目下次探测命中时随条目重建自然清除）。手动条目在 resolveCommand
+      // 第 2 级必然命中（probe 失败也产出），不会走到这里。
+      working[idx] = { ...working[idx]!, stale: true };
     }
   }
 

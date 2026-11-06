@@ -80,6 +80,7 @@ import {
   ManualRegisterError,
   removeManualEntry,
   resolveAgentModels,
+  resolveCommandPath,
   setExternalAgentModel,
   upsertManualEntry,
   type DetectedAgent,
@@ -1256,7 +1257,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
         const templateId = url.searchParams.get('templateId') ?? '';
         const def = findKnownAgent(templateId);
         if (!def) return err(res, 400, `unknown_template: ${templateId}`);
-        const command = (url.searchParams.get('command') ?? def.executable).trim();
+        // 裸名先解析为绝对路径（P1 修复）：Windows 上裸名（如 codebuddy）没有 .cmd 后缀，
+        // spawnExternal 的 shim 判定不命中 → 直接 spawn 必失败 → 静默回落静态清单，
+        // 手动向导在 Windows 上永远拿不到真实模型清单。含 '/'/'\\' 的显式路径原样返回。
+        const command = resolveCommandPath((url.searchParams.get('command') ?? def.executable).trim());
         try {
           const result = await (opts.externalModelsProbe ?? resolveAgentModels)(def, command);
           return json(res, 200, result);

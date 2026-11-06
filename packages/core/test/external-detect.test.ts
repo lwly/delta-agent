@@ -179,6 +179,29 @@ describe('detectExternalAgents（三级优先级）', () => {
     expect(found[0]!.source).toBe('path');
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0]![0])).toContain('external.json');
+    // 重新命中 → 条目重建，stale 标记清除
+    expect(readExternalAgentsCache(home)[0]!.stale).toBeUndefined();
+  });
+
+  itPosix('P0 加固：版本串无「数字.数字」形态（npm 同名占位包口号文案）→ 按探测失败跳过', async () => {
+    const fakeCmd = writeWrapper('claude-fake', VERSION_CLI, 'Hello, World!');
+    process.env[ENV_NAME] = fakeCmd;
+
+    const found = await detect();
+    expect(found).toEqual([]);
+    expect(readExternalAgentsCache(home)).toEqual([]);
+  });
+
+  itPosix('P2 加固：缓存条目探测失败且 PATH 也未命中 → 条目保留并标 stale，model 偏好不丢', async () => {
+    const badCmd = writeWrapper('claude-stale', VERSION_FAIL, 'ignored');
+    writeExternalAgentsCache([{ ...makeEntry(badCmd), model: 'sonnet' }], home);
+
+    const found = await detect({ probePathEnv: '' });
+    expect(found).toEqual([]); // 全路径未命中，不产出
+    const cached = readExternalAgentsCache(home);
+    expect(cached).toHaveLength(1); // 条目保留（不再 splice 丢 model）
+    expect(cached[0]!.stale).toBe(true);
+    expect(cached[0]!.model).toBe('sonnet');
   });
 
   itPosix('探测超时：长驻脚本 + 短超时 → 返回空且总耗时常小于默认 3s（子进程被收尾）', async () => {
@@ -273,6 +296,32 @@ describe('checkLoginState（F-56 实测修正：cursor 登录态走配置字段�
     } finally {
       if (prev === undefined) delete process.env.CURSOR_API_KEY;
       else process.env.CURSOR_API_KEY = prev;
+    }
+  });
+});
+
+describe('checkLoginState（P0 修正：codebuddy 登录态看 credentials.json，不看 ~/.codebuddy 目录）', () => {
+  const CODEBUDDY = KNOWN_AGENTS.find((d) => d.id === 'cli:codebuddy')!;
+
+  it('只有 ~/.codebuddy 目录（WorkBuddy 配置目录常驻，无 credentials.json）→ false，不再误报已登录', () => {
+    fs.mkdirSync(path.join(home, '.codebuddy'), { recursive: true });
+    expect(checkLoginState(CODEBUDDY, home)).toBe(false);
+  });
+
+  it('~/.codebuddy/credentials.json 存在 → true', () => {
+    fs.mkdirSync(path.join(home, '.codebuddy'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.codebuddy', 'credentials.json'), '{}');
+    expect(checkLoginState(CODEBUDDY, home)).toBe(true);
+  });
+
+  it('CODEBUDDY_AUTH_TOKEN 非空 → true（走 Key 鉴权，无需落盘登录态）', () => {
+    const prev = process.env.CODEBUDDY_AUTH_TOKEN;
+    process.env.CODEBUDDY_AUTH_TOKEN = 'tok-test';
+    try {
+      expect(checkLoginState(CODEBUDDY, home)).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.CODEBUDDY_AUTH_TOKEN;
+      else process.env.CODEBUDDY_AUTH_TOKEN = prev;
     }
   });
 });

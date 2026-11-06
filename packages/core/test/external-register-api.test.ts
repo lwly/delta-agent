@@ -156,6 +156,46 @@ describe('GET /api/external-agents/models（F-56 自动获取模型）', () => {
     const { status } = await api('GET', '/api/external-agents/models?templateId=cli:nope');
     expect(status).toBe(400);
   });
+
+  it('P1 修复：裸名 command 先经 resolveCommandPath 解析为绝对路径再交给探测（Windows 裸名 spawn 必失败）', async () => {
+    await startServer();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    // PATH 上放一个裸名可执行（文件存在即可，端点只解析路径不执行；Windows 命中 .cmd 后缀）
+    const bare = process.platform === 'win32' ? 'codebuddy.cmd' : 'codebuddy';
+    const binDir = path.join(tmp, 'bin');
+    await fs.mkdir(binDir, { recursive: true });
+    await fs.writeFile(path.join(binDir, bare), '');
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${prevPath ?? ''}`;
+    try {
+      const service = new SessionService(path.join(tmp, 'db3.sqlite'));
+      const deps: SessionHubDeps = {
+        service,
+        registry: new ToolRegistry(),
+        resolveProvider: async () => new MockProvider(),
+      };
+      const hub = new SessionHub(deps);
+      let receivedCommand = '';
+      server = createWebServer({
+        service,
+        hub,
+        port: 0,
+        externalModelsProbe: (def, command) => {
+          receivedCommand = command;
+          return Promise.resolve({ models: def.models ?? [], source: 'static' as const });
+        },
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const addr = server.address();
+      base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+      const { status } = await api('GET', '/api/external-agents/models?templateId=cli:codebuddy&command=codebuddy');
+      expect(status).toBe(200);
+      expect(receivedCommand).toBe(path.join(binDir, bare));
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+    }
+  });
 });
 
 describe('POST /api/external-agents（手动注册）', () => {

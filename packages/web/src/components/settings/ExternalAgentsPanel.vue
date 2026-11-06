@@ -45,6 +45,11 @@ function sourceLabel(s: ExternalAgentInfo['source']): string {
   return s === 'env' ? '环境变量' : s === 'manual' ? '手动注册' : s === 'cache' ? '缓存' : 'PATH';
 }
 
+/** 版本串可疑（P0 加固联动）：不含「数字.数字」形态（如占位包口号文案），面板加警示标 */
+function versionSuspect(v: string): boolean {
+  return v.trim() !== '' && !/\d+\.\d+/.test(v);
+}
+
 // ── F-56 两步注册向导 ──
 const wizardOpen = ref(false);
 const wizardStep = ref<1 | 2>(1);
@@ -213,6 +218,11 @@ async function submitEditModel() {
           <code class="agent-id mono" :title="a.id">{{ displayLabel(a) }}</code>
           <span class="agent-cmd mono" :title="a.command">{{ a.command }}</span>
           <span class="agent-ver">{{ a.version }}</span>
+          <span
+            v-if="versionSuspect(a.version)"
+            class="tag ver-warn"
+            title="版本串不含版本号形态，可能不是 CLI 本体（如同名占位包），请核对该命令路径指向的程序"
+          >⚠ 可疑版本</span>
           <span class="tag tier" :title="a.kind === 'reserved' ? 'Tier D：协议适配预留，暂不可执行' : `Tier ${a.tier} 协议`">Tier {{ a.tier }}</span>
           <span v-if="a.model" class="tag model" :title="`指定模型：${a.model}`">⚙ {{ a.model }}</span>
           <span class="tag src" :title="`来源：${a.command}`">{{ sourceLabel(a.source) }}</span>
@@ -363,6 +373,7 @@ async function submitEditModel() {
 .agent-id { font-size: 12.5px; color: var(--accent); }
 .agent-cmd { font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .agent-ver { font-size: 12px; color: var(--text); }
+.tag.ver-warn { background: transparent; color: var(--orange); border: 1px dashed var(--orange); }
 .tag { font-size: 9.5px; font-family: var(--mono); padding: 1px 6px; border-radius: 4px; }
 .tag.tier { background: var(--accent-soft); color: var(--accent); }
 .tag.model { background: var(--bg-hover); color: var(--accent); }
