@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   KNOWN_AGENTS,
+  CODEBUDDY_AUTH_DIR,
   checkLoginState,
   detectExternalAgents,
   detectedToSpec,
@@ -300,17 +301,42 @@ describe('checkLoginState（F-56 实测修正：cursor 登录态走配置字段�
   });
 });
 
-describe('checkLoginState（P0 修正：codebuddy 登录态看 credentials.json，不看 ~/.codebuddy 目录）', () => {
+describe('checkLoginState（P0 修正：codebuddy 凭据在 CodeBuddyExtension auth 目录，按 token 校验）', () => {
   const CODEBUDDY = KNOWN_AGENTS.find((d) => d.id === 'cli:codebuddy')!;
+  const authDir = () => path.join(home, CODEBUDDY_AUTH_DIR);
+  const writeAuth = (name: string, body: Record<string, unknown>): void => {
+    fs.mkdirSync(authDir(), { recursive: true });
+    fs.writeFileSync(path.join(authDir(), name), JSON.stringify(body));
+  };
+  const DAY_MS = 24 * 60 * 60 * 1000;
 
-  it('只有 ~/.codebuddy 目录（WorkBuddy 配置目录常驻，无 credentials.json）→ false，不再误报已登录', () => {
-    fs.mkdirSync(path.join(home, '.codebuddy'), { recursive: true });
+  it('目录不存在（未登录过）→ false', () => {
     expect(checkLoginState(CODEBUDDY, home)).toBe(false);
   });
 
-  it('~/.codebuddy/credentials.json 存在 → true', () => {
-    fs.mkdirSync(path.join(home, '.codebuddy'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.codebuddy', 'credentials.json'), '{}');
+  it('*.info 含有效 accessToken + 未过期的 refreshExpiresAt → true', () => {
+    writeAuth('Tencent-Cloud.coding-copilot.info', {
+      auth: { accessToken: 'tok-live', refreshExpiresAt: Date.now() + 30 * DAY_MS },
+    });
+    expect(checkLoginState(CODEBUDDY, home)).toBe(true);
+  });
+
+  it('refreshExpiresAt 已过期 → false（access 过期但 CLI 可自动续的场景不算）', () => {
+    writeAuth('Tencent-Cloud.coding-copilot.info', {
+      auth: { accessToken: 'tok-stale', refreshExpiresAt: Date.now() - DAY_MS },
+    });
+    expect(checkLoginState(CODEBUDDY, home)).toBe(false);
+  });
+
+  it('accessToken 为空 / 缺失 / 文件损坏 → false（永不抛错）', () => {
+    writeAuth('empty.info', { auth: { accessToken: '', refreshExpiresAt: Date.now() + DAY_MS } });
+    writeAuth('noauth.info', { other: 1 });
+    fs.writeFileSync(path.join(authDir(), 'broken.info'), '{ not json');
+    expect(checkLoginState(CODEBUDDY, home)).toBe(false);
+  });
+
+  it('refreshExpiresAt 缺失（旧版凭据形状）→ 视为已登录', () => {
+    writeAuth('legacy.info', { auth: { accessToken: 'tok-legacy' } });
     expect(checkLoginState(CODEBUDDY, home)).toBe(true);
   });
 

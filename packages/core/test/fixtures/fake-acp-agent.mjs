@@ -9,6 +9,7 @@
 //     "authUrl": "https://...",    // authenticate 期间经 _codebuddy.ai/authUrl 通知推送的登录链接
 //     "authUrlParam": "url",       // 通知 params 的字段名（缺省 authUrl——codebuddy 实测真实字段名；
 //                                  //   设为 "url" 覆盖兜底解析路径）
+//     "authFail": "sign in error: EPERM"  // authenticate 回错误回包（先写一行 stderr，模拟凭据目录无权限）
 //     "steps": [ ... ],            // 收到 session/prompt 后依次执行
 //     "stopReason": "end_turn",    // prompt 回包（缺省 end_turn）
 //     "exitCode": 0                // 步骤全部执行完后的退出码（缺省 0）
@@ -165,6 +166,12 @@ rl.on('line', (line) => {
     // params 字段名缺省 authUrl（codebuddy 实测真实形状——此前发 url 导致测试全绿真机必挂）
     const authUrlParams = { [scenario.authUrlParam ?? 'authUrl']: scenario.authUrl ?? 'https://example.com/login?token=fake' };
     send({ jsonrpc: '2.0', method: '_codebuddy.ai/authUrl', params: authUrlParams });
+    if (typeof scenario.authFail === 'string') {
+      // 认证失败路径：先写 stderr（EPERM 类错误 CLI 侧只打到 stderr），再回错误回包
+      process.stderr.write(`[fake-acp] ${scenario.authFail}\n`);
+      send({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'authenticate failed' } });
+      return;
+    }
     authDone = true;
     send({ jsonrpc: '2.0', id: msg.id, result: {} });
   } else if (msg.method === 'session/prompt') {

@@ -300,8 +300,11 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
       push({ type: 'auth_required', methods: this.authMethods });
       // authenticate 回包即登录完成（agent 在此期间经 authUrl 类通知推送浏览器链接）
       const authPromise = this.request('authenticate', { methodId: method.id });
-      // 保底提示：30s 内既没等到登录链接、认证也没完成 → 补终端登录指引，不让用户干等
-      // （codebuddy 实测链接通知秒到；超时多半是 agent 侧卡住或网络问题）
+      // 保底提示（两阶段，30s）：认证没完成就该给用户说法——
+      //   已收到登录链接 → 提示「可能浏览器端没走完 / CLI 无权限写凭据目录」（实测 EPERM 场景）；
+      //   没收到链接   → 提示终端登录指引（agent 侧卡住或网络问题）。
+      // 旧实现用 !this.authUrlSeen 屏蔽：链接 2.7s 就到、认证却一直没完成时，兜底永远不响，
+      // 用户对着「正在发起认证…」无限干等（2026-11 实测踩过）。
       let settled = false;
       void authPromise.then(
         () => {
@@ -312,16 +315,29 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
         },
       );
       const hintTimer = setTimeout(() => {
-        if (!settled && !this.authUrlSeen) {
-          push({
-            type: 'error',
-            message:
-              'external_auth_required: 超过 30s 未收到登录链接，可在终端运行 codebuddy 完成登录（/login）后停止本会话重发',
-            fatal: false,
-          });
-        }
+        if (settled) return;
+        push({
+          type: 'error',
+          fatal: false,
+          message: this.authUrlSeen
+            ? 'external_auth_required: 登录链接已发出但认证未完成——可能浏览器端未走完，或 CLI 无权限写入凭据目录'
+            : 'external_auth_required: 30s 内未收到登录链接，可在终端运行 codebuddy 完成登录（/login）后重试',
+        });
       }, AUTH_URL_HINT_DELAY_MS);
-      await authPromise.finally(() => clearTimeout(hintTimer));
+      try {
+        await authPromise;
+      } catch (authErr) {
+        // authenticate 失败原因必须透出（CLI 侧 EPERM 等在 stderr 里，吞掉用户只能干等）
+        const tail = this.stderrTail().slice(-3).join(' ').trim();
+        push({
+          type: 'error',
+          fatal: false,
+          message: `external_auth_failed: ${authErr instanceof Error ? authErr.message : String(authErr)}${tail ? ` | CLI: ${tail}` : ''}`,
+        });
+        throw authErr;
+      } finally {
+        clearTimeout(hintTimer);
+      }
       return await this.request('session/new', { cwd, mcpServers: [] });
     }
   }

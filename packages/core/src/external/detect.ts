@@ -34,6 +34,17 @@ export const PROBE_TIMEOUT_MS = 3000;
  */
 export const DEFAULT_VERSION_PATTERN = /\d+\.\d+/;
 
+/**
+ * codebuddy 登录凭据目录（相对 HOME，由 CLI 产物 homedir() 直接拼出，无环境变量可改）。
+ * 目录内文件名随 product 变化（Tencent-Cloud.coding-copilot / workbuddy-desktop…），只认 *.info。
+ */
+export const CODEBUDDY_AUTH_DIR =
+  process.platform === 'darwin'
+    ? 'Library/Application Support/CodeBuddyExtension/Data/Public/auth'
+    : process.platform === 'win32'
+      ? 'AppData/Local/CodeBuddyExtension/Data/Public/auth'
+      : '.local/share/CodeBuddyExtension/Data/Public/auth';
+
 /** external.json 文件名（位于 userConfigDir()，即 ~/.delta/external.json） */
 const EXTERNAL_CACHE_FILE = 'external.json';
 
@@ -70,6 +81,12 @@ export type KnownAgentDef = Omit<ExternalAgentSpec, 'command' | 'version' | 'arg
    * `isAuthenticated` 同样认它）。用于「有 Key = 能跑，但没有落盘登录态」的场景。
    */
   loginStateEnv?: string[];
+  /**
+   * 登录态自定义判定（最高优先，env 之后）：用于「凭据落在某目录、文件名随 product 变化」
+   * 无法用固定路径表达的场景（如 codebuddy 的 CodeBuddyExtension auth 目录）。返回 true
+   * 即视为已登录；实现须自行兜底（读不到/解析失败一律 false，绝不抛错）。
+   */
+  loginStateProbe?: (homeDir: string) => boolean;
   // ── F-56 手动注册向导字段 ──
   /** 模板展示名（Web 向导卡片 / 手动条目 displayName 缺省值） */
   label: string;
@@ -174,12 +191,37 @@ export const KNOWN_AGENTS: KnownAgentDef[] = [
       },
     },
     probeArgs: ['--version'],
-    // 登录态：真 CLI 的 homeDir 默认 ~/.codebuddy（可被 CODEBUDDY_CONFIG_DIR 覆盖），凭据
-    // 落 ~/.codebuddy/credentials.json。裸判 ~/.codebuddy 目录必然误报——它同时是 WorkBuddy
-    // 自己的配置目录（plugins/mcp.json 等），装了 WorkBuddy 的机器恒为「已登录」（P0 实测踩过）。
-    // 走 API Key 鉴权的场景由环境变量兜底。
-    loginStateFiles: ['.codebuddy/credentials.json'],
+    // 登录态：真 CLI 凭据落 CodeBuddyExtension auth 目录（homedir() 直接拼出、无环境变量
+    // 可改），文件名随 product 变化（Tencent-Cloud.coding-copilot / workbuddy-desktop…）
+    // → 扫描 *.info 校验 token。~/.codebuddy 目录不可用（是 WorkBuddy 自己的配置目录，
+    // 恒存在误报）；credentials.json 那处存的是 MCP OAuth 凭据，账号登录不在那。
+    // 过期判定用 refreshExpiresAt 而非 expiresAt：accessToken 只活 30 天（过期后 CLI 自动
+    // 用 refreshToken 续），access 过期 ≠ 登出，refresh 也过期才算。
+    loginStateFiles: [],
     loginStateEnv: ['CODEBUDDY_AUTH_TOKEN', 'CODEBUDDY_API_KEY'],
+    loginStateProbe: (homeDir) => {
+      const dir = path.join(homeDir, CODEBUDDY_AUTH_DIR);
+      let names: string[];
+      try {
+        names = fs.readdirSync(dir);
+      } catch {
+        return false;
+      }
+      return names.some((n) => {
+        if (!n.endsWith('.info')) return false;
+        try {
+          const j = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as {
+            auth?: { accessToken?: string; refreshExpiresAt?: number };
+          };
+          const token = j.auth?.accessToken;
+          if (typeof token !== 'string' || token === '') return false;
+          const exp = j.auth?.refreshExpiresAt;
+          return typeof exp !== 'number' || exp > Date.now();
+        } catch {
+          return false;
+        }
+      });
+    },
     permissionArgs: {
       // --permission-mode plan 实测存在（--help）
       plan: ['--permission-mode', 'plan'],
@@ -528,14 +570,16 @@ export function writeExternalAgentsCache(agents: ExternalAgentCacheEntry[], home
 }
 
 /**
- * 登录态检查（§10）：三条判据，按可靠性从高到低——
+ * 登录态检查（§10）：四条判据，按可靠性从高到低——
  *   1. `loginStateEnv` 环境变量非空（有 Key 就能跑，即便没落盘登录态）；
- *   2. `loginStateJson` 指定配置文件的字段非空（cursor：cli-config.json → authInfo.email）；
- *   3. `loginStateFiles` 相对 HOME 逐个 existsSync，任一存在即 true（只判存在，不解析内容）。
+ *   2. `loginStateProbe` 自定义判定（凭据目录扫描等固定路径表达不了的场景）；
+ *   3. `loginStateJson` 指定配置文件的字段非空（cursor：cli-config.json → authInfo.email）；
+ *   4. `loginStateFiles` 相对 HOME 逐个 existsSync，任一存在即 true（只判存在，不解析内容）。
  * 只读本地配置，不上报任何内容；解析失败一律当 false，绝不抛错。
  */
 export function checkLoginState(def: KnownAgentDef, homeDir: string = os.homedir()): boolean {
   if (def.loginStateEnv?.some((k) => (process.env[k] ?? '').trim() !== '')) return true;
+  if (def.loginStateProbe?.(homeDir) === true) return true;
   if (def.loginStateJson) {
     const value = readJsonField(path.join(homeDir, def.loginStateJson.file), def.loginStateJson.path);
     if (value !== undefined) return true;

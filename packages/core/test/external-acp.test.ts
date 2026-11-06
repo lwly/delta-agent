@@ -320,6 +320,25 @@ describe('AcpExternalAdapter 认证流（codebuddy -32000 实测：自动 authen
     expect(events).toContainEqual({ type: 'auth_url', url: 'https://example.com/login?via=url-field' });
   });
 
+  it('authenticate 失败 → external_auth_failed 带错误原因与 stderr 尾行（不吞 EPERM 类根因），最终 fatal 上抛', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      requireAuth: true,
+      authMethods: [{ id: 'iOA', name: 'iOA 账号' }],
+      authFail: 'sign in error: EPERM: operation not permitted',
+    });
+    const failed = events.find((e): e is Extract<ExternalEvent, { type: 'error' }> =>
+      e.type === 'error' && e.message.startsWith('external_auth_failed'),
+    );
+    expect(failed?.fatal).toBe(false);
+    expect(failed?.message).toContain('authenticate failed');
+    expect(failed?.message).toContain('EPERM: operation not permitted');
+    // 最终仍按协议错收尾（fatal，done exit 1）
+    const fatal = events.find((e): e is Extract<ExternalEvent, { type: 'error' }> => e.type === 'error' && e.fatal);
+    expect(fatal?.message).toContain('ACP 会话失败');
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 1 });
+  });
+
   it('认证错但 agent 未声明 authMethods → 无自动认证，按普通协议错 fatal 上抛', async () => {
     const adapter = new AcpExternalAdapter(makeSpec());
     const events = await runScenario(adapter, { requireAuth: true });
