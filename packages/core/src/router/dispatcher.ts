@@ -18,6 +18,7 @@ import type {
 } from './types.js';
 import { InboxStore, WorkerTaskStore } from './store.js';
 import { buildDigestMessage, buildWorkerFirstMessage, parseDependsOn } from './prompt.js';
+import { watchdogTick, type WatchdogDeps } from './watchdog.js';
 import { defaultModelFor } from '../llm/defaults.js';
 
 /** hub send 的 finally 回调透传的运行结果（T3 冻结契约，字段零新增判定） */
@@ -61,6 +62,8 @@ export interface DispatcherDeps {
   maxConcurrentWorkers?: number;
   /** done 收敛时取 Worker 会话结果摘要（≤400 字；缺省不写 result_summary，落点在 runtime） */
   getResultSummary?: (workerSessionId: string) => string | null;
+  /** 看门狗判据注入（L2a 文件变更/work_root、L2c 事件时钟；缺省的检查项自动跳过） */
+  watchdog?: WatchdogDeps;
   /** 时钟注入（测试防抖/窗口判定用；缺省 Date.now） */
   now?: () => number;
 }
@@ -416,12 +419,31 @@ export class Dispatcher {
 
   /**
    * 60s tick 入口（§10.1 / §9：pumpDigest 与看门狗共用）。顺序：
-   * 派发泵（补槽位）→ 看门狗（T2d 接入）→ 逐 Router 播报。
+   * 派发泵（补槽位）→ 看门狗 L1/L2 → 逐 Router 播报。
    */
   async tick(): Promise<void> {
     await this.claimSlot();
+    await watchdogTick(this, this.deps.watchdog ?? {});
     for (const routerId of new Set(this.workerTasks.list().map((t) => t.router_session_id))) {
       await this.pumpDigest(routerId);
     }
+  }
+
+  /**
+   * L3 偏离标记接口（P0：只落标记，不接便宜模型、不判偏离——§9.2 / 计划 T2d）。
+   * 动作 = watchdog_flag='suspect' + silent inbox（任务台「存疑」角标数据源），
+   * 不打断、不终止、不 steer；误报允许发生（低可靠度判据，误杀成本远高于放过）。
+   */
+  markSuspect(taskId: string): void {
+    const row = this.workerTasks.get(taskId);
+    if (row.watchdog_flag === 'suspect') return; // 幂等：重复标记不叠加 inbox 条目
+    this.workerTasks.setWatchdogFlag(taskId, 'suspect');
+    this.inbox.append({
+      routerSessionId: row.router_session_id,
+      taskId,
+      kind: 'digest',
+      severity: 'silent',
+      payload: { type: 'watchdog_suspect', taskId, title: row.title },
+    });
   }
 }

@@ -6,3 +6,5 @@ export * from './types.js';
 export * from './store.js';
 export * from './prompt.js';
 export * from './dispatcher.js';
+export * from './preflight.js';
+export * from './watchdog.js';

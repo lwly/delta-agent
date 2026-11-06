@@ -270,6 +270,10 @@ describe('tick（60s 循环入口）', () => {
 
   it('tick 顺带把 queued 任务派发出去', async () => {
     const e = await env();
+    // 模拟 hub 语义：send 启动运行 → 会话进入 running（否则看门狗 L1 会正确地把它判死）
+    e.hub.sendImpl = (rec) => {
+      e.hub.running.add(rec.sessionId);
+    };
     const t = e.dispatch();
     await e.dispatcher.tick();
     expect(e.dispatcher.workerTasks.get(t.id).status).toBe('running');
