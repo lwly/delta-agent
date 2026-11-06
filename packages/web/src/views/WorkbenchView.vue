@@ -30,6 +30,9 @@ import { useFilePanelStore } from '../stores/filePanel';
 // F-54 后台任务条：轮询与状态在 store，本视图只做「随会话切换 watch」接线
 import BackgroundTasksBar from '../components/BackgroundTasksBar.vue';
 import { useBgTasksStore } from '../stores/bgTasks';
+// F-58 任务台：轮询与状态在 store，本视图只做「随项目切换 watch」接线
+import TaskBoard from '../components/TaskBoard.vue';
+import { useTasksStore } from '../stores/tasks';
 // 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
 import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
 import { resolveSelectedModel } from '../utils/modelChoice';
@@ -47,6 +50,14 @@ watch(
   { immediate: true },
 );
 onUnmounted(() => bgTasks.watch(null));
+// F-58 任务台：随项目切换启停轮询（离开工作台即停，防孤儿定时器）
+const tasksStore = useTasksStore();
+watch(
+  () => ws.activeProjectId,
+  (id) => tasksStore.watch(id || null),
+  { immediate: true },
+);
+onUnmounted(() => tasksStore.watch(null));
 const route = useRoute();
 const router = useRouter();
 
@@ -1332,6 +1343,9 @@ watch(
           还没有项目，点「＋ 新项目」注册本地仓库根目录。
         </p>
       </div>
+
+      <!-- F-58 任务台：当前项目的 Worker 任务列表（轮询在 store；interrupt 未送达计红点） -->
+      <TaskBoard />
 
       <!-- 底部功能区：设置（含待确认记忆角标）独立成组；Token 进度条；回收站 / 平台降为次级灰字 -->
       <div class="side-section bottom-group">

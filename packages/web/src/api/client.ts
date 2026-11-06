@@ -790,6 +790,84 @@ export interface BackgroundTaskView {
   exit_code: number | null;
 }
 
+// ── F-58 Router–Worker 调度（与 core router/types.ts 同构的手写镜像；web 不 import core 源码）──
+
+/** 任务状态机（§7.4）。终态 done/failed/canceled 不可回退；needs_decision 非终态、不占并发槽位 */
+export type WorkerTaskStatus = 'draft' | 'queued' | 'preflight' | 'running' | 'needs_decision' | 'done' | 'failed' | 'canceled';
+
+/** 失败归类（§7.1 failure_kind）。watchdog_l2 = 看门狗越界击杀（不重试） */
+export type FailureKind = 'preflight' | 'runtime' | 'watchdog_l2' | 'aborted' | 'canceled';
+
+/** 产物引用（裁决 Q2：路径 + result_summary 双轨） */
+export interface TaskArtifact {
+  kind: 'file' | 'session' | 'note';
+  ref: string;
+}
+
+/** dispatch_task 入参与手工建任务的共同 body（§7.5） */
+export interface DispatchRequest {
+  title: string;
+  /** 派单原文 = Worker 首条用户消息 */
+  goal: string;
+  /** 完成条件；null = 由 Router 在 title 里写清 */
+  acceptance?: string | null;
+  /** 仅 UI 标签，不进 prompt（§1.4） */
+  role_label?: string | null;
+  /** null = 内置引擎；'cli:*' / 'acp:*' = 外部 agent。派单后不可变 */
+  executor?: string | null;
+  permission_mode?: 'plan' | 'default' | 'yolo';
+  priority?: number;
+  /** 依赖任务 id：存在未终态项时不派发 */
+  depends_on?: string[];
+}
+
+/** worker_tasks DTO 投影（HTTP / Web 消费；金额永不入内） */
+export interface WorkerTaskView {
+  id: string;
+  project_id: string;
+  router_session_id: string;
+  title: string;
+  goal: string;
+  acceptance: string | null;
+  role_label: string | null;
+  executor: string | null;
+  permission_mode: string;
+  status: WorkerTaskStatus;
+  priority: number;
+  depends_on: string[];
+  artifacts: TaskArtifact[];
+  worker_session_id: string | null;
+  result_summary: string | null;
+  failure_kind: FailureKind | null;
+  /** decision_json 解析结果；结构由裁决场景定义 */
+  decision: unknown;
+  watchdog_flag: 'suspect' | null;
+  attempt: number;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  updated_at: number;
+}
+
+export type InboxKind = 'task_done' | 'task_failed' | 'needs_decision' | 'digest';
+
+/** 静默三级（§10）：成功一律 silent；batch 自动播报；interrupt 立即播报 + Web 红点 */
+export type InboxSeverity = 'silent' | 'batch' | 'interrupt';
+
+/** task_inbox 行（§7.1）。delivered_at NULL = 未送达；ack_at = 用户读过（与送达语义分开） */
+export interface InboxItem {
+  id: number;
+  router_session_id: string;
+  /** null = 会话级提示（如用量概览） */
+  task_id: string | null;
+  kind: InboxKind;
+  severity: InboxSeverity;
+  payload: unknown;
+  created_at: number;
+  delivered_at: number | null;
+  ack_at: number | null;
+}
+
 /** browse 端点的作用域前缀（session 主 / project 回落） */
 const browseBase = (scope: BrowseScope): string =>
   scope.kind === 'session' ? `/api/sessions/${scope.id}` : `/api/projects/${scope.id}`;
@@ -1074,6 +1152,39 @@ export const api = {
     request<BackgroundTaskView[]>('GET', `/api/sessions/${sessionId}/background-tasks`),
   killBackgroundTask: (sessionId: string, taskId: string) =>
     request<{ ok: boolean }>('DELETE', `/api/sessions/${sessionId}/background-tasks/${encodeURIComponent(taskId)}`),
+
+  // ── F-58 Router–Worker 调度（任务台数据源；形状与 core router/types.ts 的 WorkerTaskView / InboxItem 同构）──
+
+  // POST /api/projects/:id/router：取或建 Router 会话（幂等，返回 {session}）
+  createRouterSession: (projectId: string) =>
+    request<{ session: SessionRow }>('POST', `/api/projects/${projectId}/router`),
+
+  // GET /api/projects/:id/worker-tasks?status=&limit=：任务列表（任务台数据源）
+  listWorkerTasks: (projectId: string, opts?: { status?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.status) q.set('status', opts.status);
+    if (opts?.limit != null) q.set('limit', String(opts.limit));
+    const qs = q.toString();
+    return request<{ tasks: WorkerTaskView[] }>('GET', `/api/projects/${projectId}/worker-tasks${qs ? `?${qs}` : ''}`);
+  },
+
+  // POST /api/projects/:id/worker-tasks：手工建任务（body 同 dispatch_task；dispatch:true 立即派发）
+  createWorkerTask: (
+    projectId: string,
+    body: DispatchRequest & { dispatch?: boolean },
+  ) => request<{ task: WorkerTaskView }>('POST', `/api/projects/${projectId}/worker-tasks`, body),
+
+  // POST /api/worker-tasks/:id/decision：needs_decision 的人工裁决（retry/cancel/accept）
+  decideWorkerTask: (taskId: string, decision: 'retry' | 'cancel' | 'accept') =>
+    request<{ task: WorkerTaskView }>('POST', `/api/worker-tasks/${encodeURIComponent(taskId)}/decision`, { decision }),
+
+  // POST /api/worker-tasks/:id/cancel：取消（queued/running/needs_decision 均可；幂等）
+  cancelWorkerTask: (taskId: string) =>
+    request<{ task: WorkerTaskView }>('POST', `/api/worker-tasks/${encodeURIComponent(taskId)}/cancel`),
+
+  // GET /api/projects/:id/inbox?delivered=0：未送达条目（Web 红点数据源；仅支持 delivered=0）
+  listUndeliveredInbox: (projectId: string) =>
+    request<{ items: InboxItem[] }>('GET', `/api/projects/${projectId}/inbox?delivered=0`),
 
   // skills / mcp 配置中心（设置页面板）
   skillDetails: (projectId?: string) =>
