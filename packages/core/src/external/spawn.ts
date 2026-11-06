@@ -40,7 +40,7 @@ export interface SpawnOptions {
    * Windows：command 解析到 .cmd/.ps1 shim 时必须 shell:true，此时用此包装整条命令行。
    * 缺省实现见 defaultWindowsShellQuote。
    */
-  windowsShellQuote?: (commandLine: string) => string;
+  windowsShellQuote?: (command: string, args: string[]) => string;
 }
 
 export type ProcEvent =
@@ -68,11 +68,17 @@ export interface SpawnedProcess {
 }
 
 /**
- * Windows cmd.exe 引号包装缺省实现：外层单引号 + 内部整体 JSON.stringify（双引号转义）。
- * cmd.exe 自身不认单引号，外层单引号只作整体包裹防词法拆分；内部 JSON 双引号串
- * 保证含空格的路径/参数不散架（shell:true 时 Node 把整条命令交给 cmd /c）。
+ * Windows cmd.exe 引号包装缺省实现：逐段引用（command 与各 arg 独立加引号），空格拼接。
+ * cmd.exe 自身不认单引号，旧实现「外层单引号 + 内层 JSON.stringify」在 `cmd /d /s /c` 下
+ * 会被 /s 剥掉首尾引号后把外层单引号当命令名一部分（F-55 Windows 实测 5/5 CLI 探测失败），
+ * 改为对含空格/cmd 元字符（"&|<>^）的 token 加双引号、内部双引号转义——即 Node spawn
+ * 对文件名参数的标准引用法。完全不含特殊字符的裸名不加重引号。
  */
-const defaultWindowsShellQuote = (commandLine: string): string => `'${JSON.stringify(commandLine)}'`;
+export const defaultWindowsShellQuote = (command: string, args: string[]): string => {
+  const quoteToken = (token: string): string =>
+    /[\s"&|<>^]/.test(token) ? `"${token.replace(/"/g, '\\"')}"` : token;
+  return [command, ...args].map(quoteToken).join(' ');
+};
 
 /** 组装子进程 env：仅 { 基础白名单 + envWhitelist 中存在于 process.env 的项 + extraEnv 直注入 }，
  * 不透传 delta 进程的其余变量（不注入 delta 的密钥）。extraEnv 供 adapter 传单次运行的
@@ -216,9 +222,9 @@ export function spawnExternal(options: SpawnOptions): SpawnedProcess {
     windowsHide: true,
   };
   // shell:true 时 Node 把 command 当整条命令行执行：此时用 windowsShellQuote
-  // （缺省：外层单引号 + JSON.stringify 内层）包装整条命令行，防止含空格路径被 cmd 拆散
+  // （缺省：逐段引用，见 defaultWindowsShellQuote）包装整条命令行，防止含空格路径被 cmd 拆散
   const child = isWinShim
-    ? nodeSpawn((windowsShellQuote ?? defaultWindowsShellQuote)([command, ...args].join(' ')), spawnOpts)
+    ? nodeSpawn((windowsShellQuote ?? defaultWindowsShellQuote)(command, args), spawnOpts)
     : nodeSpawn(command, args, spawnOpts);
 
   // ---- 事件队列（单消费者 async generator） ----

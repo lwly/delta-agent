@@ -5,8 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { spawnExternal, MAX_LINE_BYTES } from '../src/external/spawn.js';
+import { spawnExternal, defaultWindowsShellQuote, MAX_LINE_BYTES } from '../src/external/spawn.js';
 import type { ProcEvent, SpawnedProcess } from '../src/external/spawn.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -173,5 +175,59 @@ describe('spawnExternal（F-55 进程生命周期底座）', () => {
     expect(r.done).toBe(true);
     expect(Date.now() - t0).toBeLessThan(100);
     await proc.wait();
+  });
+});
+
+describe('defaultWindowsShellQuote（F-55 Windows cmd 引号包装）', () => {
+  it('裸名不含空格/元字符：不加重引号', () => {
+    expect(defaultWindowsShellQuote('codebuddy.cmd', ['--version'])).toBe('codebuddy.cmd --version');
+  });
+
+  it('可执行路径含空格：仅该 token 加双引号，参数不动', () => {
+    expect(defaultWindowsShellQuote('C:\\Program Files\\nodejs\\codebuddy.cmd', ['--version'])).toBe(
+      '"C:\\Program Files\\nodejs\\codebuddy.cmd" --version',
+    );
+  });
+
+  it('参数含空格：仅该参数加双引号（逐段引用，不是整条串包裹）', () => {
+    expect(defaultWindowsShellQuote('a.cmd', ['--msg', 'hello world'])).toBe('a.cmd --msg "hello world"');
+  });
+
+  it('参数含双引号：转义后仍包在双引号内', () => {
+    expect(defaultWindowsShellQuote('a.cmd', ['say "hi"'])).toBe('a.cmd "say \\"hi\\""');
+  });
+
+  it('cmd 元字符（&|^<>）触发加引号', () => {
+    expect(defaultWindowsShellQuote('a.cmd', ['--filter', 'a&b'])).toBe('a.cmd --filter "a&b"');
+  });
+});
+
+/**
+ * Windows 真实 .cmd shim 集成用例：npm 装的 CLI 在 Windows 上是 .cmd shim，必须 shell:true
+ * 走 cmd.exe。旧实现（外层单引号 + JSON.stringify）在 `cmd /d /s /c` 下报
+ * 「文件名、目录名或卷标语法不正确」——F-55 实测 5/5 CLI 探测失败，此处防止回归。
+ * POSIX 上无 cmd.exe，仅 Windows CI（windows-latest）执行。
+ */
+const itWindows = process.platform === 'win32' ? it : it.skip;
+
+describe('spawnExternal .cmd shim（Windows shell:true 路径）', () => {
+  itWindows('shim 在含空格目录下 + 含空格参数：stdout 可读、exit 0', async () => {
+    // 临时目录故意带空格，验证 command token 的双引号包装
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta cmd shim '));
+    const shim = path.join(dir, 'hello-cli.cmd');
+    try {
+      fs.writeFileSync(shim, '@echo off\r\necho hello\r\necho arg=[%~1]\r\n', 'utf8');
+      const ac = new AbortController();
+      const proc = spawnExternal({ command: shim, args: ['--name', 'hello world'], cwd: dir, signal: ac.signal });
+      const events: ProcEvent[] = [];
+      for await (const ev of proc.events) {
+        events.push(ev);
+        if (ev.type === 'exit') break;
+      }
+      expect(linesOf(events)).toEqual(['hello', 'arg=[hello world]']);
+      expect(exitOf(events).code).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
