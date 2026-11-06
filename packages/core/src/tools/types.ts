@@ -118,6 +118,12 @@ export interface ToolContext {
    * 缺省（TUI/headless 未注入）= 后台执行明确报错，引导回同步执行。
    */
   backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /**
+   * F-58 调度器（dispatch_task / task_status 两个调度工具依赖）。
+   * 缺省（未装配）= 两工具报 dispatcher_unavailable（对齐 task_unavailable 口径），
+   * 工具定义仍对模型可见。Router 会话经 hub 收窄后仅见这两个工具。
+   */
+  dispatcher?: import('../router/dispatcher.js').Dispatcher;
   /** F-39：事件发射器（task 工具发 expert_delegate_* 用；缺省 = 不发事件） */
   emit?: (ev: import('@delta/shared').AgentEvent) => void;
 }

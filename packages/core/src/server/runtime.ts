@@ -27,6 +27,8 @@ import { createWebServer } from './http.js';
 import { TerminalManager } from './terminal.js';
 import { BackgroundTaskManager } from '../session/background-tasks.js';
 import { cancelAllExternalRuns } from '../external/lifecycle.js';
+import { Dispatcher } from '../router/dispatcher.js';
+import { runPreflight } from '../router/preflight.js';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
@@ -140,6 +142,14 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   // F-54 会话内后台任务（hub 与 http 共用同一实例；dispose 全杀防孤儿进程）
   const backgroundTasks = new BackgroundTaskManager();
 
+  // ── F-58 调度层装配（design-f58 §12/§13）──────────────────────────────────
+  // Worker 会话事件时钟（watchdog L2c 判据数据源）：订阅 hub 事件流记录每个 Worker
+  // 会话最近一次事件时间（hub 不 import router/，靠运行时注入耦合）；运行结束清理。
+  const workerEventClock = new Map<string, number>();
+  const workerEventUnsubs = new Map<string, () => void>();
+  // dispatcher 在 hub 之后装配（deps 互引），闭包延迟解析
+  let dispatcher: Dispatcher | undefined;
+
   const hub = new SessionHub({
     service,
     registry,
@@ -157,7 +167,69 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     runLog,
     // F-54 会话内后台任务：工具层（run_in_background/task_output）与 HTTP 端点共用同一实例
     backgroundTasks: backgroundTasks,
+    // F-58（T3 接缝）：运行结束透传给 Dispatcher（收敛主路径，§13）
+    onRunFinished: (sessionId, outcome) => {
+      workerEventClock.delete(sessionId);
+      workerEventUnsubs.get(sessionId)?.();
+      workerEventUnsubs.delete(sessionId);
+      dispatcher?.onRunFinished(sessionId, outcome);
+    },
   });
+
+  dispatcher = new Dispatcher({
+    workerTasks: service.workerTasks,
+    inbox: service.inbox,
+    // hub.send 全链路复用（阻塞到整轮结束；Dispatcher 不 await，运行结果经 onRunFinished 收敛）
+    send: (sessionId, input) => hub.send(sessionId, input),
+    // 纯读运行态（不触发 zombieReap）——本层唯一存活判定来源（D15）
+    peekRunning: (sessionId) => hub.peekRunning(sessionId),
+    // ⚠️ 契约要求注入但 Dispatcher/watchdog 禁止调用（isRunning 带 zombieReap 副作用，§9.3）
+    isRunning: (sessionId) => hub.isRunning(sessionId),
+    abort: (sessionId) => {
+      hub.abort(sessionId);
+    },
+    // 派单前置门禁（真实探测；测试侧不经过本装配，单测注入 fake）
+    preflight: (task) => runPreflight(task),
+    // Worker 会话创建（service 写死 kind='worker'，§7.5）；同时挂上事件时钟订阅
+    createWorkerSession: (projectId, o) => {
+      const s = service.createWorkerSession(projectId, o);
+      workerEventUnsubs.set(
+        s.id,
+        hub.subscribe(s.id, () => {
+          workerEventClock.set(s.id, Date.now());
+        }),
+      );
+      return s;
+    },
+    // 内置 Worker model 推导第一优先：Router 会话当前 model（§7.5）
+    getRouterModel: (routerSessionId) => service.getSession(routerSessionId)?.model ?? null,
+    // done 收敛摘要：取 Worker 会话最后一条非空 assistant 消息（≤400 字，Dispatcher 再截断）
+    getResultSummary: (workerSessionId) => {
+      try {
+        const msgs = service.getHistory(workerSessionId);
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          const m = msgs[i]!;
+          if (m.role === 'assistant' && m.content.trim()) return m.content.trim().slice(0, 400);
+        }
+        return null;
+      } catch {
+        return null; // 会话历史读取失败不阻塞收敛（摘要尽力而为）
+      }
+    },
+    // 看门狗判据（§9）：L2a 文件变更 + work_root、L2c 事件时钟（Worker 订阅流）
+    watchdog: {
+      listFileChanges: (sessionId) => service.changes.list(sessionId).map((c) => ({ path: c.path })),
+      getWorkRoot: (sessionId) => hub.resolveSessionWorkRoot(sessionId) ?? null,
+      lastEventAt: (sessionId) => workerEventClock.get(sessionId) ?? null,
+    },
+  });
+  // 启动收敛（§18-1）：重启后 running/preflight 且进程已不在的行标 failed(runtime)
+  dispatcher.bootstrap();
+  // 60s tick（§9/§10.1）：派发泵补槽 → 看门狗 L1/L2 → 逐 Router 播报；unref 不阻止进程退出
+  const dispatchTimer = setInterval(() => {
+    void dispatcher?.tick().catch(() => undefined);
+  }, 60_000);
+  dispatchTimer.unref?.();
 
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
   // F-47 Web 内置终端：node-pty 为 optionalDependencies——缺失/不可用时 status 端点明确降级
@@ -177,6 +249,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
     terminal, // F-47：/api/terminal/* + /ws/terminal
     backgroundTasks, // F-54：/api/sessions/:id/background-tasks
+    dispatcher, // F-58：6 个调度端点（缺省时端点 501）
   });
 
   let disposed = false;
@@ -195,11 +268,21 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      clearInterval(dispatchTimer); // F-58：先停 60s tick，不再派发/播报
       // 先停 accepting（server.close 立即返回、等待存量连接收尾）：全杀子进程的
       // 数百 ms 窗口内不再接受新的运行，避免新外部 run 不在全杀快照而成孤儿
       server.close();
       terminal.killAll(); // F-47：serve 退出全杀 pty（防孤儿 shell 进程）
       backgroundTasks.killAll(); // F-54：serve 退出全杀后台任务（防孤儿命令进程）
+      // F-58：dispose 不留孤儿任务——abort 所有运行中 Worker 会话，running/preflight
+      // 行收敛 failed(runtime)（failOrphaned 带 WHERE status IN 守卫，若 onRunFinished
+      // 已按 aborted 先收敛则此处自动让位，不二次改写）
+      for (const status of ['running', 'preflight'] as const) {
+        for (const task of service.workerTasks.list({ status })) {
+          if (task.worker_session_id) hub.abort(task.worker_session_id);
+          service.workerTasks.failOrphaned(task.id, 'runtime');
+        }
+      }
       // F-55 AC-55-5：serve 退出全杀运行中的外部 agent 子进程（防孤儿 CLI 进程；
       // 与 backgroundTasks.killAll 同一 dispose 收尾语义，内部单项容错不阻塞其余步骤）
       await cancelAllExternalRuns();

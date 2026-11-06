@@ -156,6 +156,26 @@ export class SessionService {
     return this.store.createSession({ id: randomUUID(), projectId, ...opts, mode });
   }
 
+  /**
+   * F-58（design-f58 §7.5 / §12）：创建 Worker 会话——一任务一会话，任务终态即封存。
+   * kind 由服务端写死 'worker'（不开放给调用方），task_id 写 sessions.task_id 供反查；
+   * model = task.executor 解析结果（外部原样 / 内置走 Router model 推导链），恒非空。
+   */
+  createWorkerSession(
+    projectId: string,
+    opts: { title: string; model: string; taskId: string },
+  ): SessionRow {
+    const s = this.store.createSession({
+      id: randomUUID(),
+      projectId,
+      title: opts.title,
+      model: opts.model,
+    });
+    this.store.setSessionKind(s.id, 'worker');
+    this.store.setSessionTask(s.id, opts.taskId);
+    return s;
+  }
+
   getSession(id: string): SessionRow | undefined {
     return this.store.getSession(id);
   }

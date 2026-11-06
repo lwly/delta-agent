@@ -20,6 +20,7 @@ import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
 import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
 import { saveMemoryTool, recallMemoryTool } from './builtin/memory.js';
 import { taskTool } from './builtin/task.js';
+import { dispatchTaskTool, taskStatusTool } from './builtin/dispatch.js';
 
 /** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
 interface CompiledValidator {
@@ -64,6 +65,7 @@ export class ToolRegistry {
       loadSkillTool, unloadSkillTool,
       saveMemoryTool, recallMemoryTool,
       taskTool,
+      dispatchTaskTool, taskStatusTool, // F-58 调度工具（Router 会话收窄后的全部工具面）
     ]) {
       this.register(t);
     }

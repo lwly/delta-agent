@@ -31,7 +31,7 @@ beforeEach(async () => {
 });
 
 describe('ToolRegistry', () => {
-  it('registers the 17 builtin tools', () => {
+  it('registers the 19 builtin tools', () => {
     const reg = new ToolRegistry();
     expect(reg.names().sort()).toEqual(
       [
@@ -40,6 +40,7 @@ describe('ToolRegistry', () => {
         'load_skill', 'unload_skill',
         'save_memory', 'recall_memory',
         'task',
+        'dispatch_task', 'task_status',
       ].sort(),
     );
   });
