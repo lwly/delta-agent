@@ -218,7 +218,7 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
 - 模型清单探测端点（`GET /api/external-agents/models`）收到的裸名 `command` 先经 `resolveCommandPath` 解析为绝对路径——Windows 裸名 spawn 不带 `.cmd` 后缀必失败，否则手动注册流程永远回落静态清单。
 - CLI：`delta models list` 尾部追加「外部 Agent」区块；`delta doctor` 新增一节（版本 / 权限档支持度 / 登录态是否存在）。
 - Web：设置 → 模型 页新增卡片，列出探测到的 agent + 三档支持度勾选表；新建会话时模型选择器里以 `cli:` 前缀区分；版本串不含版本号形态的条目（手动条目沿用旧版本串的场景）加「⚠ 可疑版本」警示标。
-- 登录态检测只做**存在性判断**（如 `~/.claude.json` 是否存在），**不解析内容、不复制、不上报**。判据必须指向**凭据文件本身**而非 CLI 配置目录：`~/.codebuddy` 同时是 WorkBuddy 自己的配置目录，裸判目录恒为「已登录」（2026-11 P0 实测误报）——codebuddy 判 `~/.codebuddy/credentials.json` + `CODEBUDDY_AUTH_TOKEN`/`CODEBUDDY_API_KEY` 环境变量。
+- 登录态检测只做**存在性判断**（如 `~/.claude.json` 是否存在），**不解析内容、不复制、不上报**。判据必须指向**凭据文件本身**而非 CLI 配置目录：`~/.codebuddy` 同时是 WorkBuddy 自己的配置目录，裸判目录恒为「已登录」（2026-11 P0 实测误报）。codebuddy 凭据落 **`CodeBuddyExtension/Data/Public/auth/*.info`**（darwin `~/Library/Application Support` / win32 `%USERPROFILE%\AppData\Local` / linux `~/.local/share`，由 CLI 产物 `homedir()` 直接拼出、无环境变量可改），文件名随 product 变化 → `loginStateProbe` 自定义判定（env 后、json 前的最高优先判据）：扫描 `*.info` 校验 `auth.accessToken` 非空且 `refreshExpiresAt` 未过期——**过期判定必须用 refresh 而非 access**（accessToken 只活 30 天，过期后 CLI 自动续；只看 access 会误报「未登录」）；`CODEBUDDY_AUTH_TOKEN`/`CODEBUDDY_API_KEY` 环境变量为 Key 鉴权兜底。
 
 ---
 
