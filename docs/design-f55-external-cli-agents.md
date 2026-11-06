@@ -188,7 +188,7 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
 | 取消      | `AbortSignal` → 先发协议取消（ACP `session/cancel`），300ms 后仍未退则杀进程组：POSIX `kill(-pid)`，Windows `taskkill /T /F /PID`                              |
 | 超时      | 无全局超时（长任务是常态）；`ctx.maxTurns` 不适用，改用「无事件静默 10 分钟」健康检查，命中记 `sandbox_notice` 同类提示                                                             |
 | 孤儿清理    | 适配器实例注册到 `serve` 的 dispose 列表，与 F-54 `BackgroundTaskManager` 同一收尾路径（**实现偏差**：P4 落地为进程级全局 lifecycle 追踪（`external/lifecycle.ts` 的 track/untrack/cancelAllExternalRuns），engine 不感知 serve，dispose 在 `server.close()` 之后全杀——比实例级注册更稳，每 run 独立实例下进程句柄即取消入口）                                                                        |
-| Windows | `command` 解析到 `.cmd`/`.ps1` shim 时必须 `shell: true`，参数走 `JSON.stringify` 单引号包法避免空格拆分；`detect` 阶段依次尝试 `claude.cmd` / `claude.bat` / `claude` |
+| Windows | `command` 解析到 `.cmd`/`.ps1` shim 时必须 `shell: true`，引号包装走逐段引用（`command` 与各 arg 独立判断，含空格/`&"\|<>^` 的 token 加双引号、内部 `\"` 转义，见 `defaultWindowsShellQuote`）——不采用整条串包法：`cmd /d /s /c` 会剥掉首尾引号，外层单引号 + `JSON.stringify` 会被当命令名一部分报「文件名、目录名或卷标语法不正确」（2026-11 实测 5/5 npm CLI 探测失败后修正）；`detect` 阶段依次尝试 `claude.cmd` / `claude.bat` / `claude` |
 
 ---
 
