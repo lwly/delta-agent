@@ -115,6 +115,16 @@ export interface ExternalAgentAdapter {
 
 **不发的事件**：`compact_*`（CLI 自己管上下文）、`budget_degraded`（无法降级黑盒）、`subtask_*` / `review_verdict`（无 DAG）。
 
+### 4.1 ACP 认证流（2026-11 增补，codebuddy -32000 实测）
+
+部分 ACP agent（codebuddy）在 `session/new` 时回 `-32000 Authentication required`（`data.category='auth'`），协议本身支持客户端侧发起认证，delta 实现「自动认证 + 登录链接直出」，用户无需退出 delta 去终端登录：
+
+1. `initialize` 回包的 `authMethods` 接住存入 adapter（此前被丢弃）；
+2. `session/new` 报认证类错误（code `-32000` 或 `data.category==='auth'`）且 agent 声明了认证方式 → 对第一个 authMethod 发 `authenticate`，**回包即登录完成**，随后重试一次 `session/new`（仍失败按普通协议错上抛）；
+3. JSON-RPC error 回包拒绝时携带 code/data（`AcpRpcError`），上层可区分认证失败与普通协议错；
+4. 认证期间 agent 经通知推送浏览器登录链接（codebuddy 实测 method `_codebuddy.ai/authUrl`，宽容匹配方法名含 `authUrl` + `params.url` 字符串）→ `ExternalEvent auth_url`；
+5. 映射层把 `auth_required` / `auth_url` 翻译为 **`external_auth_required`** 稳定码非 fatal 提示（消息带认证方式名 / 登录 URL）；Web 侧识别该前缀渲染「需要登录 → 打开登录页」可点击卡片，不再显示 ✘ 报错。
+
 ---
 
 ## 5. 权限：三档映射 + 能力降级声明
