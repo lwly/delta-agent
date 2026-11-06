@@ -42,6 +42,12 @@ import {
   findCronJob,
 } from '../cron/store.js';
 import { runDueCronJobs, type CronExecutor } from '../cron/runner.js';
+// F-58 调度端点（6 端点 + PATCH permission 的 Router 校验；dispatcher 由 runtime 装配注入）
+import { isExternalModel } from '../external/registry.js';
+import { toWorkerTaskView } from '../router/store.js';
+import { parseDispatchArgs } from '../tools/builtin/dispatch.js';
+import type { Dispatcher } from '../router/dispatcher.js';
+import type { WorkerTaskStatus } from '../router/types.js';
 // F-41 运行日志（/api/logs 尾读 + /api/logs/stream 实时推送）
 import type { RunLog } from '../logging/logger.js';
 // F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
@@ -127,6 +133,12 @@ export interface ServeOptions {
    * 缺省不提供：GET/DELETE /api/sessions/:id/background-tasks* 返回 501（能力未装配口径）。
    */
   backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /**
+   * F-58 调度器（serve 运行时注入的单例 Dispatcher）。
+   * 缺省不提供：6 个调度端点（/api/projects/:id/router|worker-tasks|inbox、
+   * /api/worker-tasks/:id/decision|cancel）一律返回 501（能力未装配口径，对齐 background-tasks）。
+   */
+  dispatcher?: Dispatcher;
   /**
    * F-55 外部 Agent 探测入口（缺省 ensureExternalAdapters；测试注入隔离探测副作用——
    * 真探测会跑 `--version` 子进程并写 ~/.delta/external.json，单测不能触碰真实 HOME/PATH）。
@@ -843,6 +855,115 @@ export function createWebServer(opts: ServeOptions): http.Server {
         if (handled) return;
       }
 
+      // ── F-58 调度端点（design-f58 §14；能力未装配 501，对齐 background-tasks 口径）──
+      // 本项目 Router 会话（POST /router 取或建的幂等查找源；一个项目一个 Router，§18-4）
+      const findRouterSession = (projectId: string) =>
+        service.listSessions(projectId).find((s) => s.kind === 'router');
+      if (parts[0] === 'api' && (parts[1] === 'worker-tasks' || (parts[1] === 'projects' && (parts[3] === 'router' || parts[3] === 'worker-tasks' || parts[3] === 'inbox')))) {
+        if (!opts.dispatcher) return err(res, 501, '调度能力未装配');
+        const dispatcher = opts.dispatcher;
+        // POST /api/projects/:id/router —— 取或建 Router 会话（幂等，返回 {session}）
+        if (method === 'POST' && parts[1] === 'projects' && parts[3] === 'router' && parts.length === 4) {
+          const project = service.getProject(parts[2]!);
+          if (!project) return err(res, 404, 'project not found');
+          const existing = findRouterSession(project.id);
+          if (existing) return json(res, 200, { session: existing });
+          const body = await readBody(req);
+          const model = body.model !== undefined ? String(body.model) : '';
+          // §4.4 拦截点 1：外部 agent 不能当 Router（其内置工具 delta 无法收窄）
+          if (isExternalModel(model)) {
+            return err(res, 400, `Router 会话不允许使用外部模型（${model}）：外部 agent 的工具集无法收窄，不能担任 Router`);
+          }
+          const s = service.createSession(project.id, { title: body.title ? String(body.title) : 'Router', model });
+          // kind 只由服务端写入（裁决 Q1：无任何客户端写入口）
+          service.store.setSessionKind(s.id, 'router');
+          // §4.1 L-权限层：Router 固定 plan 档（dispatch_task 归 read，不阻断派单）
+          hub.setPermissionMode(s.id, 'plan');
+          return json(res, 200, { session: service.getSession(s.id) });
+        }
+        // GET /api/projects/:id/worker-tasks?status=&limit= —— 任务列表（任务台数据源）
+        if (method === 'GET' && parts[1] === 'projects' && parts[3] === 'worker-tasks' && parts.length === 4) {
+          if (!service.getProject(parts[2]!)) return err(res, 404, 'project not found');
+          const VALID_STATUSES: ReadonlySet<string> = new Set([
+            'draft', 'queued', 'preflight', 'running', 'needs_decision', 'done', 'failed', 'canceled',
+          ]);
+          const status = url.searchParams.get('status');
+          if (status !== null && status !== '' && !VALID_STATUSES.has(status)) {
+            return err(res, 400, `非法 status：${status}`);
+          }
+          const limitRaw = Number(url.searchParams.get('limit'));
+          const rows = service.workerTasks.list({
+            projectId: parts[2]!,
+            ...(status ? { status: status as WorkerTaskStatus } : {}),
+            ...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: Math.floor(limitRaw) } : {}),
+          });
+          return json(res, 200, { tasks: rows.map(toWorkerTaskView) });
+        }
+        // POST /api/projects/:id/worker-tasks —— 手工建任务（body 同 dispatch_task；
+        // 不带 dispatch:true 落 draft（§7.4：draft 只由 Web 手工表单产生），带则落 queued 并立即尝试派发）
+        if (method === 'POST' && parts[1] === 'projects' && parts[3] === 'worker-tasks' && parts.length === 4) {
+          const project = service.getProject(parts[2]!);
+          if (!project) return err(res, 404, 'project not found');
+          const body = await readBody(req);
+          const parsed = parseDispatchArgs(body);
+          if (!parsed.ok) return err(res, 400, parsed.error);
+          // 无 Router 也能用：取或建（与 POST /router 同一服务端写入路径）
+          let router = findRouterSession(project.id);
+          if (!router) {
+            const s = service.createSession(project.id, { title: 'Router', model: '' });
+            service.store.setSessionKind(s.id, 'router');
+            hub.setPermissionMode(s.id, 'plan');
+            router = service.getSession(s.id)!;
+          }
+          const row = service.workerTasks.create({
+            ...parsed.value,
+            projectId: project.id,
+            routerSessionId: router.id,
+            status: body.dispatch === true ? 'queued' : 'draft',
+          });
+          if (body.dispatch === true) void dispatcher.claimSlot().catch(() => {});
+          return json(res, 200, { task: toWorkerTaskView(row) });
+        }
+        // POST /api/worker-tasks/:id/decision —— needs_decision 的人工裁决（retry/cancel/accept）
+        if (method === 'POST' && parts[1] === 'worker-tasks' && parts[3] === 'decision' && parts.length === 4) {
+          const body = await readBody(req);
+          const decision = String(body.decision ?? '');
+          if (decision !== 'retry' && decision !== 'cancel' && decision !== 'accept') {
+            return err(res, 400, 'decision 必须是 retry / cancel / accept');
+          }
+          const id = decodeURIComponent(parts[2]!);
+          if (!service.workerTasks.find(id)) return err(res, 404, 'worker task not found');
+          try {
+            return json(res, 200, { task: toWorkerTaskView(dispatcher.decide(id, decision)) });
+          } catch (e) {
+            // 非 needs_decision 等状态机拒绝 → 409
+            return err(res, 409, (e as Error).message);
+          }
+        }
+        // POST /api/worker-tasks/:id/cancel —— 取消（queued/running/needs_decision 均可；幂等）
+        if (method === 'POST' && parts[1] === 'worker-tasks' && parts[3] === 'cancel' && parts.length === 4) {
+          const id = decodeURIComponent(parts[2]!);
+          if (!service.workerTasks.find(id)) return err(res, 404, 'worker task not found');
+          try {
+            return json(res, 200, { task: toWorkerTaskView(dispatcher.cancel(id)) });
+          } catch (e) {
+            // preflight 阶段不支持直接取消（窗口极短）→ 409
+            return err(res, 409, (e as Error).message);
+          }
+        }
+        // GET /api/projects/:id/inbox?delivered=0 —— 未送达条目（Web 红点 + digest 播报同源）
+        if (method === 'GET' && parts[1] === 'projects' && parts[3] === 'inbox' && parts.length === 4) {
+          const project = service.getProject(parts[2]!);
+          if (!project) return err(res, 404, 'project not found');
+          const delivered = url.searchParams.get('delivered');
+          if (delivered !== null && delivered !== '0') {
+            return err(res, 400, '仅支持 delivered=0（未送达口径；送达标记由 dispatcher 播报流程写）');
+          }
+          const router = findRouterSession(project.id);
+          return json(res, 200, { items: router ? service.inbox.listUndelivered(router.id) : [] });
+        }
+      }
+
       // ── sessions ──────────────────────────────────────────────────────────
       if (method === 'POST' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'sessions') {
         const body = await readBody(req);
@@ -926,6 +1047,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
           return json(res, 200, { mode: hub.getPermissionMode(sessionId) });
         }
         if (method === 'PATCH' && parts[3] === 'permission' && parts.length === 4) {
+          // F-58（§4.1 L-权限层，裁决 Q3）：Router 会话固定 plan 档，UI 置灰不可改
+          if (service.getSession(sessionId)?.kind === 'router') {
+            return err(res, 400, 'Router 会话固定 plan（只读）档，不可修改权限模式');
+          }
           const body = await readBody(req);
           const mode = String(body.mode ?? '');
           if (mode !== 'plan' && mode !== 'default' && mode !== 'yolo') {

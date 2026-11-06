@@ -133,9 +133,11 @@ describe('runExternalAgent（F-55 事件映射引擎）', () => {
     expect(events[0]).toEqual({ type: 'turn_start', turn: 1 });
     expect(events[1]).toEqual({ type: 'text_delta', text: '你好' });
     expect(events[2]).toEqual({ type: 'thinking_delta', text: '思考中' });
+    // F-58（§6③）：done 如实带出退出码（含 0）
     expect(events[4]).toEqual({
       type: 'done',
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      exitCode: 0,
     });
   });
 

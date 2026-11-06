@@ -159,8 +159,10 @@ export async function* runExternalAgent(
     const resumeToken = ctx.externalResume?.externalId;
     const buffered: AgentEvent[] = [];
     let first: ExternalRunOutcome;
+    /** 最后一轮 adapter 运行的结果（done.exitCode 取此处；令牌失效降级重跑后以重跑轮为准） */
+    let lastOutcome: ExternalRunOutcome | undefined;
     if (resumeToken === undefined) {
-      first = yield* consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, undefined);
+      first = lastOutcome = yield* consumeAdapterRun(ctx, adapter, input, permissionMode, mcpFile?.configPath ?? undefined, usageTotal, undefined);
     } else {
       // externalSeen 翻转经 onExternalSeen 回调同步通知（outcome 只在流结束时返回，中途拿不到）
       let streaming = false;
@@ -206,7 +208,7 @@ export async function* runExternalAgent(
       }
       yield { type: 'error', message: RESUME_FALLBACK_NOTICE, fatal: false };
       // 丢弃失效令牌重跑（resumeToken 仅作首轮入参，重跑显式传 undefined）
-      yield* consumeAdapterRun(
+      lastOutcome = yield* consumeAdapterRun(
         ctx,
         adapter,
         buildResumeFallbackPrompt(history, input),
@@ -220,7 +222,13 @@ export async function* runExternalAgent(
       for (const ev of buffered) yield ev;
     }
 
-    yield { type: 'done', usage: usageTotal };
+    // F-58（§6③）：done 带出退出码（exit≠0 且无产出 → 上方 error{fatal} 已随流发出，
+    // AC3 据此判 failed(runtime)；exit 0 / undefined 不加字段，保持既有事件形状）
+    yield {
+      type: 'done',
+      usage: usageTotal,
+      ...(lastOutcome?.exitCode !== undefined ? { exitCode: lastOutcome.exitCode } : {}),
+    };
   } finally {
     untrackExternalRun(runHandle); // 运行结束即反注册（dispose 全杀只覆盖在跑的 run）
     mcpFile?.cleanup(); // done 产出之后、return 前删除临时 MCP 配置文件（幂等）

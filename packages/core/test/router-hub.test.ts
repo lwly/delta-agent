@@ -31,20 +31,8 @@ import type {
 import { SessionService } from '../src/session/service.js';
 import { ToolRegistry } from '../src/tools/registry.js';
 import { SessionHub, type HubEvent, type SessionHubDeps } from '../src/server/hub.js';
-import type { AgentTool } from '../src/tools/types.js';
 
 // ── 测试脚手架 ───────────────────────────────────────────────────────────────
-
-/** T4 才注册真实调度工具，这里用最小 stub 占位（仅验证收窄结构，不验证工具行为） */
-function stubTool(name: string): AgentTool {
-  return {
-    name,
-    description: `${name} 占位工具（F-58 T4 才有真实实现）`,
-    schema: { type: 'object', properties: {} },
-    danger: 'safe',
-    execute: async () => ({ callId: '', name, ok: true, content: 'stub' }),
-  };
-}
 
 /** 捕获型 fake provider：记录每个 ChatRequest 的工具名 + 可选工具调用脚本 */
 class CapturingProvider implements LLMProvider {
@@ -123,10 +111,9 @@ afterEach(async () => {
 });
 
 function makeRegistryWithStubs(): ToolRegistry {
-  const registry = new ToolRegistry();
-  registry.register(stubTool('dispatch_task'));
-  registry.register(stubTool('task_status'));
-  return registry;
+  // T4 已落地真实 dispatch_task/task_status（tools/builtin/dispatch.ts），注册表自带，
+  // T3 时期的 stub 注入不再需要（未装配 dispatcher 时真实工具自带明确报错口径）
+  return new ToolRegistry();
 }
 
 function makeRouterSession(model = 'test-model'): string {
@@ -161,7 +148,7 @@ function collectEvents(hub: SessionHub, sessionId: string): HubEvent[] {
 describe('AC1：Router 注册表收窄（design §4.1 L-结构层）', () => {
   it('Router 会话跑一轮：请求体工具集合 = {dispatch_task, task_status}，执行类工具全部缺席', async () => {
     const provider = new CapturingProvider([
-      // 第一轮：调用 dispatch_task（允许集内，走 RestrictedRegistry 执行 stub）
+      // 第一轮：调用 dispatch_task（允许集内，走 RestrictedRegistry 执行真实 T4 工具）
       { toolCalls: [{ id: 'c1', name: 'dispatch_task', argsJson: JSON.stringify({ title: 't', goal: 'g' }) }] },
       { text: '已派单' },
     ]);
@@ -188,10 +175,10 @@ describe('AC1：Router 注册表收窄（design §4.1 L-结构层）', () => {
     for (const forbidden of ['run_command', 'write_file', 'edit_file', 'read_file', 'glob_search', 'grep_search']) {
       expect(names).not.toContain(forbidden);
     }
-    // 收窄后 dispatch_task 仍可执行（stub 返回 ok，tool 消息落库）
+    // 收窄后 dispatch_task 仍可执行（真实 T4 工具；hub 未注入 dispatcher → 明确报错口径，tool 消息落库）
     expect(events.some((e) => e.type === 'done')).toBe(true);
     const history = service.getHistory(routerId);
-    expect(history.some((m) => m.role === 'tool' && m.content === 'stub')).toBe(true);
+    expect(history.some((m) => m.role === 'tool' && m.content.includes('未装配调度器'))).toBe(true);
   });
 
   it('普通 chat 会话不收窄：注册表全量可见（零回归护栏）', async () => {

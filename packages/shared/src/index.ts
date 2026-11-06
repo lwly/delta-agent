@@ -227,8 +227,10 @@ export type AgentEvent =
   /**
    * done.usage 统一口径：主循环各轮 + 收尾轮 + 子代理（task 工具回传 meta.usage）。
    * subagents = 本次运行派生的子代理次数（> 0 时 UI 标注「含子代理 N 个」）。
+   * F-58（§6③）：外部引擎收尾带出进程退出码（exit≠0 且无产出 → AC3 判 failed(runtime)
+   * 的依据）；其余引擎不填 = undefined，老消费端忽略。
    */
-  | { type: 'done'; usage: Usage; subagents?: number }
+  | { type: 'done'; usage: Usage; subagents?: number; exitCode?: number }
   | { type: 'error'; message: string; fatal: boolean };
 
 // ── Confirmation flow ─────────────────────────────────────────────────────

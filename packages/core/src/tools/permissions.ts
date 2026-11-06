@@ -29,6 +29,10 @@ export const TOOL_CAPABILITY: Record<string, ToolCapability> = {
   task: 'read',
   // F-54 后台任务状态/输出查询：纯只读
   task_output: 'read',
+  // F-58 调度工具（裁决 Q3）：dispatch_task 仅落库不执行、task_status 纯只读——
+  // Router 固定 plan 档，归 read 才不阻断派单
+  dispatch_task: 'read',
+  task_status: 'read',
   // 写状态
   write_file: 'write',
   edit_file: 'write',
