@@ -34,8 +34,24 @@ function log(step, message) {
   process.stdout.write(`\n[${step}] ${message}\n`);
 }
 
+const IS_WIN = process.platform === 'win32';
+
+/** 含空白或引号的参数在 shell 模式下需要自己加引号 */
+function quoteArg(arg) {
+  return /[\s"]/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg;
+}
+
 function run(cmd, args, opts = {}) {
-  execFileSync(cmd, args, { cwd: ROOT, stdio: 'inherit', ...opts });
+  // Windows 上 pnpm / npm 只有 .cmd shim，execFileSync 不经 shell 会 ENOENT
+  if (IS_WIN) {
+    return execFileSync([cmd, ...args].map(quoteArg).join(' '), {
+      cwd: ROOT,
+      stdio: 'inherit',
+      shell: true,
+      ...opts,
+    });
+  }
+  return execFileSync(cmd, args, { cwd: ROOT, stdio: 'inherit', ...opts });
 }
 
 function runQuiet(cmd, args, opts = {}) {
@@ -76,7 +92,6 @@ if (!SUPPORTED.has(target)) {
   console.error(`当前平台 ${target} 不受支持（已支持：${[...SUPPORTED].join(' / ')}）`);
   process.exit(1);
 }
-const IS_WIN = process.platform === 'win32';
 const OUT = path.join(BUILD, IS_WIN ? `delta-${target}.exe` : `delta-${target}`);
 
 // ── 1. 编译 ─────────────────────────────────────────────────────────────
@@ -135,7 +150,9 @@ fs.rmSync(ZIP, { force: true });
 if (IS_WIN) {
   // Windows runner 自带 bsdtar（tar.exe），-a 按扩展名产出 zip（STORE/DEFLATE，
   // 与 sea-entry.cjs 内置解压器兼容；条目 ./ 前缀由其 normalize 处理）
-  run('tar', ['-a', '-cf', ZIP, '.'], { cwd: RUNTIME });
+  // 必须用绝对路径：Git Bash 的 /usr/bin/tar 是 GNU tar，不认 -a（会报 Cannot execute remote shell）
+  const winTar = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
+  run(fs.existsSync(winTar) ? winTar : 'tar', ['-a', '-cf', ZIP, '.'], { cwd: RUNTIME });
 } else {
   run('zip', ['-r', '-q', '-X', ZIP, '.', '-x', '*.DS_Store'], { cwd: RUNTIME });
 }
