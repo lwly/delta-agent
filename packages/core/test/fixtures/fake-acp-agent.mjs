@@ -7,6 +7,8 @@
 //     "authMethods": [...],        // initialize 回包认证方式（缺省 []）；[{id,name}]
 //     "requireAuth": true,         // 首个 session/new 回 -32000 认证错，authenticate 后才放行
 //     "authUrl": "https://...",    // authenticate 期间经 _codebuddy.ai/authUrl 通知推送的登录链接
+//     "authUrlParam": "url",       // 通知 params 的字段名（缺省 authUrl——codebuddy 实测真实字段名；
+//                                  //   设为 "url" 覆盖兜底解析路径）
 //     "steps": [ ... ],            // 收到 session/prompt 后依次执行
 //     "stopReason": "end_turn",    // prompt 回包（缺省 end_turn）
 //     "exitCode": 0                // 步骤全部执行完后的退出码（缺省 0）
@@ -159,8 +161,10 @@ rl.on('line', (line) => {
     }
     send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: SESSION_ID } });
   } else if (msg.method === 'authenticate') {
-    // 模拟真实时序：先推登录链接通知（浏览器登录），登录完成后（测试内立即）回包放行
-    send({ jsonrpc: '2.0', method: '_codebuddy.ai/authUrl', params: { url: scenario.authUrl ?? 'https://example.com/login?token=fake' } });
+    // 模拟真实时序：先推登录链接通知（浏览器登录），登录完成后（测试内立即）回包放行。
+    // params 字段名缺省 authUrl（codebuddy 实测真实形状——此前发 url 导致测试全绿真机必挂）
+    const authUrlParams = { [scenario.authUrlParam ?? 'authUrl']: scenario.authUrl ?? 'https://example.com/login?token=fake' };
+    send({ jsonrpc: '2.0', method: '_codebuddy.ai/authUrl', params: authUrlParams });
     authDone = true;
     send({ jsonrpc: '2.0', id: msg.id, result: {} });
   } else if (msg.method === 'session/prompt') {

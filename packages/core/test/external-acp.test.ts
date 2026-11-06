@@ -308,6 +308,18 @@ describe('AcpExternalAdapter 认证流（codebuddy -32000 实测：自动 authen
     ]);
   });
 
+  it('params.url 兜底：agent 发 url 字段（非 authUrl）同样产出 auth_url 事件', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      requireAuth: true,
+      authMethods: [{ id: 'iOA', name: 'iOA 账号' }],
+      authUrl: 'https://example.com/login?via=url-field',
+      authUrlParam: 'url',
+      steps: [],
+    });
+    expect(events).toContainEqual({ type: 'auth_url', url: 'https://example.com/login?via=url-field' });
+  });
+
   it('认证错但 agent 未声明 authMethods → 无自动认证，按普通协议错 fatal 上抛', async () => {
     const adapter = new AcpExternalAdapter(makeSpec());
     const events = await runScenario(adapter, { requireAuth: true });

@@ -86,6 +86,12 @@ function parseAuthMethods(raw: unknown): Array<{ id: string; name: string }> {
   return out;
 }
 
+/**
+ * authenticate 后等待登录链接的保底提示时限：超时仍未收到 auth_url 且未完成认证，
+ * 补一条终端登录指引（不让用户对着「正在发起认证…」无限干等）。
+ */
+const AUTH_URL_HINT_DELAY_MS = 30_000;
+
 export class AcpExternalAdapter implements ExternalAgentAdapter {
   readonly spec: ExternalAgentSpec;
 
@@ -109,6 +115,8 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
   private turnDone = false;
   /** initialize 回包声明的认证方式清单（session/new 报认证错时挑第一个发起 authenticate） */
   private authMethods: Array<{ id: string; name: string }> = [];
+  /** 本次认证是否已收到过登录链接通知（30s 保底提示的判定依据） */
+  private authUrlSeen = false;
 
   stderrTail(): string[] {
     return this.lastProc?.stderrTail() ?? [];
@@ -150,6 +158,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     this.exitSeen = false;
     this.turnDone = false;
     this.authMethods = [];
+    this.authUrlSeen = false;
 
     const proc = spawnExternal({
       command: this.spec.command,
@@ -290,7 +299,29 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
       const method = this.authMethods[0]!;
       push({ type: 'auth_required', methods: this.authMethods });
       // authenticate 回包即登录完成（agent 在此期间经 authUrl 类通知推送浏览器链接）
-      await this.request('authenticate', { methodId: method.id });
+      const authPromise = this.request('authenticate', { methodId: method.id });
+      // 保底提示：30s 内既没等到登录链接、认证也没完成 → 补终端登录指引，不让用户干等
+      // （codebuddy 实测链接通知秒到；超时多半是 agent 侧卡住或网络问题）
+      let settled = false;
+      void authPromise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      const hintTimer = setTimeout(() => {
+        if (!settled && !this.authUrlSeen) {
+          push({
+            type: 'error',
+            message:
+              'external_auth_required: 超过 30s 未收到登录链接，可在终端运行 codebuddy 完成登录（/login）后停止本会话重发',
+            fatal: false,
+          });
+        }
+      }, AUTH_URL_HINT_DELAY_MS);
+      await authPromise.finally(() => clearTimeout(hintTimer));
       return await this.request('session/new', { cwd, mcpServers: [] });
     }
   }
@@ -373,10 +404,15 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     if (msg.method === 'session/update') {
       this.mapSessionUpdate(msg.params ?? {}, push);
     } else if (typeof msg.method === 'string' && msg.method.includes('authUrl')) {
-      // 认证登录链接通知（宽容匹配：方法名含 authUrl + params.url 为字符串；codebuddy 实测
-      // method: _codebuddy.ai/authUrl）——转 auth_url 对外事件，由映射引擎/Web 弹「点击登录」
-      const url = (msg.params ?? {}) as Record<string, unknown>;
-      if (typeof url.url === 'string' && url.url !== '') push({ type: 'auth_url', url: url.url });
+      // 认证登录链接通知（宽容匹配：方法名含 authUrl；codebuddy 实测 method:
+      // _codebuddy.ai/authUrl，params 字段名是 authUrl——2026-11 反编译确认，
+      // params.url 留作兜底）——转 auth_url 对外事件，由映射引擎/Web 弹「点击登录」
+      const p = (msg.params ?? {}) as Record<string, unknown>;
+      const url = typeof p.authUrl === 'string' && p.authUrl !== '' ? p.authUrl : p.url;
+      if (typeof url === 'string' && url !== '') {
+        this.authUrlSeen = true;
+        push({ type: 'auth_url', url });
+      }
     }
     // 其他通知方法：忽略（宽容原则）
   }
