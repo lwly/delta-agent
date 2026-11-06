@@ -333,6 +333,27 @@ describe('runExternalAgent（F-55 事件映射引擎）', () => {
     expect(events.at(-1)?.type).toBe('done');
   });
 
+  it('auth_required/auth_url → external_auth_required 稳定码提示（fatal false，消息带认证方式与登录链接）', async () => {
+    const adapter = scriptAdapter([
+      { type: 'auth_required', methods: [{ id: 'iOA', name: 'iOA 账号' }] },
+      { type: 'auth_url', url: 'https://example.com/login?token=abc' },
+      { type: 'text', text: 'after-auth' },
+      { type: 'done', exitCode: 0 },
+    ]);
+    registerExternalAdapter(adapter);
+    const events = await collect(makeCtx());
+
+    const errs = events.filter((e) => e.type === 'error');
+    expect(errs).toHaveLength(2);
+    expect(errs.every((e) => e.type === 'error' && e.fatal === false)).toBe(true);
+    expect(errs[0]!.message).toContain('external_auth_required');
+    expect(errs[0]!.message).toContain('iOA 账号');
+    expect(errs[1]!.message).toContain('external_auth_required');
+    expect(errs[1]!.message).toContain('https://example.com/login?token=abc');
+    // 认证期间会话继续跑：text 照常透传
+    expect(types(events)).toContain('text_delta');
+  });
+
   it('done 必达：上游不发 done 事件且 exit 非 0、无产出 → fatal error（exit 3）+ done', async () => {
     // 脚本末尾没有 ExternalEvent done：adapter 流自然结束
     const adapter = scriptAdapter([{ type: 'error', message: 'boom', fatal: false }]);

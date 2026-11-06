@@ -4,6 +4,9 @@
 // 场景由 FAKE_ACP_SCRIPT 指向的 JSON 文件描述：
 //   {
 //     "protocolVersion": 1,        // initialize 回包（缺省 1）
+//     "authMethods": [...],        // initialize 回包认证方式（缺省 []）；[{id,name}]
+//     "requireAuth": true,         // 首个 session/new 回 -32000 认证错，authenticate 后才放行
+//     "authUrl": "https://...",    // authenticate 期间经 _codebuddy.ai/authUrl 通知推送的登录链接
 //     "steps": [ ... ],            // 收到 session/prompt 后依次执行
 //     "stopReason": "end_turn",    // prompt 回包（缺省 end_turn）
 //     "exitCode": 0                // 步骤全部执行完后的退出码（缺省 0）
@@ -39,6 +42,7 @@ try {
 }
 
 const SESSION_ID = 'fake-acp-session-1';
+let authDone = false; // requireAuth 场景：authenticate 收到后置 true，session/new 随之放行
 const send = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`);
 
 /** 收尾：置退出码、清未决定时器（否则 delay 的 timer 会拽住事件循环，进程迟迟不退）、
@@ -140,11 +144,25 @@ rl.on('line', (line) => {
       result: {
         protocolVersion: scenario.protocolVersion ?? 1,
         agentCapabilities: { loadSession: false, promptCapabilities: {} },
-        authMethods: [],
+        authMethods: Array.isArray(scenario.authMethods) ? scenario.authMethods : [],
       },
     });
   } else if (msg.method === 'session/new') {
+    // requireAuth 场景：认证完成前一律回 -32000 认证错（data.category=auth，codebuddy 实测形状）
+    if (scenario.requireAuth === true && !authDone) {
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        error: { code: -32000, message: 'Authentication required', data: { category: 'auth' } },
+      });
+      return;
+    }
     send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: SESSION_ID } });
+  } else if (msg.method === 'authenticate') {
+    // 模拟真实时序：先推登录链接通知（浏览器登录），登录完成后（测试内立即）回包放行
+    send({ jsonrpc: '2.0', method: '_codebuddy.ai/authUrl', params: { url: scenario.authUrl ?? 'https://example.com/login?token=fake' } });
+    authDone = true;
+    send({ jsonrpc: '2.0', id: msg.id, result: {} });
   } else if (msg.method === 'session/prompt') {
     void runSteps(msg.id);
   } else if (msg.method === 'session/cancel') {

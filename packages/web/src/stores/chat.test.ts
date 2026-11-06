@@ -122,3 +122,26 @@ describe('chat store 预算告警提示', () => {
     ]);
   });
 });
+
+describe('chat store ACP 认证提示（external_auth_required → 登录卡片，不渲染 ✘ 报错）', () => {
+  it('external_auth_required 前缀 + 消息含 URL → notice 带 url 字段（渲染为可点击链接）', () => {
+    const chat = useChatStore();
+    chat.onEvent({
+      type: 'error',
+      message: 'external_auth_required: 请打开登录链接完成认证，认证通过后本会话自动继续：https://example.com/login?token=abc',
+    });
+    const notices = chat.notices.filter((n) => n.text.startsWith('外部 agent 需要登录'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.url).toBe('https://example.com/login?token=abc');
+  });
+
+  it('external_auth_required 无 URL → 原文提示；普通 error 仍渲染 ✘ 前缀', () => {
+    const chat = useChatStore();
+    chat.onEvent({ type: 'error', message: 'external_auth_required: 外部 agent 需要登录（支持：iOA），正在发起认证…' });
+    expect(chat.notices[0]!.text).toContain('external_auth_required');
+    expect(chat.notices[0]!.url).toBeUndefined();
+
+    chat.onEvent({ type: 'error', message: '普通协议错' });
+    expect(chat.notices[1]!.text).toBe('✘ 普通协议错');
+  });
+});

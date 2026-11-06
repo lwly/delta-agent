@@ -45,6 +45,12 @@ export type ExternalEvent =
   | { type: 'plan'; steps: Array<{ title: string; status: string }> }
   | { type: 'usage'; input: number; output: number }
   | { type: 'external_session'; id: string } // 用于 --resume
+  | {
+      // ACP 认证流（codebuddy -32000 实测）：agent 声明的认证方式清单（initialize 回包）
+      type: 'auth_required';
+      methods: Array<{ id: string; name: string }>;
+    }
+  | { type: 'auth_url'; url: string } // 浏览器登录链接（agent 经 authUrl 类通知推送，如 _codebuddy.ai/authUrl）
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'done'; exitCode: number };
 

@@ -1535,7 +1535,10 @@ watch(
             <!-- 事件通知（压缩/预算/计划/子任务…） -->
             <div v-for="n in chat.notices" :key="n.id" class="event-card">
               <span class="event-ico">ℹ</span>
-              <span class="event-text">{{ n.text }}</span>
+              <span class="event-text">
+                {{ n.text }}
+                <a v-if="n.url" :href="n.url" target="_blank" rel="noopener noreferrer" class="auth-link">打开登录页 ↗</a>
+              </span>
             </div>
           </div>
           </div>
@@ -2272,6 +2275,8 @@ watch(
   white-space: pre-wrap; word-break: break-word;
 }
 .event-ico { font-size: 13px; }
+/* ACP 认证流：通知卡内的可点击登录链接（external_auth_required 分支） */
+.auth-link { color: var(--accent); font-weight: 600; text-decoration: underline; margin-left: 4px; }
 
 /* ══════════ 审批卡片 ══════════ */
 .cards-zone { padding-top: 0; }

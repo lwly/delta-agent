@@ -42,13 +42,48 @@ interface AcpIncomingMessage {
   method?: string;
   params?: Record<string, unknown>;
   result?: Record<string, unknown>;
-  error?: { code: number; message: string };
+  error?: { code: number; message: string; data?: unknown };
 }
 
 /** session/update 里 permission option 的宽松形状 */
 interface AcpPermissionOption {
   optionId?: string;
   kind?: string;
+}
+
+/**
+ * JSON-RPC error 回包的异常载体：code/data 挂在 Error 上——上层据此区分「认证失败」
+ * （code -32000 或 data.category==='auth'，codebuddy 实测）与普通协议错。
+ */
+export class AcpRpcError extends Error {
+  constructor(
+    public readonly code: number,
+    message: string,
+    public readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = 'AcpRpcError';
+  }
+
+  /** 认证类错误判定：code -32000 或 data.category === 'auth'（二者其一即认） */
+  get isAuthError(): boolean {
+    if (this.code === -32000) return true;
+    const category = (this.data as Record<string, unknown> | undefined)?.category;
+    return category === 'auth';
+  }
+}
+
+/** initialize 回包 authMethods 的宽松解析：只收 {id, name} 形状项（宽容，缺失字段不给 id） */
+function parseAuthMethods(raw: unknown): Array<{ id: string; name: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ id: string; name: string }> = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.id !== 'string' || rec.id === '') continue;
+    out.push({ id: rec.id, name: typeof rec.name === 'string' ? rec.name : rec.id });
+  }
+  return out;
 }
 
 export class AcpExternalAdapter implements ExternalAgentAdapter {
@@ -72,6 +107,8 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
   private exitSeen = false;
   /** 本轮 turn 是否已宣告结束（prompt 回包到达 / 驱动失败收尾）；防 dispatch 重复发 done */
   private turnDone = false;
+  /** initialize 回包声明的认证方式清单（session/new 报认证错时挑第一个发起 authenticate） */
+  private authMethods: Array<{ id: string; name: string }> = [];
 
   stderrTail(): string[] {
     return this.lastProc?.stderrTail() ?? [];
@@ -112,6 +149,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     this.sessionId = null;
     this.exitSeen = false;
     this.turnDone = false;
+    this.authMethods = [];
 
     const proc = spawnExternal({
       command: this.spec.command,
@@ -181,12 +219,11 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     const driver = async (): Promise<void> => {
       try {
         // 握手第一步必须在读 stdout 首行前发出（spawn stdin 即写，管道缓冲保证顺序）
-        await this.request('initialize', { protocolVersion: 1, clientCapabilities: {} });
+        // 接住回包：authMethods 供 session/new 认证失败时自动发起 authenticate
+        const initResult = await this.request('initialize', { protocolVersion: 1, clientCapabilities: {} });
+        this.authMethods = parseAuthMethods(initResult?.authMethods);
         // 版本协商宽容：agent 回包的 protocolVersion 与我方（1）不同也不报错，仅依赖语义不锁拼写
-        const newResult = await this.request('session/new', {
-          cwd: req.cwd,
-          mcpServers: [], // TODO(P2): MCP 透传（spec.mcpArgs 写临时 mcp.json 后经 args 传入）
-        });
+        const newResult = await this.requestSessionNew(req.cwd, push);
         const sessionId = newResult?.sessionId;
         if (typeof sessionId !== 'string') throw new Error('session/new 回包缺少 sessionId');
         this.sessionId = sessionId;
@@ -208,7 +245,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
         if (this.exitSeen) return; // 进程已退出：done 已带退出码，不再补 error
         push({
           type: 'error',
-          message: `ACP 会话失败：${err instanceof Error ? err.message : String(err)}`,
+          message: `ACP 会话失败：${err instanceof AcpRpcError ? `（code ${err.code}）${err.message}` : err instanceof Error ? err.message : String(err)}`,
           fatal: true,
         });
         // 失败同样立即收尾：常驻 agent 收到协议错误后未必自退，不能等 exit（同上回归）
@@ -236,6 +273,27 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
   }
 
   // ---- JSON-RPC 发送侧 ----
+
+  /**
+   * session/new：认证类错误（-32000 / data.category==='auth'）且 agent 声明了认证方式时，
+   * 自动对第一个 authMethod 发 authenticate（agent 会推登录链接通知），回包（= 登录完成）
+   * 后重试一次 session/new；仍失败按普通协议错上抛。agent 未声明认证方式则原样上抛。
+   */
+  private async requestSessionNew(cwd: string, push: (ev: ExternalEvent) => void): Promise<Record<string, unknown>> {
+    try {
+      return await this.request('session/new', {
+        cwd,
+        mcpServers: [], // TODO(P2): MCP 透传（spec.mcpArgs 写临时 mcp.json 后经 args 传入）
+      });
+    } catch (err) {
+      if (!(err instanceof AcpRpcError) || !err.isAuthError || this.authMethods.length === 0) throw err;
+      const method = this.authMethods[0]!;
+      push({ type: 'auth_required', methods: this.authMethods });
+      // authenticate 回包即登录完成（agent 在此期间经 authUrl 类通知推送浏览器链接）
+      await this.request('authenticate', { methodId: method.id });
+      return await this.request('session/new', { cwd, mcpServers: [] });
+    }
+  }
 
   /** 发送 JSON-RPC 请求并等回包；stdin 不可写（进程已死）立即抛错 */
   private request(method: string, params: unknown): Promise<Record<string, unknown>> {
@@ -293,7 +351,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
       if (!entry) return; // 未知 id 的回包：忽略（宽容）
       this.pending.delete(String(msg.id));
       if (msg.error !== undefined) {
-        entry.reject(new Error(`ACP 请求失败（${msg.error.code}）：${msg.error.message}`));
+        entry.reject(new AcpRpcError(msg.error.code, msg.error.message, msg.error.data));
       } else {
         entry.resolve(msg.result ?? {});
       }
@@ -314,6 +372,11 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
     // 3) notification
     if (msg.method === 'session/update') {
       this.mapSessionUpdate(msg.params ?? {}, push);
+    } else if (typeof msg.method === 'string' && msg.method.includes('authUrl')) {
+      // 认证登录链接通知（宽容匹配：方法名含 authUrl + params.url 为字符串；codebuddy 实测
+      // method: _codebuddy.ai/authUrl）——转 auth_url 对外事件，由映射引擎/Web 弹「点击登录」
+      const url = (msg.params ?? {}) as Record<string, unknown>;
+      if (typeof url.url === 'string' && url.url !== '') push({ type: 'auth_url', url: url.url });
     }
     // 其他通知方法：忽略（宽容原则）
   }

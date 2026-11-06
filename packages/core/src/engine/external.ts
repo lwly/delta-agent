@@ -390,6 +390,18 @@ async function* consumeAdapterRun(
           onExternalSeen?.();
           ctx.onExternalSession?.(ev.id);
           break;
+        case 'auth_required': {
+          // ACP 认证流：adapter 已自动对第一个 authMethod 发起 authenticate，此处只做
+          // 稳定错误码提示（external_auth_required 前缀，Web 据此渲染登录卡片而非 ✘ 报错）
+          const names = ev.methods.map((m) => m.name || m.id).join(' / ');
+          yield { type: 'error', message: `external_auth_required: 外部 agent 需要登录（支持：${names}），正在发起认证…`, fatal: false };
+          break;
+        }
+        case 'auth_url':
+          // 登录链接直出（URL 随消息透出，Web 渲染为可点击登录卡片）；认证完成由 adapter
+          // 的 authenticate 回包驱动，会话自动继续，无需用户重发
+          yield { type: 'error', message: `external_auth_required: 请打开登录链接完成认证，认证通过后本会话自动继续：${ev.url}`, fatal: false };
+          break;
         case 'error':
           if (ev.fatal) outcome.upstreamFatal = true;
           yield { type: 'error', message: ev.message, fatal: ev.fatal };

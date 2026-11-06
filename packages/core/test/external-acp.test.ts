@@ -283,3 +283,38 @@ describe('AcpExternalAdapter（F-55 Tier A：JSON-RPC over stdio）', () => {
     expect(adapter.stderrTail().join('\n')).toContain('acp-stderr-marker');
   });
 });
+
+describe('AcpExternalAdapter 认证流（codebuddy -32000 实测：自动 authenticate + 登录链接直出）', () => {
+  it('session/new 认证错 → auth_required + authenticate → auth_url 事件 → 重试 session/new 成功，会话正常跑通', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      requireAuth: true,
+      authMethods: [
+        { id: 'iOA', name: 'iOA 账号' },
+        { id: 'external', name: '外部账号' },
+      ],
+      authUrl: 'https://example.com/login?token=fake-acp',
+      steps: [update('agent_message_chunk', { content: { type: 'text', text: 'after-auth' } })],
+    });
+    expect(events).toEqual([
+      { type: 'auth_required', methods: [
+        { id: 'iOA', name: 'iOA 账号' },
+        { id: 'external', name: '外部账号' },
+      ] },
+      { type: 'auth_url', url: 'https://example.com/login?token=fake-acp' },
+      { type: 'external_session', id: 'fake-acp-session-1' },
+      { type: 'text', text: 'after-auth' },
+      { type: 'done', exitCode: 0 },
+    ]);
+  });
+
+  it('认证错但 agent 未声明 authMethods → 无自动认证，按普通协议错 fatal 上抛', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, { requireAuth: true });
+    const err = events.find((e): e is Extract<ExternalEvent, { type: 'error' }> => e.type === 'error');
+    expect(err?.fatal).toBe(true);
+    expect(err?.message).toContain('-32000');
+    expect(events.some((e) => e.type === 'auth_required')).toBe(false);
+    expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 1 });
+  });
+});

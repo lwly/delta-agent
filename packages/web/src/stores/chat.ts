@@ -56,7 +56,7 @@ export const useChatStore = defineStore('chat', {
     /** 待回答提问队列（同轮可多次 ask_user，按 requestId 独立回填） */
     pendingAsks: [] as Array<{ requestId: string; question: string; options?: string[] }>,
     /** tag：替换标签——同 tag 的旧提示先移除再入队（如预算告警只保留最新一条） */
-    notices: [] as Array<{ id: number; text: string; tag?: string }>,
+    notices: [] as Array<{ id: number; text: string; tag?: string; url?: string }>,
     unsub: null as null | (() => void),
     noticeId: 1,
     // ── UI 本地状态（不来自服务端协议，见各字段注释）──────────────────
@@ -187,12 +187,12 @@ export const useChatStore = defineStore('chat', {
       this.toolSeq = 0;
       this.thinkingText = '';
     },
-    notice(text: string, tag?: string) {
+    notice(text: string, tag?: string, url?: string) {
       if (tag) {
         const idx = this.notices.findIndex((n) => n.tag === tag);
         if (idx !== -1) this.notices.splice(idx, 1);
       }
-      this.notices.push({ id: this.noticeId++, text, ...(tag ? { tag } : {}) });
+      this.notices.push({ id: this.noticeId++, text, ...(tag ? { tag } : {}), ...(url ? { url } : {}) });
       if (this.notices.length > 20) this.notices.shift();
     },
     async onEvent(ev: { type: string; [k: string]: unknown }) {
@@ -375,9 +375,22 @@ export const useChatStore = defineStore('chat', {
           }
           break;
         }
-        case 'error':
-          this.notice(`✘ ${String(ev.message)}`);
+        case 'error': {
+          const msg = String(ev.message);
+          // ACP 认证流（external_auth_required 稳定码）：渲染成「需要登录」卡片而非 ✘ 报错；
+          // 消息里的登录链接直出为可点击 URL（只认 http(s)，防 CLI 侧异常串注入别的协议）
+          if (msg.startsWith('external_auth_required')) {
+            const url = /(https?:\/\/\S+)/.exec(msg)?.[1];
+            this.notice(
+              url ? '外部 agent 需要登录，点击链接完成认证，认证通过后本会话自动继续' : msg,
+              undefined,
+              url,
+            );
+            break;
+          }
+          this.notice(`✘ ${msg}`);
           break;
+        }
         case 'run_error':
           this.notice(`✘ ${String(ev.message)}`);
           break;
