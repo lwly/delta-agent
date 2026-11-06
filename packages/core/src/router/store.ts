@@ -142,6 +142,13 @@ export class WorkerTaskStore {
     return this.db.prepare('SELECT * FROM worker_tasks WHERE id = ?').get(id) as WorkerTaskRow | undefined;
   }
 
+  /** 按 Worker 会话反查任务（idx_wtasks_session；onRunFinished 收敛的唯一入口）。 */
+  findByWorkerSession(workerSessionId: string): WorkerTaskRow | undefined {
+    return this.db
+      .prepare('SELECT * FROM worker_tasks WHERE worker_session_id = ?')
+      .get(workerSessionId) as WorkerTaskRow | undefined;
+  }
+
   /** 台账/任务台数据源：priority DESC, created_at ASC（设计稿 §8.2 第 1 步的桶序）。 */
   list(opts: ListWorkerTaskOpts = {}): WorkerTaskRow[] {
     const where: string[] = [];
@@ -248,6 +255,24 @@ export class WorkerTaskStore {
          ORDER BY finished_at DESC LIMIT ${Math.max(1, Math.floor(limit))}`,
       )
       .all(routerSessionId, sinceTs) as WorkerTaskRow[];
+  }
+
+  /**
+   * bootstrap 定向收敛（设计稿 §18-1：重启后把 running/preflight 且进程已不在的行标
+   * failed(runtime)）。之所以不经 transition()：T1 冻结的状态机表里 preflight 只有
+   * running/needs_decision 两条出边（preflight 窗口极短、正常路径不存在该迁移），
+   * 而 §18-1 明确要求 bootstrap 同时收敛 preflight 行——两者冲突时以定向方法落 §18-1，
+   * 不动既有状态机语义（T1 的「preflight 不可直接取消/无 failed 出边」测试保持零回归）。
+   * 原子性靠 WHERE status IN (...) 守卫：已被其他路径收敛的行不会被二次改写。
+   */
+  failOrphaned(taskId: string, failureKind: FailureKind = 'runtime'): boolean {
+    const r = this.db
+      .prepare(
+        `UPDATE worker_tasks SET status = 'failed', failure_kind = ?, finished_at = ?, updated_at = ?
+         WHERE id = ? AND status IN ('preflight', 'running')`,
+      )
+      .run(failureKind, Date.now(), Date.now(), taskId);
+    return r.changes === 1;
   }
 }
 
