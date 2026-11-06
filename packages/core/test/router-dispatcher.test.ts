@@ -126,8 +126,11 @@ describe('dispatch / claimSlot（queued → preflight → running）', () => {
     const dep = e.dispatch({ title: '依赖任务' });
     const child = e.dispatch({ title: '子任务', dependsOn: [dep.id] });
     await e.dispatcher.claimSlot();
+    // Router 置忙：屏蔽 onRunFinished 的自动播报（T2c），本用例只验证状态机与 inbox 落行
+    e.hub.running.add(e.routerId);
     e.dispatcher.onRunFinished('ws-1', e.outcome({ runError: '炸了' }));
     await new Promise((r) => setTimeout(r, 0));
+    e.hub.running.delete(e.routerId);
 
     const childRow = e.dispatcher.workerTasks.get(child.id);
     expect(childRow.status).toBe('canceled');
@@ -157,6 +160,8 @@ describe('onRunFinished 收敛（done / failed(runtime) / aborted）', () => {
 
   it('runError → failed(runtime)；aborted → failed(aborted)；均写 inbox', async () => {
     const e = await env({ preflight: preflightPass });
+    // Router 置忙：屏蔽 onRunFinished 内的自动播报（T2c），本用例只验证状态机与 inbox 落行
+    e.hub.running.add(e.routerId);
     const a = e.dispatch({ title: '任务A' });
     await e.dispatcher.claimSlot();
     e.dispatcher.onRunFinished('ws-1', e.outcome({ runError: '模型超时' }));

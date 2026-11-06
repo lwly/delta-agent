@@ -17,7 +17,7 @@ import type {
   WorkerTaskRow,
 } from './types.js';
 import { InboxStore, WorkerTaskStore } from './store.js';
-import { buildWorkerFirstMessage, parseDependsOn } from './prompt.js';
+import { buildDigestMessage, buildWorkerFirstMessage, parseDependsOn } from './prompt.js';
 import { defaultModelFor } from '../llm/defaults.js';
 
 /** hub send 的 finally 回调透传的运行结果（T3 冻结契约，字段零新增判定） */
@@ -67,6 +67,11 @@ export interface DispatcherDeps {
 
 /** 依赖任务未就绪时任务保持 queued（§7.4：depends_on 有未终态项不派发） */
 const PENDING_STATUSES = new Set(['draft', 'queued', 'preflight', 'running', 'needs_decision']);
+
+/** digest 防抖（§10.1 C4）：两次播报最小间隔 */
+export const DIGEST_MIN_INTERVAL_MS = 60_000;
+/** batch 窗口兜底（§10.1 C2）：距上次播报超过 15min 时，不足 2 条终态也播 */
+export const DIGEST_MAX_GAP_MS = 15 * 60_000;
 
 export class Dispatcher {
   readonly workerTasks: WorkerTaskStore;
@@ -242,6 +247,8 @@ export class Dispatcher {
     }
     // 槽位已释放：继续派发排队的任务（异步，不阻塞调用方 finally）
     void this.claimSlot().catch(() => {});
+    // §13 时序第 15 步：每次收敛后尝试播报（C3/C4 条件会把不该发的挡住）
+    void this.pumpDigest(task.router_session_id).catch(() => {});
   }
 
   /** 运行失败收敛（幂等守卫：仅 running 可收敛；失败经 inbox batch 进 digest，§10） */
@@ -351,6 +358,70 @@ export class Dispatcher {
           });
         }
       }
+    }
+  }
+
+  /**
+   * 主动播报（设计稿 §10.1，D14——本设计价值主张的关键机制）。四条件全满足才发：
+   *   C1 有 batch/interrupt 未送达（silent 永不触发，这是「没搞定就不打扰」的硬保障）；
+   *   C2 窗口关闭：interrupt 立即；仅 batch 需「终态数≥2（自上次播报）」或「距上次播报>15min」；
+   *   C3 Router 空闲（peekRunning 纯读，不触发 zombieReap）；C4 距上次播报>60s 防抖。
+   *
+   * 顺序不可颠倒（防自激循环的头号防线，§10.1 三个设计要点之一）：
+   *   先把本批 inbox 行写 delivered_at，再 hub.send；send 失败回滚 delivered_at=NULL。
+   *   即使 send 期间有新条目进来，它们是新 id，不会被本轮重复播报；
+   *   本轮结束触发的 onRunFinished → pumpDigest 也会被 C4 防抖挡住。
+   *
+   * 返回是否真的发送了。
+   */
+  async pumpDigest(routerSessionId: string): Promise<boolean> {
+    const now = this.nowFn();
+    // C1：存在待播报条目（batch/interrupt；silent 永不触发）
+    const undelivered = this.inbox
+      .listUndelivered(routerSessionId)
+      .filter((i) => i.severity === 'batch' || i.severity === 'interrupt');
+    if (undelivered.length === 0) return false;
+
+    const lastDeliveredAt = this.inbox.lastDeliveredAt(routerSessionId);
+    // C2：窗口已关闭。interrupt 立即；仅 batch 看「终态数≥2 或距上次播报>15min」。
+    // 从未播报过（lastDeliveredAt 为 NULL）不视为「距上次>15min」——否则首条失败会立即
+    // 触发播报，batch 的累积语义（AC8：≥2 条终态触发 1 条 digest）就失效了
+    const hasInterrupt = undelivered.some((i) => i.severity === 'interrupt');
+    if (!hasInterrupt) {
+      const terminalCount = this.workerTasks.listTerminalSince(routerSessionId, lastDeliveredAt ?? 0).length;
+      const gapOpen = lastDeliveredAt !== null && now - lastDeliveredAt > DIGEST_MAX_GAP_MS;
+      if (terminalCount < 2 && !gapOpen) return false;
+    }
+
+    // C3：Router 空闲。运行中不发送，条目留在 inbox 等两个出口之一：
+    // onRunFinished → 再 pump，或用户开口 → 台账注入未送达 interrupt（§8.2）
+    if (this.deps.peekRunning(routerSessionId)) return false;
+
+    // C4：防抖（先于标记：标记会改 MAX(delivered_at)，防抖判定必须用标记前的值）
+    if (lastDeliveredAt !== null && now - lastDeliveredAt <= DIGEST_MIN_INTERVAL_MS) return false;
+
+    // 先标记，后发送（顺序不可颠倒）
+    const ids = undelivered.map((i) => i.id);
+    this.inbox.markDelivered(ids, now);
+    const digestText = buildDigestMessage(undelivered);
+    try {
+      await this.deps.send(routerSessionId, digestText);
+      return true;
+    } catch {
+      // send 失败（Router 恰好被占用等）→ 回滚，等下一 tick / 下一次收敛
+      this.inbox.unmarkDelivered(ids);
+      return false;
+    }
+  }
+
+  /**
+   * 60s tick 入口（§10.1 / §9：pumpDigest 与看门狗共用）。顺序：
+   * 派发泵（补槽位）→ 看门狗（T2d 接入）→ 逐 Router 播报。
+   */
+  async tick(): Promise<void> {
+    await this.claimSlot();
+    for (const routerId of new Set(this.workerTasks.list().map((t) => t.router_session_id))) {
+      await this.pumpDigest(routerId);
     }
   }
 }
