@@ -25,6 +25,12 @@ export interface SessionRow {
   external_id: string | null;
   /** F-55（v6）：外部 agent 虚拟 id（cli:* / acp:*）；与 external_id 成对写入 */
   external_agent: string | null;
+  /** F-58（v7）：会话种类 'chat' | 'router' | 'worker'；历史行为 'chat' */
+  kind: string;
+  /** F-58（v7）：仅 UI 标签（任务台展示），不进 prompt、不参与任何引擎分支 */
+  role_label: string | null;
+  /** F-58（v7）：worker 会话反查所属任务（worker_tasks.id）；router/chat 会话为 NULL */
+  task_id: string | null;
 }
 
 /** 会话列清单：4 处 SELECT 共用一份，避免加列时漏改（F-39 §6.5） */
@@ -43,6 +49,9 @@ const SESSION_COLUMNS = [
   'expert_type',
   'external_id',
   'external_agent',
+  'kind',
+  'role_label',
+  'task_id',
 ] as const;
 
 const sessionColumns = (prefix = ''): string => SESSION_COLUMNS.map((c) => `${prefix}${c}`).join(', ');
@@ -252,6 +261,26 @@ export class SessionStore {
     this.db
       .prepare('UPDATE sessions SET external_id = ?, external_agent = ?, updated_at = ? WHERE id = ?')
       .run(externalId, agentId, new Date().toISOString(), sessionId);
+  }
+
+  /**
+   * F-58（裁决 Q1）：写入会话种类。只允许服务端在建会话流程中调用一次——
+   * kind 建后不可变（router 改回 chat 等于把执行工具还给已积累调度上下文的会话），
+   * 不得提供任何 PATCH / 客户端写入口。
+   */
+  setSessionKind(id: string, kind: 'chat' | 'router' | 'worker'): void {
+    const r = this.db
+      .prepare('UPDATE sessions SET kind = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(kind, new Date().toISOString(), id);
+    if (r.changes === 0) throw new Error('session not found');
+  }
+
+  /** F-58：worker 会话反查所属任务（worker_tasks.id）；NULL = 解除关联。 */
+  setSessionTask(id: string, taskId: string | null): void {
+    const r = this.db
+      .prepare('UPDATE sessions SET task_id = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL')
+      .run(taskId, new Date().toISOString(), id);
+    if (r.changes === 0) throw new Error('session not found');
   }
 
   touchSession(id: string, patch: { title?: string; status?: string; model?: string }): void {

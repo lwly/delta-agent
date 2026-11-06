@@ -10,6 +10,7 @@ import { MemoryStore } from './memory.js';
 import { FileChangeStore } from './changes.js';
 import { SearchStore, type SearchOptions, type SearchHit } from './search.js';
 import { UsageStore } from './usage.js';
+import { WorkerTaskStore, InboxStore } from '../router/store.js';
 import { resolveEmbedding } from '../llm/embeddings.js';
 
 /**
@@ -47,6 +48,10 @@ export class SessionService {
   readonly search: SearchStore;
   /** F-31 成本与用量报告（同库 usage 表：只读聚合查询） */
   readonly usage: UsageStore;
+  /** F-58 调度任务生命周期（同库 worker_tasks 表：状态机 + 原子认领） */
+  readonly workerTasks: WorkerTaskStore;
+  /** F-58 Router 待播报队列（同库 task_inbox 表：三级静默 + 送达标记） */
+  readonly inbox: InboxStore;
   /** 运行中会话的 AbortController 注册表（删除前必须中止，§8.2 移除安全策略） */
   private activeRuns = new Map<string, AbortController>();
 
@@ -57,6 +62,8 @@ export class SessionService {
     this.changes = new FileChangeStore(this.store.db);
     this.search = new SearchStore(this.store.db, opts?.embedderFactory ?? resolveEmbedding);
     this.usage = new UsageStore(this.store.db);
+    this.workerTasks = new WorkerTaskStore(this.store.db);
+    this.inbox = new InboxStore(this.store.db);
   }
 
   /**

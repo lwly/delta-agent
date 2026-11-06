@@ -482,6 +482,27 @@ export {
 } from './llm/embeddings.js';
 
 export {
+  WorkerTaskStore,
+  InboxStore,
+  toWorkerTaskView,
+  DEFAULT_MAX_CONCURRENT_WORKERS,
+  type CreateWorkerTaskInput,
+  type ListWorkerTaskOpts,
+  type AppendInboxInput,
+  type WorkerTaskStatus,
+  type TerminalTaskStatus,
+  type FailureKind,
+  type TaskArtifact,
+  type DispatchRequest,
+  type PreflightResult,
+  type WorkerTaskRow,
+  type WorkerTaskView,
+  type InboxItem,
+  type InboxKind,
+  type InboxSeverity,
+} from './router/index.js';
+
+export {
   McpManager,
   loadMcpConfig,
   readMcpConfigFile,

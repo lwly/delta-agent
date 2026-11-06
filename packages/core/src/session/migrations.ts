@@ -187,6 +187,59 @@ ALTER TABLE sessions ADD COLUMN external_agent TEXT DEFAULT NULL;
 ALTER TABLE usage ADD COLUMN billing TEXT NOT NULL DEFAULT 'metered';
 `;
 
+/** v7：F-58 Router–Worker 调度层——sessions 标记会话种类（chat/router/worker），
+ * worker_tasks 为用户级任务生命周期表（不复用 F-15b 的 Plan 节点租约表 tasks，设计稿 §7.3），
+ * task_inbox 为 Router 待播报队列（severity 三级静默，设计稿 §10）。
+ * 金额不入 worker_tasks：从 usage 按 session_id 聚合，禁止双写（设计稿 §7.1 明确不加的列）。 */
+const MIGRATION_V7_F58_ROUTER_WORKER = `
+ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat';
+ALTER TABLE sessions ADD COLUMN role_label TEXT DEFAULT NULL;
+ALTER TABLE sessions ADD COLUMN task_id TEXT DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_project_kind ON sessions(project_id, kind);
+
+CREATE TABLE IF NOT EXISTS worker_tasks (
+  id                 TEXT PRIMARY KEY,
+  project_id         TEXT NOT NULL,
+  router_session_id  TEXT NOT NULL,
+  title              TEXT NOT NULL,
+  goal               TEXT NOT NULL,
+  acceptance         TEXT DEFAULT NULL,
+  role_label         TEXT DEFAULT NULL,
+  executor           TEXT DEFAULT NULL,
+  permission_mode    TEXT NOT NULL DEFAULT 'default',
+  status             TEXT NOT NULL DEFAULT 'draft',
+  priority           INTEGER NOT NULL DEFAULT 1,
+  depends_on         TEXT NOT NULL DEFAULT '[]',
+  artifacts          TEXT NOT NULL DEFAULT '[]',
+  worker_session_id  TEXT DEFAULT NULL,
+  result_summary     TEXT DEFAULT NULL,
+  failure_kind       TEXT DEFAULT NULL,
+  decision_json      TEXT DEFAULT NULL,
+  watchdog_flag      TEXT DEFAULT NULL,
+  attempt            INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL,
+  started_at         INTEGER,
+  finished_at        INTEGER,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wtasks_project ON worker_tasks(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_wtasks_router  ON worker_tasks(router_session_id, status);
+CREATE INDEX IF NOT EXISTS idx_wtasks_session ON worker_tasks(worker_session_id);
+
+CREATE TABLE IF NOT EXISTS task_inbox (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  router_session_id TEXT NOT NULL,
+  task_id           TEXT DEFAULT NULL,
+  kind              TEXT NOT NULL,
+  severity          TEXT NOT NULL DEFAULT 'silent',
+  payload_json      TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  delivered_at      INTEGER DEFAULT NULL,
+  ack_at            INTEGER DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_router ON task_inbox(router_session_id, delivered_at);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'baseline-core-tables', sql: MIGRATION_V1_BASELINE },
   { version: 2, name: 'f17-search-indexes', sql: MIGRATION_V2_F17_SEARCH },
@@ -210,6 +263,19 @@ export const MIGRATIONS: Migration[] = [
       hasColumn(db, 'sessions', 'external_id') &&
       hasColumn(db, 'sessions', 'external_agent') &&
       hasColumn(db, 'usage', 'billing'),
+  },
+  {
+    version: 7,
+    name: 'f58-router-worker',
+    sql: MIGRATION_V7_F58_ROUTER_WORKER,
+    // 列已存在 = 「user_version 被外部工具改小」后重放。三列齐全才跳过 ALTER
+    skipIf: (db) =>
+      hasColumn(db, 'sessions', 'kind') &&
+      hasColumn(db, 'sessions', 'role_label') &&
+      hasColumn(db, 'sessions', 'task_id'),
+    // 跳过时不能连带漏建索引（幂等语句，可安全重复执行；两表及其索引由 CREATE IF NOT EXISTS 自带幂等，
+    // 但跳过分支不执行主 SQL，故 sessions 复合索引在此补建——对齐 v5 写法）
+    repairSql: 'CREATE INDEX IF NOT EXISTS idx_sessions_project_kind ON sessions(project_id, kind);',
   },
 ];
 
