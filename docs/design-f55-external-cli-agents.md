@@ -195,6 +195,7 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
 ## 10. 检测与配置
 
 - **不自动下载、不自动安装**（与 OpenBot 相反）。只探测：`command --version`，超时 3s，失败静默跳过。
+- **版本串格式校验**（2026-11 P0 加固）：`--version` 输出必须匹配 `versionPattern`（缺省 `/\d+\.\d+/`，须含「数字.数字」）才认命——npm 同名占位包输出口号文案（如 "Hello, World!"），无任何数字，按探测失败静默挡掉。
 - 探测结果落到 `~/.delta/external.json`（**非密钥文件，无加密**），形状：
 
 ```json
@@ -203,10 +204,11 @@ CLI 自己有 session 文件（`~/.claude`、`~/.codex` …），delta 也有 SQ
       "version": "2.x", "tier": "B", "enabled": true, "lastProbeAt": "2026-11-04T09:00:00Z" } ] }
 ```
 
-- 优先级：显式 `DELTA_EXTERNAL_<ID>_PATH` > `~/.delta/external.json` > PATH 探测。
+- 优先级：显式 `DELTA_EXTERNAL_<ID>_PATH` > `~/.delta/external.json` > PATH 探测。全路径未命中的既有缓存条目**保留并标 `stale: true`**（不 splice——移除会连带丢用户选的 `model` 等偏好；下次探测命中随条目重建自然清除）。
+- 模型清单探测端点（`GET /api/external-agents/models`）收到的裸名 `command` 先经 `resolveCommandPath` 解析为绝对路径——Windows 裸名 spawn 不带 `.cmd` 后缀必失败，否则手动注册流程永远回落静态清单。
 - CLI：`delta models list` 尾部追加「外部 Agent」区块；`delta doctor` 新增一节（版本 / 权限档支持度 / 登录态是否存在）。
-- Web：设置 → 模型 页新增卡片，列出探测到的 agent + 三档支持度勾选表；新建会话时模型选择器里以 `cli:` 前缀区分。
-- 登录态检测只做**存在性判断**（如 `~/.claude.json` 是否存在），**不解析内容、不复制、不上报**。
+- Web：设置 → 模型 页新增卡片，列出探测到的 agent + 三档支持度勾选表；新建会话时模型选择器里以 `cli:` 前缀区分；版本串不含版本号形态的条目（手动条目沿用旧版本串的场景）加「⚠ 可疑版本」警示标。
+- 登录态检测只做**存在性判断**（如 `~/.claude.json` 是否存在），**不解析内容、不复制、不上报**。判据必须指向**凭据文件本身**而非 CLI 配置目录：`~/.codebuddy` 同时是 WorkBuddy 自己的配置目录，裸判目录恒为「已登录」（2026-11 P0 实测误报）——codebuddy 判 `~/.codebuddy/credentials.json` + `CODEBUDDY_AUTH_TOKEN`/`CODEBUDDY_API_KEY` 环境变量。
 
 ---
 
