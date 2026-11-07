@@ -53,6 +53,7 @@ import { isExternalModel } from '../external/registry.js';
 import { modeSegment } from '../engine/mode-prompt.js';
 import { distillMemories } from '../session/distill.js';
 import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
+import { buildRouterLedger } from '../router/ledger.js';
 import type { HookManager } from '../hooks/manager.js';
 import * as path from 'node:path';
 import { FILES, projectConfigDir } from '../paths.js';
@@ -750,6 +751,20 @@ export class SessionHub {
       // 记忆里程碑：本轮输入的 L2 记忆召回（Top-K 注入动态段，最后追加不动缓存前缀）
       const memoryScopes = ['global', `project:${session.project_id}`, `session:${sessionId}`];
       const memoryBlock = this.renderMemoryRecall(input, memoryScopes);
+      // F-58 台账注入（design-f58 §8.1）：仅 Router 会话把 worker_tasks + task_inbox 投影成
+      // 纯文本块拼入动态段，任务状态以此为准；chat 等其他会话零变化。数据行经 deps.service
+      // 的两个 F-58 store 读出，buildRouterLedger 是零 IO 纯函数（§8.2 裁剪在函数内）。
+      let ledgerBlock = '';
+      if (session.kind === 'router') {
+        try {
+          ledgerBlock = buildRouterLedger({
+            tasks: service.workerTasks.list({ routerSessionId: sessionId }),
+            interrupts: service.inbox.listUndelivered(sessionId, { severity: 'interrupt' }),
+          }).text;
+        } catch {
+          // 台账失败不阻塞本轮运行（投影视图，缺一段提示词好过整轮拒绝）
+        }
+      }
       const ctxMode = (['react', 'plan-execute', 'multi-agent'].includes(session.mode)
         ? session.mode
         : 'react') as RunContext['mode'];
@@ -762,8 +777,8 @@ export class SessionHub {
         systemPrompt: staticText,
         systemPromptParts: {
           staticText,
-          // 记忆召回块 + M5 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
-          dynamicText: [dynamicText, memoryBlock, modeSegment(ctxMode, this.deps.plan)]
+          // 记忆召回块 + F-58 台账 + M5 模式段最后追加（prompt-design §5），切换模式不动缓存前缀
+          dynamicText: [dynamicText, memoryBlock, ledgerBlock, modeSegment(ctxMode, this.deps.plan)]
             .filter((t) => t.length > 0)
             .join('\n\n'),
         },
