@@ -677,3 +677,42 @@ sequenceDiagram
 - 快在哪：人的**上下文切换成本**归零——5 个任务不需要 5 个窗口、不需要记住各自进度、不需要自己判断"这个是不是卡住了"。Router 的台账替人记住"什么在跑、什么完了、什么要你决定"。
 - 因此度量应该是**人的指标**：单日可推进任务数、需要人工介入的次数（越少越好）、从"任务完成"到"人知道"的时延（由 batch digest 决定），而**不是**端到端时长。
 - 分享里「20 个任务平均 12 分半 / 传统近半小时」这组数据：口径不明（是否含人工切换时间、模型档位、任务难度分布均未知），**只能作趋势参考，不进 AC、不进验收、不写进对外材料**。
+
+---
+
+## 21. 实施记录（2026-11-07，T6 回写）
+
+实施期发现的偏差与裁决性口径，**只增不改**——正文与 §19 裁决记录仍按原文执行。
+
+### 21.1 措辞张力三处（均以实施计划/实现为准）
+
+1. **§12 `watchdog.ts: tick(L1/L2) + judge(L3)` vs P0「L3 只落标记接口」**：P0 的 `watchdog.ts` 只有 `watchdogTick`（L1 存活 + L2a/L2c）与 `Dispatcher.markSuspect`（`watchdog_flag='suspect'` + silent inbox），**不接便宜模型、不判偏离**——`judge(L3)` 的模型判定随 P1「steer 替代方案（abort + 重派）」一起实现。§12 清单中的 `judge(L3)` 字样读作「该文件的 P1 扩位点」，不是 P0 交付项。
+2. **§6⑤ / §12 `session/usage.ts summary()` 拆分推 P1**：`metered_cost_usd` / `subscription_tokens` 拆分与 `UsageModal.vue` 分栏**不进 P0**——AC1–AC9 无一覆盖计费展示，且该改动与调度链路零耦合（不依赖任何 F-58 端点/store）。**触发条件**：用户在订阅制 agent 上跑 Worker 后查看 F-31 报表，出现「订阅用量被计入按量成本」的歧义时启动。
+3. **§10 表格「一批任务收尾（≥2 条终态）→ batch 合成一条 digest」vs 实现口径**：`task_done` 收敛一律落 **silent**（永不进播报文本），失败收敛（runtime/aborted）落 **batch**；`pumpDigest` 的 C1 只认 batch/interrupt 条目，C2 的「终态数 ≥2」窗口仅在存在 batch 条目时生效。因此**纯成功批次零播报**（「搞定了不打扰」的落地读法），混合批次（≥2 条终态且含失败）触发 1 条 digest 且文本只含失败/待决策条目。设计稿 §10 表格第二列的「batch」读作「失败收敛的条目级别」，不合成针对成功任务的播报行。
+
+### 21.2 实施期补上的装配缝（T6 e2e 串联发现）
+
+**hub 未把 Dispatcher 注入 toolContext**：`dispatch_task` / `task_status` 的 `ToolContext.dispatcher` 在真实 serve 链路恒为空（两工具报 `dispatcher_unavailable`）——此前只有 HTTP 端点（runtime 直注）与手工构造 ctx 的单测覆盖，Router 会话→调度工具这条主链路无测试经过。修复：`SessionHubDeps` 增 `resolveDispatcher?`（与 `onRunFinished` 同款延迟解析闭包，runtime 以 `() => dispatcher` 注入），hub 构造 `toolContext` 时透传。hub 对 `router/` 仍零运行时依赖（type-only 引用，与 `tools/types.ts` 先例同款）；`test/router-ac.e2e.test.ts` 的 AC1 用例是该缝隙的永久回归守卫。
+
+### 21.3 外部 Worker 路径越界粗筛的接线状态（§9.1 L2(b)）
+
+P0 的 `watchdogTick` 对 `executor !== null` 的任务**跳过 L2a**（外部 CLI 写操作不经 delta registry，无 `file_changes` 落点）；「tool_use/tool_result argsJson 含界外绝对路径」的自动扫描**未接线**——越界信号降级为 L3 输入信号，由 `markSuspect` 标记接口承接（P0 为手动/后续接入点，AC7 外部分支用例钉住「不 kill + 降级出口可用」）。自动粗筛随 P1 的 L3 判定一起实现；`doctor` 与任务台文案（「已请求只读」）维持 §19 Q5 口径。
+
+### 21.4 真实三档能力手工 smoke（风险 1 结果）
+
+2026-11-07，开发机（macOS，PATH 探测 + `ensureExternalAdapters` 注册 + `runPreflight` 三档逐个调用），结果：
+
+| agent | tier | plan | default | yolo |
+|-------|------|------|---------|------|
+| cli:claude-code | A | OK | OK | OK |
+| cli:codex | B | **plan_unsupported** | OK | OK |
+| cli:codebuddy | A | OK | OK | OK |
+| cli:cursor-agent | A | OK | OK | OK |
+| cli:opencode | B* | OK | OK | OK |
+| cli:dsh | B | **plan_unsupported** | OK | OK |
+
+结论：Tier A（claude-code/codebuddy/cursor-agent）三档全通；codex 与 dsh 无只读档，plan 档任务正确停在 `needs_decision`（`plan_unsupported`），与 §19 Q5「UI 文案：已请求只读，实际尽力而为」及 AC4 的降级语义一致。*opencode 命中本机 external.json 缓存条目（二进制已不在 PATH，缓存探活仍过）——缓存优先于 PATH 探测是 F-55 既有行为，不是本特性引入。
+
+### 21.5 验收勾选（§15 收尾口径）
+
+AC1–AC9 全绿：单点行为由 `router-store/dispatcher/digest/preflight/watchdog/hub/tools/ledger/http` 九个单测文件钉住；真实链路串联（hub→工具→Dispatcher→外部/内置 Worker→收敛→播报→台账注入）由 `router-ac.e2e.test.ts` 覆盖。`multi` / 外部会话 / F-54 后台任务既有用例零失败；`bootstrap()` 僵尸收敛有 e2e 等价用例（重启模拟：新 Dispatcher + `peekRunning()=>false`）。全量门禁 `pnpm typecheck && pnpm test && pnpm smoke && pnpm smoke:web` 通过。
