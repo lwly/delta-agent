@@ -5,6 +5,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { WATCHDOG_L2C_SILENT_MS, isPathOutsideWorkRoot, watchdogTick } from '../src/router/watchdog.js';
+import { dispatchTaskTool } from '../src/tools/builtin/dispatch.js';
+import type { ToolContext } from '../src/tools/types.js';
+import type { ConfirmDecision } from '@delta/shared';
 import {
   cleanupAllDirs,
   createDispatcherEnv,
@@ -219,6 +222,65 @@ describe('L3 标记接口（P0 只落标记）', () => {
     e.dispatcher.markSuspect(t.id);
     e.dispatcher.markSuspect(t.id);
     expect(e.dispatcher.inbox.listUndelivered(e.routerId)).toHaveLength(1);
+  });
+});
+
+describe('AC7 外部 Worker 分支：路径越界降级 L3 suspect 标记（§9.1，T4 派单链路）', () => {
+  /** 经 T4 完整派单链路（dispatch_task 工具 → parseDispatchArgs → dispatch → claimSlot → fake preflight）造一个外部 running 任务 */
+  async function runningExternalTask(e: DispatcherEnv, title: string) {
+    const ctx = {
+      projectRoot: '/tmp/demo-f58-dispatcher',
+      signal: new AbortController().signal,
+      confirm: async () => ({ kind: 'allow' }) as ConfirmDecision,
+      askUser: async () => '',
+      todos: [],
+      projectId: e.projectId,
+      sessionId: e.routerId,
+      dispatcher: e.dispatcher,
+    } as ToolContext;
+    const res = await dispatchTaskTool.execute(
+      { title, goal: `GOAL_${title}_外部任务`, executor: 'cli:codebuddy', permission_mode: 'default' },
+      ctx,
+    );
+    expect(res.ok).toBe(true);
+    await e.dispatcher.claimSlot();
+    const taskId = (res.meta as { task_id: string }).task_id;
+    const row = e.dispatcher.workerTasks.get(taskId);
+    expect(row.status).toBe('running');
+    const ws = row.worker_session_id!;
+    e.hub.running.add(ws); // 进程存活（否则 L1 先收敛，轮不到越界判定）
+    return { taskId, ws };
+  }
+
+  it('外部 Worker（cli:*）即使存在越界信号也不 kill——降级出口是 L3 markSuspect（flag + silent inbox，状态不变）', async () => {
+    const e = await env();
+    const { taskId, ws } = await runningExternalTask(e, '外部越界任务');
+    // 防御性信号：外部 CLI 的写操作本不经 delta registry（无 file_changes 落点，§9.1），
+    // 这里手工 record 一条越界路径模拟「粗筛信号出现」——L2a 必须对外部 Worker 失效
+    e.svc.changes.record(ws, { tool: 'write_file', path: '/etc/passwd', before: null, after: 'x' });
+    const listFileChanges = (sessionId: string) =>
+      e.svc.changes.list(sessionId).map((r) => ({ path: r.path }));
+
+    await watchdogTick(e.dispatcher, { listFileChanges, getWorkRoot: () => '/tmp/demo-f58-dispatcher' });
+
+    // 不 kill：状态、attempt、进程、inbox 全部原样（L2a 仅适用内置 Worker）
+    const row = e.dispatcher.workerTasks.get(taskId);
+    expect(row.status).toBe('running');
+    expect(row.failure_kind).toBeNull();
+    expect(row.attempt).toBe(1);
+    expect(e.hub.aborted).not.toContain(ws);
+    expect(e.dispatcher.inbox.listUndelivered(e.routerId)).toHaveLength(0);
+    expect(e.hub.isRunningCalls).toBe(0); // 红线：全程未碰 isRunning
+
+    // 降级出口 = L3 标记接口：suspect 角标 + silent inbox，不打断、不终止、不 steer（§9.2）
+    e.dispatcher.markSuspect(taskId);
+    const flagged = e.dispatcher.workerTasks.get(taskId);
+    expect(flagged.status).toBe('running'); // 仍运行
+    expect(flagged.watchdog_flag).toBe('suspect');
+    const items = e.dispatcher.inbox.listUndelivered(e.routerId);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.severity).toBe('silent'); // L3 标记是 silent（AC8：不打扰）
+    expect(e.hub.aborted).not.toContain(ws);
   });
 });
 
