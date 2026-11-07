@@ -174,6 +174,9 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
       workerEventUnsubs.delete(sessionId);
       dispatcher?.onRunFinished(sessionId, outcome);
     },
+    // F-58（T6 e2e 补缝）：Router 会话 toolContext.dispatcher 的延迟解析——
+    // 缺此注入则 dispatch_task/task_status 在真实 serve 链路恒报 dispatcher_unavailable
+    resolveDispatcher: () => dispatcher,
   });
 
   dispatcher = new Dispatcher({

@@ -124,6 +124,13 @@ export interface SessionHubDeps {
     sessionId: string,
     outcome: { runError?: string; aborted: boolean; durationMs: number },
   ) => void;
+  /**
+   * F-58 调度器解析（T6 e2e 补的装配缝）：Router 会话 toolContext.dispatcher 的来源。
+   * 与 onRunFinished 同款「延迟解析」——Dispatcher 在 hub 之后装配（deps 互引），
+   * runtime 以闭包 () => dispatcher 注入；缺省 = 调度工具自带 dispatcher_unavailable 口径。
+   * 类型引用与 tools/types.ts 同款 type-only import（运行时零依赖，不违反「hub 不 import router/」）。
+   */
+  resolveDispatcher?: () => import('../router/dispatcher.js').Dispatcher | undefined;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -825,6 +832,8 @@ export class SessionHub {
           skills: this.deps.skills,
           // F-54 会话内后台任务（run_in_background / task_output；缺省 undefined = 能力未装配）
           backgroundTasks: this.deps.backgroundTasks,
+          // F-58 调度器（dispatch_task / task_status；缺省 undefined = 两工具报 dispatcher_unavailable）
+          dispatcher: this.deps.resolveDispatcher?.(),
           // F-27 Hook 系统：工具执行挂钩（PreToolUse 可阻断 / PostToolUse 记录）
           hooks: this.deps.hooks,
           // F-26 子代理即工具：注入父注册表与子代理运行时（只读隔离，用量回写本运行预算）
