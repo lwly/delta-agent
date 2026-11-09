@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { markRaw } from 'vue';
 import {
   api,
   type BranchInfo,
@@ -9,6 +10,7 @@ import {
   type SessionGitState,
 } from '../api/client';
 import { subscribeSession } from '../api/sse';
+import { LiveCallTracker, type LiveCallEntry } from '../composables/useSessionTranscript';
 
 /** 对话运行时状态：SSE 事件 → 渲染消息流 + 待确认/待回答卡片 */
 
@@ -16,7 +18,12 @@ import { subscribeSession } from '../api/sse';
 const MESSAGE_PAGE_SIZE = 50;
 
 export const useChatStore = defineStore('chat', {
-  state: () => ({
+  state: () => {
+    // T9：SSE 实时调用簿记收敛到 LiveCallTracker（与任务详情 composable 同一实现）。
+    // backing = state 内的 pendingCalls（Pinia reactive 深层代理，登记/移除自动触发
+    // WorkbenchView 的 callInfoMap computed 更新）；tracker 本身 markRaw。
+    const pendingCalls: Record<string, LiveCallEntry> = {};
+    return {
     sessionId: '' as string,
     sessionMeta: null as null | {
       title: string;
@@ -68,10 +75,12 @@ export const useChatStore = defineStore('chat', {
     lastSubagents: 0,
     /** 方案 D：本轮运行触发过预算降级续跑（非运行态时展示「追加预算继续」按钮） */
     budgetDegraded: false,
-    /** callId → 调用元信息（tool_call_start 记录；结果卡配对 / 运行中卡片 / 本地耗时计算的数据源） */
-    pendingCalls: {} as Record<string, { name: string; argsJson: string; startedAt: number; seq: number }>,
-    /** 本次会话内工具调用递增序号（open 时归零；第 N 步展示口径） */
-    toolSeq: 0,
+    /** callId → 调用元信息（tool_call_start 记录；结果卡配对 / 运行中卡片 / 本地耗时计算的数据源）。
+     *  T9：簿记收敛到 _callTracker（LiveCallTracker，与任务详情 composable 同一实现）；
+     *  此处仅保留 reactive backing 供 WorkbenchView 消费。 */
+    pendingCalls: pendingCalls as Record<string, LiveCallEntry>,
+    /** T9：SSE 实时调用簿记（register/consume/reset 全经 tracker；markRaw 防代理） */
+    _callTracker: markRaw(new LiveCallTracker(pendingCalls)),
     /** thinking_delta 流式思考文本累积（随其后落库的 assistant 消息保留；后端不下发则恒为空） */
     thinkingText: '',
     // ── F-39 专家 / 专家团 ──────────────────────────────────────────────
@@ -90,7 +99,8 @@ export const useChatStore = defineStore('chat', {
       summary?: string;
       readonlyDegraded?: boolean;
     }>,
-  }),
+    };
+  },
   actions: {
     async open(sessionId: string) {
       this.close();
@@ -118,8 +128,7 @@ export const useChatStore = defineStore('chat', {
       this.lastUsage = null;
       this.lastSubagents = 0;
       this.budgetDegraded = false;
-      this.pendingCalls = {};
-      this.toolSeq = 0;
+      this._callTracker.reset(); // T9：簿记单一来源（原地清空，保持 backing 引用）
       this.thinkingText = '';
       // PASI-9：打开会话时同步暂停态（status 落库值）
       this.paused = meta.session.status === 'paused';
@@ -183,8 +192,7 @@ export const useChatStore = defineStore('chat', {
       this.lastUsage = null;
       this.lastSubagents = 0;
       this.budgetDegraded = false;
-      this.pendingCalls = {};
-      this.toolSeq = 0;
+      this._callTracker.reset(); // T9：簿记单一来源（原地清空，保持 backing 引用）
       this.thinkingText = '';
     },
     notice(text: string, tag?: string, url?: string) {
@@ -241,13 +249,8 @@ export const useChatStore = defineStore('chat', {
             this.thinkingText = '';
           }
           // 记录调用元信息：结果未到时渲染「运行中」卡片，结果到达时配对并计算本地耗时
-          this.toolSeq += 1;
-          this.pendingCalls[call.id] = {
-            name: call.name,
-            argsJson: call.argsJson,
-            startedAt: Date.now(),
-            seq: this.toolSeq,
-          };
+          // T9：簿记收敛到 LiveCallTracker（register 返回本会话内序号；pendingCalls 是其 reactive backing）
+          this._callTracker.register(call);
           break;
         }
         case 'tool_result': {
@@ -262,7 +265,8 @@ export const useChatStore = defineStore('chat', {
               agent_name?: string;
             };
           };
-          const callMeta = this.pendingCalls[result.callId];
+          // T9：consume 取走元信息并计算本地耗时（簿记单一来源）
+          const callMeta = this._callTracker.consume(result.callId);
           this.messages.push({
             role: 'tool',
             content: result.content,
@@ -270,7 +274,7 @@ export const useChatStore = defineStore('chat', {
             // UI 本地字段：本地接收时间 / 本地计时耗时 / 调用序号 / ok 原值
             ts: Date.now(),
             ok: result.ok,
-            ...(callMeta ? { durationMs: Date.now() - callMeta.startedAt, toolSeq: callMeta.seq } : {}),
+            ...(callMeta ? { durationMs: callMeta.durationMs, toolSeq: callMeta.seq } : {}),
             // F-30 沙箱徽标（R8）：只在显式启用沙箱时存在，随实时 SSE 展示
             ...(result.meta?.sandbox ? { sandboxMeta: result.meta.sandbox } : {}),
             // F-39：「由 X 执行」角标（实时数据源 = meta.agent_name；回放 = content 前缀）

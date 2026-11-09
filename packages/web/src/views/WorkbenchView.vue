@@ -10,6 +10,17 @@ import { useChatStore } from '../stores/chat';
 import { toolLabel } from '../utils/toolNames';
 import { api, apiFetch, type ChatMessage, type ExternalAgentInfo, type MessageHit, type MessageImage, type ProviderView, type SkillCandidate } from '../api/client';
 import { renderMarkdown } from '../render';
+// 架构收口 T9：配对/状态推导收敛到共享纯函数（与任务详情、回放页同一实现）
+import {
+  agentLabelOf,
+  collectCallInfos,
+  collectToolResults,
+  isRejectedContent,
+  orphanCardOf,
+  toolCardOf as toolCardOfShared,
+  type TranscriptToolCard,
+  type ToolCallInfo,
+} from '../composables/useSessionTranscript';
 import ModalShell from '../components/ModalShell.vue';
 import TrashModal from '../components/TrashModal.vue';
 // F-39：ExpertDetail 在根级渲染（见模板尾部）
@@ -491,13 +502,7 @@ async function onDetailSummon(name: string) {
   if (item) await onExpertSelect(item);
 }
 
-/** 「由 X 执行」标签：实时取 msg.agentName；回放从 content 前缀解析（权威写入方 = task 工具） */
-function agentLabelOf(m: ChatMessage): string | null {
-  if (m.agentName) return m.agentName;
-  const r = /^\[expert:([A-Za-z0-9_-]{1,40})\]\s*([^\n]*)/.exec(m.content);
-  if (!r) return null;
-  return (r[2] ?? '').trim() || r[1]!;
-}
+// 「由 X 执行」标签（agentLabelOf）已收敛到共享模块 useSessionTranscript（T9）
 
 async function openSession(id: string) {
   error.value = '';
@@ -735,76 +740,20 @@ function onReplayClick(e: MouseEvent) {
  * - callInfoMap：callId → { name, argsJson, seq }；seq 优先取 store 本地递增序号（SSE 实时），
  *   历史消息按出现顺序补算（同一会话内按序编号，两种口径一致）
  * - resultMap：callId → 结果消息（role:'tool'），用于合并渲染与运行中判定
+ * T9：两处收集逻辑收敛到共享 collectCallInfos / collectToolResults（判据 1，
+ * 与任务详情 composable / 回放页同一实现）
  */
-interface ToolCallInfo {
-  name: string;
-  argsJson: string;
-  seq: number;
-}
-const callInfoMap = computed(() => {
-  const map = new Map<string, ToolCallInfo>();
-  const seen = new Set<string>();
-  let n = 0;
-  for (const m of chat.messages) {
-    for (const c of m.toolCalls ?? []) {
-      if (seen.has(c.id)) continue;
-      seen.add(c.id);
-      n += 1;
-      map.set(c.id, { name: c.name, argsJson: c.argsJson, seq: n });
-    }
-  }
-  // SSE 实时记录的调用（尚未落库 / 落库前结果先到的兜底）按 store 序号并入
-  for (const [id, pc] of Object.entries(chat.pendingCalls)) {
-    if (!map.has(id)) map.set(id, { name: pc.name, argsJson: pc.argsJson, seq: pc.seq });
-  }
-  return map;
-});
+const callInfoMap = computed(() => collectCallInfos(chat.messages, chat.pendingCalls));
 
-const resultMap = computed(() => {
-  const map = new Map<string, ChatMessage>();
-  for (const m of chat.messages) {
-    if (m.role === 'tool' && m.toolCallId) map.set(m.toolCallId, m);
-  }
-  return map;
-});
+const resultMap = computed(() => collectToolResults(chat.messages));
 
 /** ToolCallCard 的 props 集合（状态 / 结果 / 耗时 / 序号一次算好） */
-interface ToolCardProps {
-  callId: string;
-  name: string;
-  argsJson: string;
-  status: 'running' | 'ok' | 'fail';
-  content?: string;
-  durationMs?: number;
-  seq?: number;
-  sandboxMeta?: ChatMessage['sandboxMeta'];
-  agentName?: string | null;
-  // ── F-53 大输出懒加载（AC-53-4）──
-  /** 结果消息落库 seq（展开全文的数据源；SSE 实时消息无） */
-  resultSeq?: number | null;
-  /** 服务端摘要化标记：true = content 已截断，可点「加载完整输出」 */
-  contentTruncated?: boolean;
-  /** 摘要化前的完整内容长度（字符） */
-  contentLength?: number;
-}
+// T9：ToolCardProps / toolCardOf / orphanCard 收敛到共享模块（useSessionTranscript
+// 的 TranscriptToolCard / toolCardOf / orphanCardOf），状态推导（running/ok/fail、
+// rejected_by_user、agent 角标、懒加载字段）三处同源。
+type ToolCardProps = TranscriptToolCard;
 function toolCardOf(id: string, name: string, argsJson: string): ToolCardProps {
-  const res = resultMap.value.get(id);
-  const rejected = res ? /rejected_by_user/i.test(res.content) : false;
-  const status: ToolCardProps['status'] = !res ? 'running' : res.ok === false || rejected ? 'fail' : 'ok';
-  return {
-    callId: id,
-    name,
-    argsJson,
-    status,
-    content: res?.content,
-    durationMs: res?.durationMs,
-    seq: callInfoMap.value.get(id)?.seq,
-    sandboxMeta: res?.sandboxMeta,
-    agentName: res ? agentLabelOf(res) : null,
-    resultSeq: res?.seq ?? null,
-    contentTruncated: res?.contentTruncated,
-    contentLength: res?.contentLength,
-  };
+  return toolCardOfShared(id, name, argsJson, resultMap.value.get(id), callInfoMap.value.get(id));
 }
 /** 助手消息上的调用 → 完整工具卡（结果未到 = 运行中态） */
 function cardsFor(m: ChatMessage): ToolCardProps[] {
@@ -813,22 +762,7 @@ function cardsFor(m: ChatMessage): ToolCardProps[] {
 /** 孤儿结果卡兜底：结果消息找不到任何调用记录时，仍以结果为主体渲染一张卡 */
 function orphanCard(m: ChatMessage): ToolCardProps {
   const info = m.toolCallId ? callInfoMap.value.get(m.toolCallId) : undefined;
-  const ok = m.ok;
-  const rejected = /rejected_by_user/i.test(m.content);
-  return {
-    callId: m.toolCallId ?? `orphan-${m.content.slice(0, 16)}`,
-    name: info?.name ?? 'tool',
-    argsJson: info?.argsJson ?? '',
-    status: ok === false || rejected ? 'fail' : 'ok',
-    content: m.content,
-    durationMs: m.durationMs,
-    seq: info?.seq ?? m.toolSeq,
-    sandboxMeta: m.sandboxMeta,
-    agentName: agentLabelOf(m),
-    resultSeq: m.seq ?? null,
-    contentTruncated: m.contentTruncated,
-    contentLength: m.contentLength,
-  };
+  return orphanCardOf(m, info);
 }
 /** F-53：工具卡「加载完整输出」→ 按 resultSeq 拉全文原位回填（AC-53-4） */
 function onLoadFullResult(card: ToolCardProps) {

@@ -2,39 +2,38 @@
 // 任务详情右滑面板：Worker 任务 = 独立 Worker 会话（design-f58 §5.1「Worker = 会话」），
 // 本面板是对 worker_session_id 会话的轻量视图 —— 复用既有会话 API（零新通道）：
 //   历史 = GET /api/sessions/:id/messages（F-53 分页端点，只拉最近一屏）
-//   实时 = GET /api/sessions/:id/events（SSE，subscribeSession）
+//   实时 = GET /api/sessions/:id/events（SSE，经 useSessionTranscript 订阅）
 //   续发消息 = POST /api/sessions/:id/messages（hub 单槽：运行中 409，输入区禁用兜底）
 // 数据源任务行 = tasks store（2s 轮询），状态 chip / result_summary 随轮询自动更新。
 // 步骤摘要「N 个步骤 · X 秒」= 本会话工具调用计数 + task.started_at..finished_at 现算。
-import { computed, onUnmounted, ref, watch } from 'vue';
-import { api, type ChatMessage } from '../api/client';
-import { subscribeSession } from '../api/sse';
+//
+// 架构收口 T9（判据 1）：自建的 msgs/toolCards/streamingText 状态与 SSE 六类事件
+// 分支全部删除，收敛到 composables/useSessionTranscript（历史拉取 + SSE 增量 +
+// pairToolCards 单一配对来源）。判据 3：confirm_request / plan_approval_request
+// 不再静默吞掉——pendingDecisions 计数上浮，渲染统一禁用提示（本面板不做交互回填）。
+import { computed, onUnmounted, ref } from 'vue';
+import { api } from '../api/client';
 import { useTasksStore } from '../stores/tasks';
 import ToolCallCard from './ToolCallCard.vue';
+import { useSessionTranscript } from '../composables/useSessionTranscript';
 
 const tasks = useTasksStore();
 
 const task = computed(() => tasks.openTask);
 
-// ── Worker 会话视图状态（会话作用域：切任务即重置） ─────────────
-interface ToolCardView {
-  callId: string;
-  name: string;
-  argsJson: string;
-  status: 'running' | 'ok' | 'fail';
-  content: string;
-  durationMs: number | null;
-  seq: number;
-}
-const msgs = ref<ChatMessage[]>([]);
-const toolCards = ref<ToolCardView[]>([]); // 工具卡（callId 配对调用/结果）
-const streamingText = ref('');
-const running = ref(false);
-const loading = ref(false);
-const loadFailed = ref(false);
-let unsub: (() => void) | null = null;
-let boundSessionId = '';
-let toolSeq = 0;
+// ── Worker 会话消息流（T9：状态与 SSE 全部由 composable 承担，切任务自动重置）──
+const tr = useSessionTranscript({
+  sessionId: () => task.value?.worker_session_id ?? null,
+});
+const msgs = tr.messages;
+const toolCards = tr.toolCards;
+const streamingText = tr.streamingText;
+const running = tr.running;
+const loading = tr.loading;
+const loadFailed = tr.loadFailed;
+
+// 判据 3：待决策计数（确认 / 计划审批 / 提问）——统一禁用提示的数据源
+const pendingDecisions = tr.pendingDecisions;
 
 const input = ref('');
 const sending = ref(false);
@@ -62,179 +61,6 @@ const goalOneLine = computed(() => {
   return first.length > 60 ? `${first.slice(0, 60)}…` : first;
 });
 
-// ── 打开/关闭面板（含任务切换） ────────────────────────────────
-watch(
-  () => [tasks.openTaskId, task.value?.worker_session_id] as const,
-  ([, sid], prev) => {
-    const prevSid = prev?.[1];
-    if (!tasks.openTaskId || !sid) {
-      // 面板关闭 / 任务尚未创建执行会话（draft/queued 阶段）：停流
-      closeStream();
-      return;
-    }
-    if (sid !== prevSid || boundSessionId !== sid) openStream(sid);
-  },
-  { immediate: true },
-);
-
-function closeStream() {
-  unsub?.();
-  unsub = null;
-  boundSessionId = '';
-  msgs.value = [];
-  toolCards.value = [];
-  streamingText.value = '';
-  running.value = false;
-  loading.value = false;
-  loadFailed.value = false;
-  sendError.value = '';
-}
-
-async function openStream(sessionId: string) {
-  closeStream();
-  boundSessionId = sessionId;
-  loading.value = true;
-  try {
-    const page = await api.getSessionMessages(sessionId, { limit: 50 });
-    // await 期间面板可能已切走：过期响应丢弃
-    if (boundSessionId !== sessionId) return;
-    msgs.value = page.messages;
-    // 历史工具消息重建卡片（SSE 实时卡与落库消息双轨：历史从消息流配对）
-    rebuildCardsFromHistory(page.messages);
-    loadFailed.value = false;
-  } catch {
-    if (boundSessionId === sessionId) loadFailed.value = true;
-  } finally {
-    if (boundSessionId === sessionId) loading.value = false;
-  }
-  unsub = subscribeSession(sessionId, onEvent);
-}
-
-/** 历史消息重建工具卡：调用信息来自 assistant.toolCalls，结果来自 role:'tool' 消息，按 callId 配对 */
-function rebuildCardsFromHistory(list: ChatMessage[]) {
-  const seqOf = new Map<string, number>();
-  for (const m of list) {
-    for (const call of m.toolCalls ?? []) {
-      toolSeq += 1;
-      seqOf.set(call.id, toolSeq);
-      toolCards.value.push({
-        callId: call.id,
-        name: call.name,
-        argsJson: call.argsJson,
-        status: 'running',
-        content: '',
-        durationMs: null,
-        seq: toolSeq,
-      });
-    }
-    if (m.role === 'tool' && m.toolCallId) {
-      const existing = toolCards.value.find((c) => c.callId === m.toolCallId);
-      if (existing) {
-        existing.status = m.ok === false ? 'fail' : 'ok';
-        existing.content = m.content;
-      } else {
-        // 孤儿结果（调用消息被折叠窗口截掉）：兜底建卡
-        toolSeq += 1;
-        toolCards.value.push({
-          callId: m.toolCallId,
-          name: 'tool',
-          argsJson: '',
-          status: m.ok === false ? 'fail' : 'ok',
-          content: m.content,
-          durationMs: null,
-          seq: m.toolSeq ?? toolSeq,
-        });
-      }
-    }
-  }
-}
-
-// ── SSE 事件（面板只关心的最小子集；完整口径见 stores/chat.ts） ──
-function onEvent(ev: { type: string; [k: string]: unknown }) {
-  switch (ev.type) {
-    case 'state':
-      running.value = ev.running === true;
-      break;
-    case 'text_delta':
-      streamingText.value += String(ev.text ?? '');
-      break;
-    case 'tool_call_start': {
-      const call = ev.call as { id: string; name: string; argsJson: string };
-      if (streamingText.value) {
-        msgs.value.push({ role: 'assistant', content: streamingText.value, ts: Date.now() });
-        streamingText.value = '';
-      }
-      toolSeq += 1;
-      toolCards.value.push({
-        callId: call.id,
-        name: call.name,
-        argsJson: call.argsJson,
-        status: 'running',
-        content: '',
-        durationMs: null,
-        seq: toolSeq,
-      });
-      break;
-    }
-    case 'tool_result': {
-      const r = ev.result as { callId: string; ok: boolean; content: string };
-      const card = toolCards.value.find((c) => c.callId === r.callId);
-      if (card) {
-        card.status = r.ok ? 'ok' : 'fail';
-        card.content = r.content;
-        card.durationMs = null;
-      } else {
-        // 孤儿结果（历史已含调用但结果刚到）：兜底建卡
-        toolCards.value.push({
-          callId: r.callId,
-          name: 'tool',
-          argsJson: '',
-          status: r.ok ? 'ok' : 'fail',
-          content: r.content,
-          durationMs: null,
-          seq: ++toolSeq,
-        });
-      }
-      break;
-    }
-    case 'ask_user':
-      // 澄清问答：渲染为助手消息卡（用户在输入框回答，走普通消息通道）
-      msgs.value.push({ role: 'assistant', content: `❓ ${String(ev.question)}`, ts: Date.now() });
-      break;
-    case 'done': {
-      if (streamingText.value) {
-        msgs.value.push({ role: 'assistant', content: streamingText.value, ts: Date.now() });
-        streamingText.value = '';
-      }
-      void refetchAfterDone();
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-/** done 后增量重拉（after 游标），保证本地视图与落库一致（对齐 chat store done 分支口径的简化版） */
-async function refetchAfterDone() {
-  const sid = boundSessionId;
-  if (!sid) return;
-  try {
-    const lastSeq = [...msgs.value].reverse().find((m) => m.seq != null)?.seq ?? 0;
-    const fetched: ChatMessage[] = [];
-    let after = lastSeq;
-    for (let guard = 0; guard < 20; guard++) {
-      const r = await api.getSessionMessages(sid, { after, limit: 500 });
-      fetched.push(...r.messages);
-      if (!r.has_more || r.messages.length === 0) break;
-      after = r.messages[r.messages.length - 1]!.seq ?? after;
-    }
-    if (boundSessionId !== sid) return;
-    if (fetched.length > 0) msgs.value.push(...fetched);
-  } catch {
-    /* 瞬时失败：下轮 done/重开面板兜底 */
-  }
-}
-
 // ── 续发消息（会话空闲时直发；运行中被禁用） ───────────────────
 async function send() {
   const t = task.value;
@@ -244,20 +70,19 @@ async function send() {
   sending.value = true;
   sendError.value = '';
   input.value = '';
-  msgs.value.push({ role: 'user', content: text, ts: Date.now() });
+  tr.pushLocalUser(text);
   try {
     await api.send(sid, text);
   } catch (e) {
     sendError.value = (e as Error).message;
     // 409 = 会话正被占用（轮询间隙状态漂移）：本地回滚并提示
-    const idx = msgs.value.findIndex((m) => m.role === 'user' && m.content === text);
-    if (idx !== -1) msgs.value.splice(idx, 1);
+    tr.rollbackLocalUser(text);
   } finally {
     sending.value = false;
   }
 }
 
-onUnmounted(closeStream);
+onUnmounted(() => tr.dispose());
 </script>
 
 <template>
@@ -272,6 +97,13 @@ onUnmounted(closeStream);
     <!-- 结论 / 失败原因 / 裁决提示 -->
     <div v-if="task.result_summary" class="tdp-summary" :class="{ fail: task.status === 'failed' }">
       {{ task.result_summary }}
+    </div>
+
+    <!-- T9 判据 3：待决策统一禁用提示（confirm/plan/ask 不静默吞掉；本面板不做交互回填） -->
+    <div v-if="pendingDecisions.total > 0" class="tdp-decision-hint">
+      ⚠ 本会话有 {{ pendingDecisions.total }} 项待处理决策（确认 {{ pendingDecisions.confirms.length }} /
+      计划审批 {{ pendingDecisions.plans.length }} / 提问 {{ pendingDecisions.asks.length }}）——
+      请到主对话页处理，本面板不做交互回填
     </div>
 
     <!-- 派单原文 + 步骤摘要（折叠条） -->
@@ -401,6 +233,16 @@ onUnmounted(closeStream);
   white-space: pre-wrap;
 }
 .tdp-summary.fail { color: var(--red); }
+/* T9 判据 3：待决策统一禁用提示（不静默吞掉 confirm/plan 事件） */
+.tdp-decision-hint {
+  margin: 10px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--orange);
+  background: var(--orange-soft);
+  border-radius: var(--radius-sm, 8px);
+  color: var(--text-dim);
+  font-size: 12px;
+}
 .tdp-steps { margin: 8px 14px 0; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm, 8px); }
 .tdp-steps summary {
   display: flex;

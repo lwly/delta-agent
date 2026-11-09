@@ -3,6 +3,8 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, type RunStep, type RunSummary, type RunTimeline } from '../api/client';
+// 架构收口 T9（判据 1）：工具步骤状态推导收敛到共享配对模块（与主对话流、任务详情同一实现）
+import { cardsFromTimelineSteps } from '../composables/useSessionTranscript';
 
 const route = useRoute();
 const router = useRouter();
@@ -81,7 +83,21 @@ async function exportSession(format: 'html' | 'md') {
 function stepIcon(s: RunStep): string {
   if (s.type === 'user') return '👤';
   if (s.type === 'assistant') return '🤖';
-  return s.result ? (s.result.ok ? '🔧✔' : '🔧✘') : '🔧…';
+  // T9：状态推导走共享卡片口径（cardsFromTimelineSteps，与主对话流/任务详情同源）
+  const st = stepCards.value[timelineStepIndex(s)]?.status;
+  return s.result ? (st === 'ok' ? '🔧✔' : '🔧✘') : '🔧…';
+}
+
+/** 当前时间线的工具卡视图（共享 cardsFromTimelineSteps 派生；与步骤按序对齐） */
+const stepCards = computed(() => (timeline.value ? cardsFromTimelineSteps(timeline.value.steps) : []));
+/** 步骤 → 工具卡序号映射（cardsFromTimelineSteps 只含工具步骤，按出现顺序编号） */
+function timelineStepIndex(s: RunStep): number {
+  if (!timeline.value) return -1;
+  let n = -1;
+  for (let i = 0; i <= timeline.value.steps.indexOf(s); i++) {
+    if (timeline.value.steps[i]!.name !== undefined) n += 1;
+  }
+  return n;
 }
 
 /** 复制任意文本到剪贴板；按钮短暂显示「已复制」作为反馈 */
@@ -167,8 +183,8 @@ onMounted(loadRuns);
               <div v-else class="toolcall">
                 <div class="call-head">
                   <code>{{ s.name }}</code>
-                  <span v-if="s.result" :class="s.result.ok ? 'ok' : 'fail'">
-                    {{ s.result.ok ? '成功' : '失败' }} · {{ fmt(s.result.at) }}
+                  <span v-if="s.result" :class="stepCards[timelineStepIndex(s)]?.status === 'ok' ? 'ok' : 'fail'">
+                    {{ stepCards[timelineStepIndex(s)]?.status === 'ok' ? '成功' : '失败' }} · {{ fmt(s.result.at) }}
                   </span>
                 </div>
                 <pre class="args">{{ argsPretty(s.argsJson ?? '') }}</pre>
