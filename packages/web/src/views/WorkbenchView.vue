@@ -1078,6 +1078,8 @@ const homeInput = ref('');
 /** '' = 内置引擎（executor null）；'cli:*' / 'acp:*' = 外部 agent（externalAgents.id 即 executor 值） */
 const homeExecutor = ref('');
 const delegating = ref(false);
+/** 任务台右侧抽屉开合（tabbar 最右侧入口；详情面板 z-index 更高可叠加打开） */
+const showTaskDrawer = ref(false);
 /** 接手 toast：「{助手} 接手了"{title}"」+ 打开入口；超时自动消失 */
 const delegateToast = ref<{ assistant: string; title: string; taskId: string } | null>(null);
 let delegateToastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1454,9 +1456,6 @@ watch(
         </p>
       </div>
 
-      <!-- F-58 任务台：当前项目的 Worker 任务列表（轮询在 store；interrupt 未送达计红点） -->
-      <TaskBoard />
-
       <!-- 底部功能区：Token 进度条；回收站 / 平台降为次级灰字（设置入口在 rail，角标同步） -->
       <div class="side-section bottom-group">
         <div class="sidebar-footer">
@@ -1524,6 +1523,18 @@ watch(
           :title="chat.messages.length === 0 ? '暂无可回放的会话内容' : '会话回放'"
           @click="onReplayClick"
         >回放</router-link>
+        <!-- F-58b 任务台入口：tabbar 最右侧菜单按钮（点击右侧抽屉；interrupt 红点角标） -->
+        <button
+          class="cfg-op taskboard-toggle"
+          :class="{ active: showTaskDrawer }"
+          type="button"
+          :title="showTaskDrawer ? '收起任务台' : '任务台'"
+          :aria-pressed="showTaskDrawer"
+          @click="showTaskDrawer = !showTaskDrawer"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="15" rx="2.5" /><path d="M8 9.5h8" /><path d="M8 13h8" /><path d="M8 16.5h5" /></svg>
+          <span v-if="tasksStore.interruptCount > 0" class="taskboard-badge">{{ tasksStore.interruptCount > 99 ? '99+' : tasksStore.interruptCount }}</span>
+        </button>
       </div>
       <!-- 工作台子路由（/cron 定时任务、/logs 运行日志）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
       <router-view v-if="isSubRoute" />
@@ -1959,6 +1970,11 @@ watch(
       </router-link>
     </nav>
 
+    <!-- ══════════ 任务台右侧抽屉（tabbar 最右侧入口；F-58b 入口从侧栏移至此） ══════════ -->
+    <aside v-if="showTaskDrawer" class="task-drawer">
+      <TaskBoard closable @close="showTaskDrawer = false" />
+    </aside>
+
     <!-- ══════════ 任务详情右滑面板（tasks.openTaskId 驱动；轻首页/任务台共用） ══════════ -->
     <TaskDetailPanel />
 
@@ -2350,6 +2366,28 @@ watch(
   font-size: 14px; cursor: pointer;
 }
 .dt-close:hover { color: var(--text); }
+/* 任务台入口（tabbar 最右侧）：按钮 + interrupt 红点角标（样式对齐 rail__badge 口径） */
+.taskboard-toggle { position: relative; }
+.taskboard-badge {
+  position: absolute; top: 1px; right: 1px;
+  min-width: 14px; height: 14px; padding: 0 4px;
+  border-radius: var(--radius-pill, 999px); background: var(--red); color: #fff;
+  font-size: 10px; line-height: 14px; text-align: center;
+}
+/* 任务台右侧抽屉：非模态（不挡主区点击），详情面板（z-index 60）可叠加其上 */
+.task-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 300px; max-width: 86vw;
+  z-index: 55;
+  display: flex; flex-direction: column;
+  background: var(--bg-chrome);
+  border-left: 1px solid var(--border);
+  animation: task-drawer-in 0.18s ease-out;
+}
+@keyframes task-drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 
 /* ══════════ 标签栏 tabbar（40px，chrome 底色） ══════════ */
 .tabbar {

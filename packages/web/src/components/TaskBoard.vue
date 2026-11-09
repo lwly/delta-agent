@@ -12,6 +12,10 @@ import TaskDecisionDialog from './TaskDecisionDialog.vue';
 
 const tasks = useTasksStore();
 
+// 抽屉内嵌形态：closable = 显示关闭钮（右侧任务台抽屉用），emit close 由宿主收起抽屉
+const props = defineProps<{ closable?: boolean }>();
+const emit = defineEmits<{ close: [] }>();
+
 // 「已运行 X 分钟」现算：仅存在运行中任务时开表（与 BackgroundTasksBar 同手法）
 const now = ref(Date.now());
 let ticker: ReturnType<typeof setInterval> | null = null;
@@ -104,6 +108,7 @@ function open(t: WorkerTaskView) {
       <span v-if="tasks.interruptCount > 0" class="tb-red-dot" :title="`${tasks.interruptCount} 条需要你注意（待裁决 / 被终止）`">
         {{ tasks.interruptCount }}
       </span>
+      <button v-if="props.closable" class="tb-close" type="button" title="收起任务台" @click="emit('close')">×</button>
     </div>
     <div class="tb-list">
       <div v-for="g in groups" :key="g.key" class="tb-group">
@@ -146,15 +151,27 @@ function open(t: WorkerTaskView) {
 </template>
 
 <style scoped>
+/* 抽屉内嵌形态：撑满宿主容器（右侧任务台抽屉），不再用侧栏分隔线 */
 .task-board {
-  border-top: 1px solid var(--border);
-  padding: 10px 8px 6px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px 8px;
   font-size: 12px;
 }
 .tb-head {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 4px 6px;
+  padding: 0 4px 8px;
 }
+.tb-close {
+  margin-left: auto;
+  width: 20px; height: 20px;
+  border: none; border-radius: 5px;
+  background: transparent; color: var(--text-dim);
+  font-size: 14px; cursor: pointer;
+}
+.tb-close:hover { background: var(--bg-hover); color: var(--text); }
 .tb-title {
   font-size: 11px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.04em;
 }
@@ -164,7 +181,7 @@ function open(t: WorkerTaskView) {
   background: var(--red); color: #fff;
   font-size: 10px; line-height: 16px; text-align: center;
 }
-.tb-list { max-height: 240px; overflow-y: auto; }
+.tb-list { flex: 1; min-height: 0; overflow-y: auto; }
 /* 分组：需要你 / 处理中 / 已完成（空组不渲染） */
 .tb-group { padding-bottom: 4px; }
 .tb-group-label {
