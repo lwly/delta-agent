@@ -120,6 +120,7 @@ dispatch(projectId, { goal, executor?, permissionMode? }) → Promise<WorkerTask
 - 轻首页只出现在「无打开会话」空态（沿用原 hero 条件 `!chat.sessionId || !chat.sessionMeta`）；打开任一会话即回到完整工作台。
 - 任务台（tabbar 最右侧入口 → 右侧抽屉，TaskBoard closable 形态）与首页分组列表共用 `groups` getter，两条入口打开同一个 TaskDetailPanel。
 - 委派任务**不**自动打开 Router 会话：dispatch 后用户停留在轻首页看任务进展（目标形态），Router 播报仍走主会话（F-58 §10）。合并动线列为 P2 候选（prd-f58b Q3）。
+- **工作台全局入口**（实施期补，2026-11-09 用户反馈「子路由页没有工作台入口」）：rail 首位新增「工作台（对话）」按钮（`router.push('/')`，非子路由时高亮；不用 router-link 避免 `/` 作为父路由在子路由下误亮 active）；/cron、/logs 头部同时保留「← 工作台」返回链接（双保险，撤销早期「侧栏常驻即冗余」的取舍）。
 
 ## 5. 测试增量
 
