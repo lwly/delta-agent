@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runDueCronJobs, type CronExecutor, type CronExecutorResult } from '../src/cron/runner.js';
+import { QuotaStore } from '../src/quota/store.js';
 import { startCronScheduler } from '../src/cron/scheduler.js';
 import {
   addCronJob,
@@ -392,5 +393,39 @@ describe('架构收口 T6：运行记录与日志上下文携带 projectId', () 
     });
     expect(ctxSeen.filter((p) => p === 'p-root')).toHaveLength(2);
     expect(loadCronJobs(home).jobs[0]!.lastRun!.projectId).toBe('p-root');
+  });
+});
+
+describe('T7：cron 配额账本（与 chat/worker 同一判定实现）', () => {
+  it('超限 → budget_exhausted 记录、executor 不调用、调度照常推进（不反复失败刷屏）', async () => {
+    const home = tmpHome();
+    const job = addDueJob(home, 'capped', { maxCostUsd: 0.1 });
+    const q = new QuotaStore();
+    q.record('cron', job.id, 0.5, 0.1); // 已用 0.5 > 上限 0.1
+    const exec = vi.fn(async () => okResult());
+    const logs: string[] = [];
+    await runDueCronJobs({ executor: exec, homeDir: home, now: NOW, quota: q, logger: (l) => logs.push(l) });
+    expect(exec).not.toHaveBeenCalled();
+    const after = loadCronJobs(home).jobs[0]!;
+    expect(after.lastRun!.status).toBe('budget_exhausted');
+    expect(after.runningSince).toBeUndefined();
+    // 调度照常推进（NOW=08:00 → 当日 08:30），不因预算耗尽卡死
+    expect(after.nextRunAt).toBe(new Date(2026, 9, 1, 8, 30).toISOString());
+    expect(logs.some((l) => l.includes('预算已耗尽'))).toBe(true);
+  });
+
+  it('正常执行后 record 累计成本；上限取 job.maxCostUsd', async () => {
+    const home = tmpHome();
+    const job = addDueJob(home, 'accrue', { maxCostUsd: 0.5 });
+    const q = new QuotaStore();
+    await runDueCronJobs({
+      executor: async () => okResult({ costUsd: 0.3 }),
+      homeDir: home,
+      now: NOW,
+      quota: q,
+    });
+    expect(q.snapshot('cron', job.id)?.usedCostUsd).toBeCloseTo(0.3, 10);
+    expect(q.snapshot('cron', job.id)?.maxCostUsd).toBeCloseTo(0.5, 10);
+    expect(q.check('cron', job.id).ok).toBe(true); // 0.3 < 0.5
   });
 });

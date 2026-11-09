@@ -120,6 +120,18 @@ export const dispatchTaskTool: AgentTool = {
     if (!ctx.dispatcher) {
       return fail('dispatch_task 不可用：当前运行环境未装配调度器（Dispatcher），请直接在本会话完成任务', 'dispatcher_unavailable');
     }
+    // 架构收口 T7（判据：preflight 之外的最后闸门）：派单前检查子代理配额——
+    // 本 Router 会话累计委派成本（QuotaStore 'subagent' 账本，runtime 在 Worker 运行
+    // 结束时 record）超限时直接拒绝派单，不落库、不进派发泵。
+    if (ctx.quota && ctx.sessionId) {
+      const q = ctx.quota.check('subagent', ctx.sessionId);
+      if (!q.ok) {
+        return fail(
+          `派单被拒绝：本会话的委派任务累计成本已超预算上限（已用 $${q.usedCostUsd.toFixed(4)} / 上限 $${q.maxCostUsd.toFixed(2)}，超出 $${q.overage.toFixed(4)}）。请先完成或取消在跑任务，或调整预算`,
+          'quota_exceeded',
+        );
+      }
+    }
     const parsed = parseDispatchArgs(args);
     if (!parsed.ok) return fail(parsed.error, 'invalid_args');
     const row = ctx.dispatcher.dispatch({

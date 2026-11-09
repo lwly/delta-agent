@@ -100,6 +100,8 @@ export interface ToolContext {
   };
   /** F-26 子代理运行时（provider/model/预算/深度）；缺省时 task 报 task_unavailable */
   subagent?: SubagentRuntime;
+  /** 架构收口 T7：统一预算账本（dispatch_task 派单前子代理配额最后闸门；缺省不注入 = 不拦截） */
+  quota?: import('../quota/store.js').QuotaStore;
   /**
    * F-27 Hook 系统：PreToolUse（可阻断）/ PostToolUse（记录）挂接工具执行；
    * SessionStart/Stop/SessionEnd 由运行入口负责触发；缺省 = 不挂钩。

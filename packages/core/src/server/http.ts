@@ -134,6 +134,8 @@ export interface ServeOptions {
    * 缺省不提供：GET/DELETE /api/sessions/:id/background-tasks* 返回 501（能力未装配口径）。
    */
   backgroundTasks?: import('../session/background-tasks.js').BackgroundTaskManager;
+  /** 架构收口 T7：统一预算账本（cron「立即运行」与 serve 内置调度的配额判定共用） */
+  quota?: import('../quota/store.js').QuotaStore;
   /**
    * F-58 调度器（serve 运行时注入的单例 Dispatcher）。
    * 缺省不提供：6 个调度端点（/api/projects/:id/router|worker-tasks|inbox、
@@ -1872,6 +1874,8 @@ export function createWebServer(opts: ServeOptions): http.Server {
               trigger: 'manual',
               homeDir: cronHome,
               projectRoots: projectRoots(), // T6：立即运行同样按 cwd 回填归属（运行记录/日志带 project_id）
+              // T7：立即运行同样过 cron 配额账本（与内置调度同一判定实现）
+              ...(opts.quota ? { quota: opts.quota } : {}),
               // F-41：调度过程行（到期/跳过/结果）落运行日志（Web 日志页可见）；
               // T6：ctx.projectId → LogEntry.projectId（项目作用域下可见 cron 调度行）
               ...(opts.runLog

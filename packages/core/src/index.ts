@@ -430,6 +430,15 @@ export {
   type GateResult,
   type RunGatewayDeps,
 } from './gateway/index.js';
+// 架构收口 T7：QuotaStore 统一预算账本 + WatchdogRegistry 看护 timer 注册表
+export {
+  QuotaStore,
+  quotaExceeded,
+  type QuotaKind,
+  type QuotaSnapshot,
+  type QuotaCheckResult,
+} from './quota/store.js';
+export { WatchdogRegistry } from './router/watchdog-registry.js';
 // 架构收口 T5：CanonicalRunStatus 读时归一映射 + 项目级 activity 聚合条目类型
 export {
   fromPlanTask,

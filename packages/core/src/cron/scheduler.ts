@@ -22,6 +22,8 @@ export interface StartCronSchedulerOptions {
   signal?: AbortSignal;
   /** T6：项目根引用（透传 runner，旧任务 cwd 前缀惰性回填 projectId）；serve 侧由宿主传入 */
   projectRoots?: CronProjectRootRef[];
+  /** T7：统一预算账本（透传 runner：执行前 check、执行后 record） */
+  quota?: import('../quota/store.js').QuotaStore;
 }
 
 export interface CronSchedulerHandle {
@@ -60,6 +62,7 @@ export function startCronScheduler(opts: StartCronSchedulerOptions): CronSchedul
         trigger: 'schedule',
         logger: log,
         ...(opts.projectRoots?.length ? { projectRoots: opts.projectRoots } : {}),
+        ...(opts.quota ? { quota: opts.quota } : {}),
       });
     } catch (e) {
       // runDueCronJobs 约定不抛错；这里兜底保证循环不死

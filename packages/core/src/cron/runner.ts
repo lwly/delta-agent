@@ -64,6 +64,9 @@ export interface RunDueOptions {
   logger?: (line: string, ctx?: { projectId?: string }) => void;
   /** T6：项目根引用（旧文件任务按 cwd 前缀惰性回填 projectId，仅内存）；serve 侧由宿主传入 */
   projectRoots?: CronProjectRootRef[];
+  /** T7：统一预算账本（判据 1：cron 与 chat/worker 同一判定实现——执行前 check
+   *  'cron' 账本，超限记 error 记录跳过；执行后 record 本轮成本，上限取 job.maxCostUsd） */
+  quota?: import('../quota/store.js').QuotaStore;
 }
 
 export interface RunDueResult {
@@ -138,6 +141,32 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
     // ② 既有执行流程：锁 CAS → executor → 重读合并落盘 → 推进 nextRunAt
     const startedAt = new Date();
     log(`⏰ 定时任务到期：${job.name}（${job.cron}）`, { projectId: job.projectId });
+    // T7（判据 1）：cron 与 chat/worker 共用 QuotaStore 判定——超限不拉子进程，
+    // 收敛为 error 记录（照常推进调度，避免每轮反复失败刷屏）
+    if (opts.quota) {
+      const q = opts.quota.check('cron', job.id);
+      if (!q.ok) {
+        const now2 = new Date();
+        const record: CronRunRecord = {
+          trigger,
+          startedAt: now2.toISOString(),
+          finishedAt: now2.toISOString(),
+          durationMs: 0,
+          status: 'budget_exhausted',
+          exitCode: null,
+          error: `定时任务预算已耗尽（已用 $${q.usedCostUsd.toFixed(4)} / 上限 $${q.maxCostUsd.toFixed(2)}，超出 $${q.overage.toFixed(4)}）`,
+          ...(job.projectId ? { projectId: job.projectId } : {}),
+        };
+        mergeAndSave(job.id, (fresh) => {
+          fresh.lastRun = record;
+          fresh.runs = [...fresh.runs, record].slice(-MAX_RUN_HISTORY);
+          fresh.nextRunAt = nextRunSafe(job.cron, now);
+          fresh.updatedAt = now2.toISOString();
+        });
+        log(`⏭ ${job.name} 预算已耗尽，跳过本轮（cron 账本超限）`, { projectId: job.projectId });
+        continue;
+      }
+    }
     // 写锁 check-and-set 防并发（与 serve 内置调度 / daemon / 手动补跑互斥）：
     // 写锁 → 原子 rename → 重读校验 token 归属，失败即另一进程已抢到，跳过本轮
     const lockToken = formatCronLockToken(startedAt);
@@ -183,6 +212,8 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
       fresh.updatedAt = finishedAt.toISOString();
     });
     if (!merged) releaseCronLock(job.id, lockToken, opts.homeDir);
+    // T7：本轮成本计入 cron 账本（上限取 job.maxCostUsd；0/缺省 = 不限额，record 仍累计供台账）
+    opts.quota?.record('cron', job.id, result.costUsd ?? 0, job.maxCostUsd ?? 0);
     ran.push(job.name);
 
     const brief = record.error ? `：${record.error.slice(0, 120)}` : `（${record.durationMs}ms）`;

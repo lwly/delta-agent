@@ -1,4 +1,5 @@
 import type { BudgetConfig, BudgetState, ChatMessage, Usage } from '@delta/shared';
+import { quotaExceeded } from '../quota/store.js';
 
 export const DEFAULT_SESSION_BUDGET: BudgetConfig = {
   maxTokens: 200_000,
@@ -89,7 +90,9 @@ export class BudgetManager {
     if (usedTokenPct >= 1) {
       return { exceeded: true, reason: 'token', usedTokenPct, usedCostPct };
     }
-    if (usedCostPct >= 1) {
+    // 架构收口 T7（判据 2）：费用硬停判定与 QuotaStore.check 共享 quotaExceeded
+    // 纯函数（usedCostPct >= 1 ⇔ used >= max，语义不变，max<=0 不限额口径一致）
+    if (quotaExceeded(this.state.usedCostUsd, this.config.maxCostUsd)) {
       return { exceeded: true, reason: 'cost', usedTokenPct, usedCostPct };
     }
     return { exceeded: false, usedTokenPct, usedCostPct };

@@ -28,6 +28,8 @@ import { TerminalManager } from './terminal.js';
 import { BackgroundTaskManager } from '../session/background-tasks.js';
 import { cancelAllExternalRuns } from '../external/lifecycle.js';
 import { Dispatcher } from '../router/dispatcher.js';
+import { WatchdogRegistry } from '../router/watchdog-registry.js';
+import { QuotaStore } from '../quota/store.js';
 import { runPreflight } from '../router/preflight.js';
 import { authorizeRun } from '../gateway/index.js';
 import { isExternalModel } from '../external/registry.js';
@@ -160,6 +162,9 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
 
   // F-54 会话内后台任务（hub 与 http 共用同一实例；dispose 全杀防孤儿进程）
   const backgroundTasks = new BackgroundTaskManager();
+  // 架构收口 T7：统一预算账本 + 决策等待看护 timer 注册表（进程内单例，内存态）
+  const quotaStore = new QuotaStore();
+  const watchdogRegistry = new WatchdogRegistry();
 
   // ── F-58 调度层装配（design-f58 §12/§13）──────────────────────────────────
   // Worker 会话事件时钟（watchdog L2c 判据数据源）：订阅 hub 事件流记录每个 Worker
@@ -170,6 +175,10 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   let dispatcher: Dispatcher | undefined;
 
   const hub = new SessionHub({
+    // 架构收口 T7：统一预算账本（send 前会话闸门 + 运行结束归账；见 onRunFinished）
+    quota: quotaStore,
+    // 架构收口 T7：决策等待超时看护 timer 收敛进 WatchdogRegistry（同 kind+id 幂等）
+    watchdogTimers: watchdogRegistry,
     service,
     registry,
     resolveProvider: () => resolveProviderFromEnv(undefined), // env → 存储配置，设置页修改后即时生效
@@ -192,6 +201,12 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
       workerEventUnsubs.get(sessionId)?.();
       workerEventUnsubs.delete(sessionId);
       dispatcher?.onRunFinished(sessionId, outcome);
+      // 架构收口 T7：运行成本计入 QuotaStore（判据 1：三类调用方同一判定实现）——
+      // worker 会话按 Router 归属记 'subagent' 账本（金额不入 worker_tasks 表，
+      // 费用真相在 usage 聚合）；其余会话记 'session' 账本。maxCostUsd 随最近一轮更新。
+      const row = dispatcher?.workerTasks.findByWorkerSession(sessionId);
+      if (row) quotaStore.record('subagent', row.router_session_id, outcome.costUsd ?? 0);
+      else quotaStore.record('session', sessionId, outcome.costUsd ?? 0, outcome.maxCostUsd);
     },
     // F-58（T6 e2e 补缝）：Router 会话 toolContext.dispatcher 的延迟解析——
     // 缺此注入则 dispatch_task/task_status 在真实 serve 链路恒报 dispatcher_unavailable
@@ -316,6 +331,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
         },
         // T6：项目根引用（旧任务 cwd 前缀惰性回填 projectId，运行记录/日志带归属）
         projectRoots: service.listProjects().map((p) => ({ id: p.id, root: p.root_path })),
+        // T7：内置调度的 cron 配额账本（判据 1：与 chat/worker 同一判定实现）
+        quota: quotaStore,
       });
       cronSchedulerActive = true;
       log('✔ cron 调度器已随 serve 托管（tick 30s，配置 ~/.delta/cron.json；可用 --cron-scheduler off 关闭）');
@@ -342,6 +359,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
     terminal, // F-47：/api/terminal/* + /ws/terminal
     backgroundTasks, // F-54：/api/sessions/:id/background-tasks
+    quota: quotaStore, // T7：cron 立即运行的配额账本（与 hub/调度器共用同一实例）
     dispatcher, // F-58：6 个调度端点（缺省时端点 501）
     // F-22 收口（D3 裁决）：GET /api/status 的 cron 调度器状态数据源
     cronStatus: () => ({ running: cronScheduler?.isRunning() ?? false, mode: cronMode }),

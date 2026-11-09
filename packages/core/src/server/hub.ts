@@ -122,7 +122,14 @@ export interface SessionHubDeps {
    */
   onRunFinished?: (
     sessionId: string,
-    outcome: { runError?: string; aborted: boolean; durationMs: number },
+    outcome: {
+      runError?: string;
+      aborted: boolean;
+      durationMs: number;
+      /** 架构收口 T7：本轮运行成本与预算上限（runtime 据此 record 进 QuotaStore） */
+      costUsd?: number;
+      maxCostUsd?: number;
+    },
   ) => void;
   /**
    * F-58 调度器解析（T6 e2e 补的装配缝）：Router 会话 toolContext.dispatcher 的来源。
@@ -138,6 +145,16 @@ export interface SessionHubDeps {
    * 类型引用为 type-only（gateway 不 import server/，无循环依赖）。
    */
   runGateway?: (req: import('../gateway/types.js').RunRequest) => Promise<import('../gateway/types.js').GateResult>;
+  /**
+   * 架构收口 T7：QuotaStore 统一预算账本（send 前检查会话累计成本 + 运行结束 record）。
+   * 缺省不注入 = 不做跨轮累计判定（BudgetManager 单轮内行为不变）。
+   */
+  quota?: import('../quota/store.js').QuotaStore;
+  /**
+   * 架构收口 T7：决策等待超时看护 timer 注册表（WatchdogRegistry，runtime 注入）。
+   * 缺省 = 裸 setTimeout（既有行为）。
+   */
+  watchdogTimers?: import('../router/watchdog-registry.js').WatchdogRegistry;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -193,6 +210,9 @@ export function createDecisionWaiter<T>(
     timeoutMs?: number;
     register?: (e: DecisionWaiter) => void;
     unregister?: (e: DecisionWaiter) => void;
+    /** 架构收口 T7：WatchdogRegistry 统一看护 timer（同 kind+id 幂等去重）；缺省裸 setTimeout */
+    timers?: { register(kind: string, id: string, fn: () => void, ttlMs: number): boolean; cancel(kind: string, id: string): boolean };
+    timerKey?: string;
   } = {},
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -204,6 +224,7 @@ export function createDecisionWaiter<T>(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      else if (opts.timers && opts.timerKey) opts.timers.cancel('decision', opts.timerKey);
       signal.removeEventListener('abort', onAbort);
       opts.unregister?.(entry);
       fn();
@@ -213,11 +234,15 @@ export function createDecisionWaiter<T>(
       resolve: (v) => finish(() => resolve(v as T)),
       reject: (e) => finish(() => reject(e)),
     };
-    timer = setTimeout(
-      () => entry.reject(new Error(`等待用户决策超时（${kind} 等待超过 ${Math.round((opts.timeoutMs ?? DECISION_TIMEOUT_MS) / 60_000)} 分钟未响应）`)),
-      opts.timeoutMs ?? DECISION_TIMEOUT_MS,
-    );
-    timer.unref?.(); // 超时定时器不阻止进程退出
+    const timeoutFn = () =>
+      entry.reject(new Error(`等待用户决策超时（${kind} 等待超过 ${Math.round((opts.timeoutMs ?? DECISION_TIMEOUT_MS) / 60_000)} 分钟未响应）`));
+    if (opts.timers && opts.timerKey) {
+      // T7：看护 timer 收敛进 WatchdogRegistry（同 kind+id 幂等，unref 在注册表内处理）
+      opts.timers.register('decision', opts.timerKey, timeoutFn, opts.timeoutMs ?? DECISION_TIMEOUT_MS);
+    } else {
+      timer = setTimeout(timeoutFn, opts.timeoutMs ?? DECISION_TIMEOUT_MS);
+      timer.unref?.(); // 超时定时器不阻止进程退出
+    }
     signal.addEventListener('abort', onAbort, { once: true });
     opts.register?.(entry);
   });
@@ -383,9 +408,19 @@ export class SessionHub {
 
   // ── 确认 / 提问回填 ─────────────────────────────────────────────────────
 
-  /** 创建挂在 waiters 表上的决策等待（超时 / abort 自动收尾，见 createDecisionWaiter）。 */
+  /** 创建挂在 waiters 表上的决策等待（超时 / abort 自动收尾，见 createDecisionWaiter）。
+   *  T7：超时看护 timer 收敛进 WatchdogRegistry（runtime 注入；缺省裸 setTimeout）。 */
   private decision<T>(key: string, kind: DecisionKind, signal: AbortSignal): Promise<T> {
+    const timers = this.deps.watchdogTimers
+      ? {
+          register: (k: string, i: string, fn: () => void, ttl: number) =>
+            this.deps.watchdogTimers!.register(k, i, fn, ttl),
+          cancel: (k: string, i: string) => this.deps.watchdogTimers!.cancel(k, i),
+        }
+      : undefined;
     return createDecisionWaiter<T>(kind, signal, {
+      timers,
+      timerKey: key,
       register: (e) => this.waiters.set(key, e),
       unregister: (e) => {
         if (this.waiters.get(key) === e) this.waiters.delete(key);
@@ -615,17 +650,29 @@ export class SessionHub {
         this.log('error', `任务被拒绝：${message}`, sessionId);
         return;
       }
-    } else if (session.kind === 'router' && isExternalModel(session.model || '')) {
-      // F-58 防御性兜底（design-f58 §4.4 拦截点 2）：外部 CLI agent 不能当 Router——
-      // 其 Bash/Edit/Read 是自身进程内内置工具，delta 无法收窄（L-结构层失效），
-      // 结构上不满足「无执行能力」。正常路径进不来（HTTP 层建会话时已校验，T4），
-      // 此处拦绕过校验的直调；在 running 注册前拒绝，不留运行态、不落任何消息。
-      // （T4 起：装配 runGateway 时该检查收敛进 gateway lifecycle 步骤，见上方分支）
-      const message = `Router 会话不允许使用外部模型（${session.model}）：外部 agent 的工具集无法收窄，不能担任 Router`;
-      this.publish(sessionId, { type: 'run_error', message });
-      this.log('error', `任务被拒绝：${message}`, sessionId);
-      return;
-    }
+      } else if (session.kind === 'router' && isExternalModel(session.model || '')) {
+        // F-58 防御性兜底（design-f58 §4.4 拦截点 2）：外部 CLI agent 不能当 Router——
+        // 其 Bash/Edit/Read 是自身进程内内置工具，delta 无法收窄（L-结构层失效），
+        // 结构上不满足「无执行能力」。正常路径进不来（HTTP 层建会话时已校验，T4），
+        // 此处拦绕过校验的直调；在 running 注册前拒绝，不留运行态、不落任何消息。
+        // （T4 起：装配 runGateway 时该检查收敛进 gateway lifecycle 步骤，见上方分支）
+        const message = `Router 会话不允许使用外部模型（${session.model}）：外部 agent 的工具集无法收窄，不能担任 Router`;
+        this.publish(sessionId, { type: 'run_error', message });
+        this.log('error', `任务被拒绝：${message}`, sessionId);
+        return;
+      }
+
+      // 架构收口 T7（判据 1）：跨轮累计预算闸门——本轮开始前检查 QuotaStore 会话账本，
+      // 超限在 running.set 之前拒绝（零副作用；单轮内预算仍由 BudgetManager.guard 把关）
+      if (this.deps.quota) {
+        const q = this.deps.quota.check('session', sessionId);
+        if (!q.ok) {
+          const message = `会话预算已耗尽（已用 $${q.usedCostUsd.toFixed(4)} / 上限 $${q.maxCostUsd.toFixed(2)}，超出 $${q.overage.toFixed(4)}）；可调整预算后重试`;
+          this.publish(sessionId, { type: 'run_error', message });
+          this.log('error', `任务被拒绝：${message}`, sessionId);
+          return;
+        }
+      }
 
     this.running.set(sessionId, { ac: new AbortController(), startedAt: Date.now() });
     this.publish(sessionId, { type: 'state', running: true, paused: false });
@@ -644,6 +691,10 @@ export class SessionHub {
     const answeredCalls = new Set<string>();
     let acRef: AbortController | null = null; // F-33：finally 判定 aborted / failed 状态用
     let runError: string | null = null;
+    // T7：本轮成本快照（budget 在 try 内创建，finally 收尾透传给 onRunFinished 用）
+    let budget: BudgetManager | undefined;
+    let runCostUsd = 0;
+    let runMaxCostUsd = 0;
     // F-31：usage 事件计数器（每轮 +1），逐轮落库（D5，替代 done 一次性 turn=0）
     let usageTurn = 0;
     const beginTurnIfSaved = () => {
@@ -724,7 +775,7 @@ export class SessionHub {
       }
 
       // 会话预算：优先 settings 解析器（设置页可改，下一轮生效），缺省默认 200k / $0.7
-      const budget = new BudgetManager(this.deps.resolveBudgetConfig?.() ?? {});
+      budget = new BudgetManager(this.deps.resolveBudgetConfig?.() ?? {});
 
       // E-1 子代理模型路由：命中 F-32 routing 的 subagent 规则时子代理走小模型（省 token）；
       // 规则缺失 / 目标 provider 不可用 → 回退会话主模型（与 routeAux 降级语义一致）。
@@ -834,6 +885,8 @@ export class SessionHub {
             mode: this.getPermissionMode(sessionId),
             allowlist: this.deps.allowTools,
           }),
+          // 架构收口 T7：统一预算账本（dispatch_task 派单前的子代理配额最后闸门）
+          quota: this.deps.quota,
           confirm: async (req: ConfirmRequest) => {
             // F-33 桌面通知：确认卡出现（等人事件，旁路 fire-and-forget，不受时长门槛约束）
             try {
@@ -1054,10 +1107,17 @@ export class SessionHub {
       // runError / abort 信号 / durationMs 三个值，零新增判定；放在 finally 末尾，
       // 调度层回调里再次 hub.send（pumpDigest）时 running 槽位已释放，不会 409 自锁
       try {
+        // T7：成本快照（budget 可能未创建——前置拒绝路径直接跳过）
+        runCostUsd = budget?.state.usedCostUsd ?? 0;
+        runMaxCostUsd = budget?.config.maxCostUsd ?? 0;
         this.deps.onRunFinished?.(sessionId, {
           runError: runError ?? undefined,
           aborted: acRef?.signal.aborted ?? false,
           durationMs,
+          // 架构收口 T7（判据 1/2）：扩展签名透传本轮成本与上限——runtime 据此
+          // record 进 QuotaStore（chat 记 'session'；worker 会话经 dispatcher 行归属记 'subagent'）
+          costUsd: runCostUsd,
+          maxCostUsd: runMaxCostUsd,
         });
       } catch {
         // 调度层收敛失败不影响本轮收尾（旁路语义，与 notifyDone 同构）

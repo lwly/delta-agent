@@ -18,6 +18,7 @@ import {
   preflightPass,
   type DispatcherEnv,
 } from './helpers/fake-hub.js';
+import { QuotaStore } from '../src/quota/store.js';
 
 function makeCtx(env: DispatcherEnv, overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -355,3 +356,40 @@ describe('exitCode 通路（§6③）', () => {
 });
 
 afterAll(cleanupAllDirs);
+
+// ── 架构收口 T7：dispatch_task 子代理配额最后闸门 ─────────────────────────────
+
+describe('调度工具：T7 QuotaStore 派单闸门', () => {
+  it('subagent 账本超限 → 派单直接拒绝（quota_exceeded），不落库', async () => {
+    const env = await createDispatcherEnv();
+    try {
+      const quota = new QuotaStore();
+      quota.record('subagent', env.routerId, 5, 4); // 已用 5 > 上限 4
+      const before = env.dispatcher.workerTasks.list().length;
+      const ctx = makeCtx(env, { quota });
+      const res = await dispatchTaskTool.execute({ title: 't', goal: 'g' }, ctx);
+      expect(res.ok).toBe(false);
+      expect((res as { error?: string }).error).toContain('quota_exceeded');
+      expect(env.dispatcher.workerTasks.list().length).toBe(before); // 不落库
+    } finally {
+      cleanupAllDirs();
+    }
+  });
+
+  it('未超限 → 正常派单；运行成本经 record 累计后触发闸门', async () => {
+    const env = await createDispatcherEnv();
+    try {
+      const quota = new QuotaStore();
+      const ctx = makeCtx(env, { quota });
+      const res = await dispatchTaskTool.execute({ title: '正常派单', goal: 'g' }, ctx);
+      expect(res.ok).toBe(true);
+      // 模拟 Worker 运行结束归账（runtime onRunFinished 的 record 路径）
+      quota.record('subagent', env.routerId, 10, 4);
+      const res2 = await dispatchTaskTool.execute({ title: '第二单', goal: 'g' }, ctx);
+      expect(res2.ok).toBe(false);
+      expect((res2 as { error?: string }).error).toContain('quota_exceeded');
+    } finally {
+      cleanupAllDirs();
+    }
+  });
+});
