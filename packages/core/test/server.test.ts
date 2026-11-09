@@ -628,3 +628,49 @@ describe('架构收口 T5：/api/projects/:id/activity 聚合端点', () => {
     }
   });
 });
+
+describe('架构收口 T4：hub.send 接入统一运行前门禁', () => {
+  it('gateway 拒绝 → running.set 之前返回：零 LLM 调用、不落消息、不进运行态（判据 1）', async () => {
+    // 独立 hub：注入拒绝型 gateway + 计数器 provider
+    let llmCalls = 0;
+    const countingProvider: LLMProvider = {
+      id: 'counting',
+      async *chat(): AsyncIterable<StreamEvent> {
+        llmCalls += 1;
+        yield { type: 'done' };
+      },
+      estimateTokens: () => 0,
+    };
+    const hub4 = new SessionHub({
+      service,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => countingProvider,
+      // T4：gateway 在 workRoot/permission/quota/scope/lifecycle 之外的宿主装配（此处注入拒绝）
+      runGateway: async () => ({ ok: false, reason: 'quota_exceeded', message: '并发槽位已满' }),
+    } as SessionHubDeps);
+    const before = JSON.stringify(service.getHistory(sessionId));
+
+    await hub4.send(sessionId, '这条消息不应被处理');
+    // 判据 1：拒绝时 LLM 调用数 0、不写 message（历史逐字节不变）、不进运行态
+    expect(llmCalls).toBe(0);
+    expect(JSON.stringify(service.getHistory(sessionId))).toBe(before);
+    expect(hub4.runningSessionIds().includes(sessionId)).toBe(false);
+    hub4.stopAll?.();
+    void hub4;
+  });
+
+  it('gateway 放行 → 正常进入运行态（原路径不回归）', async () => {
+    const hub5 = new SessionHub({
+      service,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => provider,
+      runGateway: async () => ({ ok: true, policy: { permissionMode: 'default', spawnPermissionArgs: [], readOnly: false } }),
+    } as SessionHubDeps);
+    const p = hub5.send(sessionId, '你好');
+    // 放行后应进入运行态（running 注册成功）
+    await expect(p).resolves.toBeUndefined();
+    expect(hub5.runningSessionIds().includes(sessionId)).toBe(false); // 运行已结束（mock provider 即刻 done）
+    const history = service.getHistory(sessionId);
+    expect(history.length).toBeGreaterThan(0);
+  });
+});

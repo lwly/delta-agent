@@ -131,6 +131,13 @@ export interface SessionHubDeps {
    * 类型引用与 tools/types.ts 同款 type-only import（运行时零依赖，不违反「hub 不 import router/」）。
    */
   resolveDispatcher?: () => import('../router/dispatcher.js').Dispatcher | undefined;
+  /**
+   * 架构收口 T4：统一运行前门禁（gateway.authorizeRun 的调用入口，宿主装配注入）。
+   * 在 send() 的 running.set 之前执行——拒绝时不留运行态、不落任何消息、零 LLM 调用。
+   * 缺省不注入：保留既有内联 external-model-as-router 防御（行为不变，向后兼容）。
+   * 类型引用为 type-only（gateway 不 import server/，无循环依赖）。
+   */
+  runGateway?: (req: import('../gateway/types.js').RunRequest) => Promise<import('../gateway/types.js').GateResult>;
 }
 
 // ── F-37 git 分支切换 + worktree 会话级隔离（编排单点，D1/D7）──────────────
@@ -592,11 +599,28 @@ export class SessionHub {
     const project = this.deps.service.getProject(session.project_id);
     if (!project) throw new Error('project not found');
 
-    // F-58 防御性兜底（design-f58 §4.4 拦截点 2）：外部 CLI agent 不能当 Router——
-    // 其 Bash/Edit/Read 是自身进程内内置工具，delta 无法收窄（L-结构层失效），
-    // 结构上不满足「无执行能力」。正常路径进不来（HTTP 层建会话时已校验，T4），
-    // 此处拦绕过校验的直调；在 running 注册前拒绝，不留运行态、不落任何消息。
-    if (session.kind === 'router' && isExternalModel(session.model || '')) {
+    // 架构收口 T4：统一运行前门禁在 running.set 之前执行——拒绝时不留运行态、
+    // 不落任何消息、零 LLM 调用（判据 1）。未装配 gateway 的宿主走既有内联防御（行为不变）。
+    if (this.deps.runGateway) {
+      const gate = await this.deps.runGateway({
+        origin: session.kind === 'worker' ? 'worker' : session.kind === 'router' ? 'router' : 'chat',
+        sessionId,
+        projectId: session.project_id,
+        model: session.model || null,
+        sessionPermissionMode: this.getPermissionMode(sessionId),
+      });
+      if (!gate.ok) {
+        const message = gate.message ?? `运行被门禁拒绝（${gate.reason}）`;
+        this.publish(sessionId, { type: 'run_error', message });
+        this.log('error', `任务被拒绝：${message}`, sessionId);
+        return;
+      }
+    } else if (session.kind === 'router' && isExternalModel(session.model || '')) {
+      // F-58 防御性兜底（design-f58 §4.4 拦截点 2）：外部 CLI agent 不能当 Router——
+      // 其 Bash/Edit/Read 是自身进程内内置工具，delta 无法收窄（L-结构层失效），
+      // 结构上不满足「无执行能力」。正常路径进不来（HTTP 层建会话时已校验，T4），
+      // 此处拦绕过校验的直调；在 running 注册前拒绝，不留运行态、不落任何消息。
+      // （T4 起：装配 runGateway 时该检查收敛进 gateway lifecycle 步骤，见上方分支）
       const message = `Router 会话不允许使用外部模型（${session.model}）：外部 agent 的工具集无法收窄，不能担任 Router`;
       this.publish(sessionId, { type: 'run_error', message });
       this.log('error', `任务被拒绝：${message}`, sessionId);

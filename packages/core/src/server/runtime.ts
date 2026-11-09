@@ -29,6 +29,9 @@ import { BackgroundTaskManager } from '../session/background-tasks.js';
 import { cancelAllExternalRuns } from '../external/lifecycle.js';
 import { Dispatcher } from '../router/dispatcher.js';
 import { runPreflight } from '../router/preflight.js';
+import { authorizeRun } from '../gateway/index.js';
+import { isExternalModel } from '../external/registry.js';
+import type { PermissionMode } from '@delta/shared';
 import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
@@ -193,6 +196,19 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     // F-58（T6 e2e 补缝）：Router 会话 toolContext.dispatcher 的延迟解析——
     // 缺此注入则 dispatch_task/task_status 在真实 serve 链路恒报 dispatcher_unavailable
     resolveDispatcher: () => dispatcher,
+    // 架构收口 T4：统一运行前门禁（send() 在 running.set 之前执行；拒绝零副作用）。
+    // external-model-as-router 既有防御收敛进 gateway lifecycle 步骤。
+    runGateway: (req) =>
+      authorizeRun(req, {
+        checkLifecycle: (r) =>
+          r.origin === 'router' && isExternalModel(r.model ?? '')
+            ? {
+                ok: false,
+                reason: 'external_router_model',
+                message: `Router 会话不允许使用外部模型（${r.model}）：外部 agent 的工具集无法收窄，不能担任 Router`,
+              }
+            : { ok: true },
+      }),
   });
 
   dispatcher = new Dispatcher({
@@ -207,8 +223,32 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     abort: (sessionId) => {
       hub.abort(sessionId);
     },
-    // 派单前置门禁（真实探测；测试侧不经过本装配，单测注入 fake）
-    preflight: (task) => runPreflight(task),
+    // 派单前置门禁：架构收口 T4c——preflight 4 门禁（executor_unresolved / probe_failed /
+    // login_required / plan_unsupported）收敛为 gateway 的 external 一个 step（判据 3：
+    // reason 一一对应透传）；内置引擎（executor 空）经 gateway 归一后同样放行
+    preflight: async (task) => {
+      const gate = await authorizeRun(
+        {
+          origin: task.executor ? 'external' : 'worker',
+          executor: task.executor ?? null,
+          projectId: task.project_id,
+          sessionId: task.worker_session_id ?? undefined,
+          permissionMode: (task.permission_mode as PermissionMode | null) ?? null,
+        },
+        {
+          checkExternal: async (req) => {
+            const r = await runPreflight({ executor: req.executor ?? null, permission_mode: req.permissionMode ?? 'default' });
+            // preflight ①–④ 的 reason（窄联合）⊂ GateReason，一一对应透传（判据 3）
+            return r.ok
+              ? { ok: true }
+              : { ok: false, reason: (r.reason ?? 'probe_failed') as import('../gateway/types.js').GateReason, message: r.message ?? '' };
+          },
+        },
+      );
+      return gate.ok
+        ? { ok: true }
+        : { ok: false, reason: gate.reason, message: gate.message ?? '前置门禁未通过' };
+    },
     // Worker 会话创建（service 写死 kind='worker'，§7.5）；同时挂上事件时钟订阅
     createWorkerSession: (projectId, o) => {
       const s = service.createWorkerSession(projectId, o);
