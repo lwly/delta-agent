@@ -2,46 +2,22 @@
 // F-41 运行日志页（路由 /logs）：进入拉取尾部（GET /api/logs）+ SSE 实时追加（/api/logs/stream）。
 // 级别过滤 / 文本过滤 / 自动滚动开关 / 复制；SSE 断线由 EventSource 自动重连（不补拉，
 // 窗口期日志靠重新进入页面时的 tail 兜底）。数据源为 serve 内存环形缓冲（最近 1000 条）。
+// T6：项目作用域改走后端 `?project_id=`（含 cron 调度行等无会话条目）；切项目/切作用域
+// 重拉尾部并重连 SSE 换订阅口径。前端 cwd/sessionId 集合过滤已下线（scope.ts 标 legacy）。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, type LogEntryView } from '../api/client';
 import { subscribeLogs } from '../api/sse';
 import { useWorkspaceStore } from '../stores/workspace';
-import { logEntryInProject } from '../utils/scope';
 
 type LevelFilter = 'all' | 'debug' | 'info' | 'warn' | 'error';
 
-// ── F-59 项目作用域：默认只显示当前项目会话产生的日志（LogEntry.sessionId 归属过滤，
-//    F-41 D10：sessionId 本就为 Web 过滤设计），无 sessionId 的 serve/cron 级全局条目在作用域下隐藏 ──
+// ── 项目作用域（T6 后端化）：仅当「跟随项目」且选中项目时，请求带 ?project_id= ──
 const ws = useWorkspaceStore();
 const projectScoped = ref(true);
 const activeProjectName = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.name ?? '');
 const activeRoot = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.root_path ?? '');
-/** 当前项目的会话 id 集合（一次拉 500 条做归属映射；环形缓冲仅 1000 条，覆盖足够） */
-const projectSessionIds = ref<Set<string>>(new Set());
-
-async function loadProjectSessions(): Promise<void> {
-  const pid = ws.activeProjectId;
-  if (!pid) {
-    projectSessionIds.value = new Set();
-    return;
-  }
-  try {
-    // 架构收口 T2 红线文件：此调用必须保持不带 kind——项目日志归属需要「全部」会话 id
-    // （含 worker/router，否则 worker 会话的日志在项目作用域下静默丢失）；
-    // kind=chat 过滤只属于侧栏口径（workspace store / D2 裁决）
-    const r = await api.listSessionsPage(pid, { limit: 500 });
-    // 项目已切走：丢弃过期响应
-    if (ws.activeProjectId === pid) projectSessionIds.value = new Set(r.sessions.map((s) => s.id));
-  } catch {
-    /* 瞬时失败保持现状（作用域过滤退化为空集时用户可切「全部」） */
-  }
-}
-
-watch(
-  () => [ws.activeProjectId, projectScoped.value] as const,
-  () => void loadProjectSessions(),
-  { immediate: true },
-);
+/** 作用域口径：D4 同 cron 页——无项目上下文时不传 = 全量 */
+const scopedProjectId = computed(() => (projectScoped.value ? ws.activeProjectId || undefined : undefined));
 
 const entries = ref<LogEntryView[]>([]);
 const error = ref('');
@@ -53,12 +29,8 @@ const paused = ref(false); // 暂停实时追加（流仍连着，暂停期间�
 let unsub: (() => void) | undefined;
 const listEl = ref<HTMLElement | null>(null);
 
-/** 项目作用域后的条目集（级别计数与列表同源，数字与所见一致） */
-const scopedEntries = computed(() => {
-  if (!projectScoped.value || !activeRoot.value) return entries.value;
-  const ids = projectSessionIds.value;
-  return entries.value.filter((e) => logEntryInProject(e.sessionId, ids));
-});
+/** 后端已按作用域过滤，此处即全集（级别计数与所见一致） */
+const scopedEntries = computed(() => entries.value);
 
 const filtered = computed(() => {
   const needle = textFilter.value.trim().toLowerCase();
@@ -82,7 +54,8 @@ const counts = computed(() => ({
 
 async function load(): Promise<void> {
   try {
-    const r = await api.logsTail(500);
+    // T6：作用域由后端 ?project_id= 过滤（projectId 直属或会话归属，含 worker/router 会话）
+    const r = await api.logsTail(500, scopedProjectId.value ? { projectId: scopedProjectId.value } : undefined);
     entries.value = r.items;
     error.value = '';
     scrollToBottom();
@@ -97,6 +70,12 @@ function onEntry(e: LogEntryView): void {
   // 与服务端环形缓冲同口径：只保留最近 1000 条，防长开页面内存膨胀
   if (entries.value.length > 1000) entries.value.splice(0, entries.value.length - 1000);
   scrollToBottom();
+}
+
+/** 按当前作用域口径（重）连 SSE：连入即补发过滤后的尾部，此后逐条推送 */
+function connectStream(): void {
+  unsub?.();
+  unsub = subscribeLogs(onEntry, scopedProjectId.value ? { projectId: scopedProjectId.value } : undefined);
 }
 
 function scrollToBottom(): void {
@@ -131,12 +110,21 @@ function sessionIdShort(id: string): string {
 
 onMounted(() => {
   void load();
-  unsub = subscribeLogs(onEntry);
+  connectStream();
 });
 
 onBeforeUnmount(() => {
   unsub?.();
 });
+
+// T6：切项目 / 切作用域 → 重拉尾部并重连 SSE 换过滤口径
+watch(
+  [() => ws.activeProjectId, projectScoped] as const,
+  () => {
+    void load();
+    connectStream();
+  },
+);
 
 // 过滤条件变化时回到底部
 watch([levelFilter, textFilter], () => scrollToBottom());
@@ -153,7 +141,7 @@ watch([levelFilter, textFilter], () => scrollToBottom());
           v-if="activeRoot"
           class="btn-sm scope"
           :class="{ active: projectScoped }"
-          :title="projectScoped ? `只显示 ${activeProjectName} 会话产生的日志，点击查看全部` : '显示全部日志，点击回到当前项目'"
+          :title="projectScoped ? `只显示 ${activeProjectName} 的日志（会话与定时任务，服务端过滤）` : '显示全部日志，点击回到当前项目'"
           @click="projectScoped = !projectScoped"
         >{{ projectScoped ? `📁 ${activeProjectName}` : '全部日志' }}</button>
         <label class="chk"><input v-model="autoScroll" type="checkbox" /> 自动滚动</label>

@@ -3,7 +3,7 @@
  * 覆盖：cwd 根本身 / 子目录 / 兄弟目录前缀陷阱 / 空值；日志 sessionId 命中 / 未命中 / 缺失。
  */
 import { describe, expect, it } from 'vitest';
-import { cwdInRoot, logEntryInProject } from './scope';
+import { cwdInRoot, logEntryInProject, projectIdMatches } from './scope';
 
 describe('cwdInRoot (F-59 定时任务项目作用域)', () => {
   const root = '/Users/me/work/project';
@@ -49,5 +49,18 @@ describe('logEntryInProject (F-59 运行日志项目作用域)', () => {
 
   it('空会话集合不归属任何条目', () => {
     expect(logEntryInProject('s1', new Set())).toBe(false);
+  });
+});
+
+describe('projectIdMatches (架构收口 T6：后端 project_id 过滤口径的纯函数镜像)', () => {
+  it('projectId 相等命中', () => {
+    expect(projectIdMatches('p-1', 'p-1')).toBe(true);
+  });
+
+  it('不相等 / 一方缺失不命中', () => {
+    expect(projectIdMatches('p-2', 'p-1')).toBe(false);
+    expect(projectIdMatches(undefined, 'p-1')).toBe(false);
+    expect(projectIdMatches(null, 'p-1')).toBe(false);
+    expect(projectIdMatches('', 'p-1')).toBe(false);
   });
 });

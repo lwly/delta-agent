@@ -6,6 +6,7 @@
 import { computed, reactive, ref } from 'vue';
 import { api, type CronJobView } from '../api/client';
 import ModalShell from './ModalShell.vue';
+import { useWorkspaceStore } from '../stores/workspace';
 import {
   buildCron,
   parseCronToForm,
@@ -21,6 +22,14 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ close: []; saved: [] }>();
+
+// ── T6 项目归属（D4 裁决）：新建绑定当前选中项目；桌面端无 activeProjectId 时不传 = 全局任务（UI 标注）──
+const ws = useWorkspaceStore();
+const projectNameOf = (id?: string): string => ws.projects.find((p) => p.id === id)?.name ?? '';
+const projectId = ref<string | undefined>(
+  props.job ? (props.job.project_id || undefined) : (ws.activeProjectId || undefined),
+);
+const projectLabel = computed(() => (projectId.value ? projectNameOf(projectId.value) : '全部项目（全局任务）'));
 
 const MANUAL = '__manual__';
 
@@ -149,6 +158,7 @@ async function submit(): Promise<void> {
     valid_from: validity.value === 'custom' && validFromDate.value ? dateToIso(validFromDate.value, false) : null,
     valid_until: validity.value === 'custom' && validUntilDate.value ? dateToIso(validUntilDate.value, true) : null,
     ...(Number.isFinite(maxCost) && maxCost > 0 ? { max_cost_usd: maxCost } : {}),
+    ...(projectId.value ? { project_id: projectId.value } : {}),
   };
   busy.value = true;
   try {
@@ -177,6 +187,14 @@ async function submit(): Promise<void> {
 <template>
   <ModalShell :title="editing ? '编辑定时任务' : '新建定时任务'" icon="⏰" :width="560" @close="emit('close')">
     <div class="form">
+      <!-- T6（D4 裁决）：项目归属只读标注——新建时自动绑定当前选中项目；桌面端无项目上下文 = 全局任务 -->
+      <div class="field">
+        <span class="label">项目归属</span>
+        <span class="proj-badge" :title="projectId ?? '不绑定项目，跨项目可见'">
+          📁 {{ projectLabel }}
+        </span>
+      </div>
+
       <label class="field">
         <span class="label">任务名称</span>
         <input v-model="form.name" placeholder="如：每日整理项目日报" />
@@ -327,6 +345,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 .link { border: none; background: transparent; color: var(--accent); font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }
 .err { color: var(--red); font-size: 11.5px; }
+.proj-badge { color: var(--text-dim); font-size: 12.5px; }
 .warn { color: var(--orange); font-size: 11.5px; }
 .error { color: var(--red); font-size: 12.5px; margin: 0; }
 .more summary { color: var(--text-dim); font-size: 12px; cursor: pointer; }

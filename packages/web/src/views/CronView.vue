@@ -3,20 +3,22 @@
 // 任务卡片列表 + 批量管理（多选 + 浮动操作栏）+ 新建/编辑弹窗（CronJobForm，保持弹窗形态）。
 // 存储 ~/.delta/cron.json 与 CLI 共用；「立即运行」走 spawn 子进程（与 daemon 同构），
 // 提交后轮询运行锁与 last_run；倒计时 30s 刷新（nowTick 注入卡片）。
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, type CronJobView } from '../api/client';
 import CronJobCard from '../components/CronJobCard.vue';
 import CronJobForm from '../components/CronJobForm.vue';
 import { useWorkspaceStore } from '../stores/workspace';
-import { cwdInRoot } from '../utils/scope';
 
 type Tab = 'all' | 'enabled' | 'paused';
 
-// ── F-59 项目作用域：默认只显示 cwd 落在当前项目根内（含子目录）的任务，可切「全部项目」──
+// ── F-59 项目作用域（T6 后端化）：选中项目时请求带 ?project_id=，由服务端过滤；
+//    「全部项目」时发全量请求。不再依赖前端 cwdInRoot 前缀匹配（scope.ts 已标 legacy）──
 const ws = useWorkspaceStore();
 const projectScoped = ref(true);
 const activeProjectName = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.name ?? '');
 const activeRoot = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.root_path ?? '');
+/** 作用域过滤口径：仅当「跟随项目」且选中了项目时后端过滤（D4：无项目上下文 = 全局/全量） */
+const scopedProjectId = computed(() => (projectScoped.value ? ws.activeProjectId || undefined : undefined));
 
 const jobs = ref<CronJobView[]>([]);
 const workspaces = ref<string[]>([]);
@@ -50,12 +52,8 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 const anyRunning = computed(() => jobs.value.some((j) => j.running_since) || runningIds.value.size > 0);
 
-/** 项目作用域后的任务集（Tab 计数与列表同源，数字与所见一致） */
-const scopedJobs = computed(() => {
-  if (!projectScoped.value || !activeRoot.value) return jobs.value;
-  const root = activeRoot.value;
-  return jobs.value.filter((j) => cwdInRoot(j.cwd, root));
-});
+/** 后端已按作用域过滤，此处即列表全集（Tab 计数与所见一致） */
+const scopedJobs = computed(() => jobs.value);
 
 const counts = computed(() => ({
   all: scopedJobs.value.length,
@@ -77,7 +75,8 @@ function showToast(msg: string): void {
 
 async function load(): Promise<void> {
   try {
-    const r = await api.cronList();
+    // T6：作用域由后端 ?project_id= 过滤（cwd 前缀惰性回填归属；项目删除/cwd 移走后仍以 projectId 为准）
+    const r = await api.cronList(scopedProjectId.value ? { projectId: scopedProjectId.value } : undefined);
     jobs.value = r.jobs;
     workspaces.value = r.workspaces ?? [];
     warnings.value = r.warnings.map((w) => w.message);
@@ -243,6 +242,8 @@ onMounted(() => {
   void refresh();
   nowTimer = setInterval(() => (now.value = new Date()), 30_000);
 });
+// T6：切项目 / 切作用域 → 换请求口径重拉（后端过滤）
+watch([() => ws.activeProjectId, projectScoped], () => void refresh());
 onBeforeUnmount(() => {
   stopPolling();
   if (nowTimer) clearInterval(nowTimer);

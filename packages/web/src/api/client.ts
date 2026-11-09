@@ -455,6 +455,8 @@ export interface CronJobView {
   valid_from?: string;
   /** F-22b 有效期终点（ISO）；缺省长期有效 */
   valid_until?: string;
+  /** 架构收口 T6：项目归属（projects.id）；不传 = 全局任务（D4 裁决，桌面端无 cwd 概念） */
+  project_id?: string;
   created_at: string;
   updated_at: string;
   next_run_at?: string;
@@ -476,9 +478,11 @@ export interface CronJobInput {
   valid_from?: string;
   /** F-22b 有效期终点（ISO）；缺省长期有效 */
   valid_until?: string;
+  /** T6：项目归属；不传 = 全局任务（D4 裁决） */
+  project_id?: string;
 }
 
-/** PATCH /api/cron/:id 补丁：permission/valid_from/valid_until 支持 null = 清除（恢复缺省语义） */
+/** PATCH /api/cron/:id 补丁：permission/valid_from/valid_until/project_id 支持 null = 清除（恢复缺省语义） */
 export interface CronJobPatch {
   name?: string;
   cron?: string;
@@ -489,6 +493,8 @@ export interface CronJobPatch {
   permission?: 'plan' | 'default' | 'yolo' | null;
   valid_from?: string | null;
   valid_until?: string | null;
+  /** null = 清除（恢复全局任务）；undefined = 不动 */
+  project_id?: string | null;
 }
 
 /** GET /api/cron 响应（F-22b：workspaces = serve 启动目录 + 既有任务 cwd 去重，供表单下拉） */
@@ -785,6 +791,8 @@ export interface LogEntryView {
   level: 'debug' | 'info' | 'warn' | 'error';
   source: string;
   sessionId?: string;
+  /** 架构收口 T6：项目归属（cron 调度行等无会话条目；?project_id= 过滤依据） */
+  project_id?: string;
   message: string;
 }
 
@@ -1164,7 +1172,11 @@ export const api = {
     request<{ ok: boolean } & BudgetSetting>('POST', '/api/settings/budget/extend', { multiply }),
 
   // cron（F-22 定时任务面板；F-22b WorkBuddy 化改版）
-  cronList: () => request<CronListResponse>('GET', '/api/cron'),
+  cronList: (opts?: { projectId?: string }) =>
+    request<CronListResponse>(
+      'GET',
+      `/api/cron${opts?.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : ''}`,
+    ),
   status: () => request<StatusResponse>('GET', '/api/status'),
   cronGet: (id: string) => request<CronJobView>('GET', `/api/cron/${id}`),
   cronAdd: (input: CronJobInput) => request<CronJobView>('POST', '/api/cron', input),
@@ -1173,7 +1185,11 @@ export const api = {
   cronRun: (id: string) => request<{ ok: boolean; running: boolean }>('POST', `/api/cron/${id}/run`),
 
   // F-41 运行日志（尾读；实时流走 subscribeLogs）
-  logsTail: (limit = 200) => request<{ items: LogEntryView[] }>('GET', `/api/logs?limit=${limit}`),
+  logsTail: (limit = 200, opts?: { projectId?: string }) =>
+    request<{ items: LogEntryView[] }>(
+      'GET',
+      `/api/logs?limit=${limit}${opts?.projectId ? `&project_id=${encodeURIComponent(opts.projectId)}` : ''}`,
+    ),
 
   // F-54 会话内后台任务（列表 running 在前；DELETE 终止运行中任务）
   backgroundTasks: (sessionId: string) =>
