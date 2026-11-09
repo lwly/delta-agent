@@ -9,7 +9,8 @@ Agent 任务的 cron 调度：按 5 字段 cron 表达式（本地时区）定�
 
 **本期范围**：core 调度内核 + `delta cron` CLI 子命令组 + 常驻 daemon + Web 调度面板
 （`delta serve` 内 `/api/cron` 端点 + 工作台「⏰ 定时」弹窗，与 CLI 共用同一 `cron.json` 存储）。
-**不在本期**：分布式/多机调度。
+**不在本期**：分布式/多机调度（多实例安全只做到「同机同文件不双跑」，由运行锁
+check-and-set 保证，见 §5；跨机 leader election 不做）。
 
 ## 2. 总体结构
 
@@ -68,14 +69,25 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 
 - 到期判定：`enabled && !runningSince && (nextRunAt 缺失 || nextRunAt <= now)`；
 - 串行执行：同一 tick 内逐个跑，避免并发任务争抢预算/模型；
-- 运行锁：`runningSince` 写入即落盘（daemon 与手动补跑跨进程互斥）；残留超 24h
-  （STALE_RUNNING_MS）视为上次进程崩溃，自动解除后照常执行；
+- 运行锁 check-and-set（多实例不双跑）：锁值为归属 token（`pid:epochMs:rand`，旧版
+  裸 ISO 串兼容）。执行前 `acquireCronLock()`：写锁 → 原子 rename → **重读文件** →
+  校验 `runningSince === token`，失败即另一进程已抢到，跳过本轮；残留超 24h
+  （STALE_RUNNING_MS）视为上次进程崩溃，覆盖抢锁后照常执行；执行结束后**重新
+  loadCronJobs() 把本轮记录合并进最新对象再落盘**（逐项合并，不整份覆盖——执行期间
+  另一进程写入的锁与运行记录不受 last-writer-wins 影响）；
 - 失败隔离：单任务执行失败收敛为 error 记录，不中断其余任务；坏表达式任务
   记录失败但不改 enabled（调度推进容错为 undefined，不反复失败）；
 - 补跑语义：daemon 停机期间到期的任务，重启后首轮即补跑一次（不会按错过时刻数连跑）；
 - `onlyJobId`（`cron run --id`）：强制执行一次、trigger=manual、**不推进 nextRunAt**；
 - scheduler：启动即跑首轮；busy 保护（上轮未完跳过本轮）；interval unref，
-  进程存活由 CLI daemon 的信号监听保持；stop()/signal abort 优雅停止。
+  进程存活由 CLI daemon 的信号监听保持；stop()/signal abort 优雅停止；
+- **serve 托管（收口改造 T1 / D1 裁决）**：`delta serve` 缺省（`cronScheduler: 'auto'`）
+  在注入了 `cronExecutor` 时随 serve 启停一个进程内调度器——只开 Web 控制台定时任务
+  也会自动触发，无需另跑 `delta cron daemon`。`--cron-scheduler off` 或环境变量
+  `DELTA_CRON_DISABLE_AUTOTICK=1` 显式关闭；desktop 宿主显式 `off`（v1 不注入 executor）。
+  进程内单例守卫防二次 createServeRuntime 双起 timer。`GET /api/status` 返回
+  `{ cron: { running, mode } }`（Web 定时任务页据此提示「调度器未运行」；端点命名为
+  /api/status 而非 /api/cron/status，避免被 `GET /api/cron/:id` 先匹配）。
 
 ## 6. CLI
 
@@ -86,7 +98,8 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 | `delta cron remove <id-or-name>` | 删除 |
 | `delta cron enable/disable <id-or-name>` | 启停（enable 从当下重算下次运行，不补跑停用期） |
 | `delta cron run [--id]` | 手动补跑；`--id` 强制试跑一次 |
-| `delta cron daemon [--tick-ms 30000] [--once]` | 常驻调度；`--once` 单轮补跑后退出（配合系统 cron / systemd timer） |
+| `delta cron daemon [--tick-ms 30000] [--once]` | 常驻调度；`--once` 单轮补跑后退出（配合系统 cron / systemd timer）。`delta serve` 已托管调度时无需再跑；显式跑 daemon 时建议 `DELTA_CRON_DISABLE_AUTOTICK=1 delta serve` 关闭内置调度防双实例 |
+| `delta serve [--cron-scheduler auto|off]` | Web 控制台；缺省托管 cron 调度器（auto，需注入 cronExecutor），off 关闭。`GET /api/status` 可查调度器运行状态 |
 
 执行器超时默认 30 分钟（SIGTERM），超时记 `timeout`；子进程输出无法解析为 JSON
 报告时收敛为 `error` 并携带输出前 500 字。

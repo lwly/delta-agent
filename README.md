@@ -121,6 +121,8 @@ delta [options]                     # 启动交互式 TUI 会话
 
 | 子命令 | 说明 |
 |--------|------|
+| `delta serve` | 启动 Web 控制台本地服务（托管形态默认 127.0.0.1:7902，`--dev` 7900）。**默认托管 cron 调度器**（`--cron-scheduler off` 或环境变量 `DELTA_CRON_DISABLE_AUTOTICK=1` 关闭；关闭后定时任务需自行运行 `delta cron daemon`） |
+| `delta cron list/add/remove/enable/disable/run/daemon` | 定时任务：cron 表达式调度 agent 任务（`~/.delta/cron.json`）。`delta serve` 已内置调度时无需再跑 `delta cron daemon`；多实例共用同一配置文件，运行锁 check-and-set 保证不双跑 |
 | `delta models add/list/remove` | 管理 Provider 配置（Key 加密存储） |
 | `delta memory` | 管理 L2 长期动态记忆 |
 | `delta sandbox status/enable/disable/pull/gc` | 沙箱运维（Seatbelt / Docker） |
