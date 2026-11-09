@@ -6,16 +6,24 @@
  *  - 执行器经 CronExecutor 注入（core 不感知 CLI / 进程细节；测试用伪造执行器）；
  *    CLI 提供默认实现：spawn `delta run -p <prompt> --json` 子进程（见 cli/cron-executor.ts）；
  *  - 串行执行：同一时刻最多一个任务在跑，避免并发任务互相争抢预算/模型；
- *  - runningSince 锁：执行前写入、完成后清除；残留超过 STALE_RUNNING_MS 视为上次
- *    进程崩溃，自动清除后照常执行（防 daemon 与手动补跑并发重复执行）；
+ *  - 运行锁 check-and-set（多实例不双跑）：执行前 acquireCronLock()（写锁 → 原子
+ *    rename → 重读文件 → 校验锁 token 归属），失败即跳过本轮；残留锁超过
+ *    STALE_RUNNING_MS 视为上次进程崩溃，覆盖抢锁后照常执行；
  *  - 单任务失败不中断其余任务；坏表达式任务记录 error 运行记录但不改 enabled；
- *  - 任务清单全程使用同一份内存对象读改写落盘（串行执行下无并发写竞争；
- *    执行期间用户手工改文件会被本轮落盘覆盖，与其它配置存储的 last-writer-wins 口径一致）。
+ *  - 执行结束后**重新 loadCronJobs()**，把本轮 CronRunRecord 合并进最新对象再落盘
+ *    （避免 last-writer-wins 覆盖另一进程的锁或运行记录；执行期间用户手工改文件
+ *    的其它字段不会被本轮覆盖，口径从「全程同一份内存对象」收紧为「逐项合并」）。
  */
 import { nextRun } from './parse.js';
 import {
+  MAX_RUN_HISTORY,
+  STALE_RUNNING_MS,
+  acquireCronLock,
+  formatCronLockToken,
   isInValidWindow,
   loadCronJobs,
+  parseCronLockTime,
+  releaseCronLock,
   saveCronJobs,
   type CronJob,
   type CronRunRecord,
@@ -74,9 +82,22 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
   for (const w of warnings) log(`⚠ ${w.message}`);
   if (corrupt) return { ran: [], skipped: 0 };
 
-  // 崩溃残留锁清理：runningSince 超过 STALE_RUNNING_MS 的任务解除锁定
+  // 合并落盘：重读最新文件 → 只改目标任务的目标字段 → 原子写回。
+  // 防止本轮结果覆盖执行期间另一进程写入的锁或运行记录（多实例安全的关键一环）。
+  const mergeAndSave = (jobId: string, mutate: (fresh: CronJob) => void): boolean => {
+    const fresh = loadCronJobs(opts.homeDir);
+    if (fresh.corrupt) return false;
+    const target = fresh.jobs.find((j) => j.id === jobId);
+    if (!target) return false; // 任务已被其它进程/用户删除：放弃落盘
+    mutate(target);
+    saveCronJobs(fresh.jobs, opts.homeDir);
+    return true;
+  };
+
+  // 崩溃残留锁清理：runningSince（token 或旧版 ISO 串）超过 STALE_RUNNING_MS 的任务解除锁定
   for (const job of jobs) {
-    if (job.runningSince && now.getTime() - Date.parse(job.runningSince) > 24 * 60 * 60 * 1000) {
+    const lockedAt = job.runningSince ? parseCronLockTime(job.runningSince) : undefined;
+    if (lockedAt !== undefined && now.getTime() - lockedAt > STALE_RUNNING_MS) {
       log(`⚠ 任务 ${job.name} 的运行锁已残留超过 24h（疑似上次进程崩溃），自动解除`);
       delete job.runningSince;
     }
@@ -98,18 +119,24 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
     // ① F-22b 有效期窗口检查：以计划时刻 dueAt 判定；手动补跑（onlyJobId）不受限。
     //    窗口外 → 静默跳过（不执行、不写运行记录），从 dueAt 推进 nextRunAt 保持 cron 相位。
     if (!opts.onlyJobId && !isInValidWindow(job, dueAt)) {
-      job.nextRunAt = nextRunSafe(job.cron, dueAt);
-      job.updatedAt = now.toISOString();
-      saveCronJobs(jobs, opts.homeDir);
+      const nextAt = nextRunSafe(job.cron, dueAt);
+      mergeAndSave(job.id, (fresh) => {
+        fresh.nextRunAt = nextAt;
+        fresh.updatedAt = now.toISOString();
+      });
       log(`⏭ ${job.name} 在有效期窗口外，跳过本次调度`);
       continue;
     }
-    // ② 既有执行流程：写锁 → executor → 运行记录 → 推进 nextRunAt
+    // ② 既有执行流程：锁 CAS → executor → 重读合并落盘 → 推进 nextRunAt
     const startedAt = new Date();
     log(`⏰ 定时任务到期：${job.name}（${job.cron}）`);
-    // 写锁防并发（与 daemon / 手动补跑互斥）
-    job.runningSince = startedAt.toISOString();
-    saveCronJobs(jobs, opts.homeDir);
+    // 写锁 check-and-set 防并发（与 serve 内置调度 / daemon / 手动补跑互斥）：
+    // 写锁 → 原子 rename → 重读校验 token 归属，失败即另一进程已抢到，跳过本轮
+    const lockToken = formatCronLockToken(startedAt);
+    if (!acquireCronLock(job.id, lockToken, opts.homeDir)) {
+      log(`⏭ ${job.name} 已被其它进程抢到运行锁，跳过本轮`);
+      continue;
+    }
 
     let result: CronExecutorResult;
     try {
@@ -133,15 +160,19 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
       ...(result.error ? { error: result.error } : {}),
       ...(result.resultPreview ? { resultPreview: result.resultPreview } : {}),
     };
-    delete job.runningSince;
-    job.lastRun = record;
-    job.runs = [...job.runs, record].slice(-20);
-    // 手动强制执行（onlyJobId）不推进调度时刻；到期执行推进到下一次
-    if (!opts.onlyJobId) {
-      job.nextRunAt = nextRunSafe(job.cron, now);
-    }
-    job.updatedAt = finishedAt.toISOString();
-    saveCronJobs(jobs, opts.homeDir);
+    // 重读合并落盘：清锁（仅当仍归属本 token）+ 运行记录 + 调度推进一次完成，
+    // 避免覆盖执行期间另一进程写入的锁或记录；合并失败（文件损坏/任务被删）兜底释放锁
+    const merged = mergeAndSave(job.id, (fresh) => {
+      if (fresh.runningSince === lockToken) delete fresh.runningSince;
+      fresh.lastRun = record;
+      fresh.runs = [...fresh.runs, record].slice(-MAX_RUN_HISTORY);
+      // 手动强制执行（onlyJobId）不推进调度时刻；到期执行推进到下一次
+      if (!opts.onlyJobId) {
+        fresh.nextRunAt = nextRunSafe(job.cron, now);
+      }
+      fresh.updatedAt = finishedAt.toISOString();
+    });
+    if (!merged) releaseCronLock(job.id, lockToken, opts.homeDir);
     ran.push(job.name);
 
     const brief = record.error ? `：${record.error.slice(0, 120)}` : `（${record.durationMs}ms）`;

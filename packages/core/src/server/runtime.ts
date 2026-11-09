@@ -33,6 +33,13 @@ import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
 import type { CronExecutor } from '../cron/runner.js';
+import { startCronScheduler, type CronSchedulerHandle } from '../cron/scheduler.js';
+
+/**
+ * cron 调度器进程内单例守卫：同一进程内只允许一个 serve runtime 托管调度器，
+ * 防止二次 createServeRuntime 产生第二个 timer 双触发。dispose 时复位。
+ */
+let cronSchedulerActive = false;
 
 export interface ServeRuntimeOptions {
   /** 监听端口（缺省 7900；CLI serve 托管形态默认 7902 / --dev 形态 7900，桌面宿主传 0 随机避让） */
@@ -55,6 +62,15 @@ export interface ServeRuntimeOptions {
    * 不传则「立即运行」返回 400（与 ServeOptions.cronExecutor 缺省语义一致）。
    */
   cronExecutor?: CronExecutor;
+  /**
+   * F-22 收口：serve 是否随启停托管一个进程内 cron 调度器。
+   * - `'auto'`（缺省）：仅当宿主同时注入了 `cronExecutor` 时，随 serve 启停调度器；
+   *   desktop 等未注入 executor 的宿主自动不启用；
+   * - `'off'`：显式关闭（desktop v1 固定传 off，防将来注入 executor 后行为悄然变化）。
+   * 另支持环境变量 `DELTA_CRON_DISABLE_AUTOTICK=1`（用户显式跑 `delta cron daemon`
+   * 时关掉内置调度），效果等同 'off'。
+   */
+  cronScheduler?: 'auto' | 'off';
   /** 桌面通知（F-33）；缺省 no-op */
   notify?: Notifier;
   /** 信息日志（缺省 console.log） */
@@ -234,6 +250,33 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   }, 60_000);
   dispatchTimer.unref?.();
 
+  // ── F-22 收口（架构收口方案 T1 / D1 裁决）：serve 托管 cron 调度器 ──────────
+  // 判据：只开 `delta serve` 即自动触发定时任务（不再要求单独跑 `delta cron daemon`）。
+  // auto = 仅当宿主同时注入了 cronExecutor 时随 serve 启停一个进程内调度器；
+  // desktop 未注入 executor 时自动不启用；off / DELTA_CRON_DISABLE_AUTOTICK=1 显式关闭。
+  const cronEnvDisabled = process.env.DELTA_CRON_DISABLE_AUTOTICK === '1';
+  const cronMode: 'auto' | 'off' = opts.cronScheduler === 'off' || cronEnvDisabled ? 'off' : 'auto';
+  let cronScheduler: CronSchedulerHandle | undefined;
+  if (cronMode === 'auto') {
+    if (!opts.cronExecutor) {
+      log('ℹ cron 调度器未启用：宿主未注入 cronExecutor（仅提供「立即运行」以外的面板能力）');
+    } else if (cronSchedulerActive) {
+      // 进程内单例守卫：二次 createServeRuntime 不重复起 timer（防同进程双实例双触发）
+      log('ℹ cron 调度器已由本进程另一个 serve runtime 托管，跳过重复启动');
+    } else {
+      cronScheduler = startCronScheduler({
+        executor: opts.cronExecutor,
+        tickMs: 30_000,
+        homeDir: opts.cronHomeDir,
+        logger: (l) => log(l),
+      });
+      cronSchedulerActive = true;
+      log('✔ cron 调度器已随 serve 托管（tick 30s，配置 ~/.delta/cron.json；可用 --cron-scheduler off 关闭）');
+    }
+  } else {
+    log('ℹ cron 调度器已关闭（--cron-scheduler off 或 DELTA_CRON_DISABLE_AUTOTICK=1）；定时任务需由 `delta cron daemon` 触发');
+  }
+
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
   // F-47 Web 内置终端：node-pty 为 optionalDependencies——缺失/不可用时 status 端点明确降级
   const terminal = new TerminalManager({
@@ -253,6 +296,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     terminal, // F-47：/api/terminal/* + /ws/terminal
     backgroundTasks, // F-54：/api/sessions/:id/background-tasks
     dispatcher, // F-58：6 个调度端点（缺省时端点 501）
+    // F-22 收口（D3 裁决）：GET /api/status 的 cron 调度器状态数据源
+    cronStatus: () => ({ running: cronScheduler?.isRunning() ?? false, mode: cronMode }),
   });
 
   let disposed = false;
@@ -271,6 +316,9 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      // F-22 收口：先停 cron 调度器（不再扫描/触发任务），再走既有收尾
+      if (cronScheduler?.stop()) cronSchedulerActive = false;
+      cronScheduler = undefined;
       clearInterval(dispatchTimer); // F-58：先停 60s tick，不再派发/播报
       // 先停 accepting（server.close 立即返回、等待存量连接收尾）：全杀子进程的
       // 数百 ms 窗口内不再接受新的运行，避免新外部 run 不在全杀快照而成孤儿

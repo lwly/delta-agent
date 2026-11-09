@@ -25,6 +25,12 @@ const loading = ref(false);
 const error = ref('');
 const toast = ref('');
 
+// ── F-22 收口（D3 裁决）：调度器运行状态（GET /api/status）──
+// running=false 时显示「调度器未运行」提示：定时任务不会自动触发。
+// 端点缺失（旧 server）时静默按运行中处理，不阻塞任务列表。
+const schedulerRunning = ref(true);
+const schedulerMode = ref<'auto' | 'off'>('auto');
+
 const tab = ref<Tab>('all');
 const expanded = ref('');
 const batchMode = ref(false);
@@ -78,6 +84,13 @@ async function load(): Promise<void> {
     error.value = '';
   } catch (e) {
     error.value = (e as Error).message;
+  }
+  try {
+    const st = await api.status();
+    schedulerRunning.value = st.cron.running;
+    schedulerMode.value = st.cron.mode;
+  } catch {
+    schedulerRunning.value = true; // /api/status 不可用（旧 server）：不误报
   }
 }
 
@@ -250,6 +263,11 @@ onBeforeUnmount(() => {
     <p v-if="error" class="error">✘ {{ error }}</p>
     <p v-if="toast" class="toast">⚠ {{ toast }}</p>
     <p v-for="w in warnings" :key="w" class="warn">⚠ {{ w }}</p>
+    <!-- 调度器未运行提示（F-22 收口 T1 / D3）：任务仍可手动「立即运行」，只是不会自动触发 -->
+    <p v-if="!schedulerRunning" class="warn">
+      ⚠ 调度器未运行（mode={{ schedulerMode }}）：定时任务不会自动触发。
+      请在宿主机保持 <code>delta serve</code> 运行（内置调度），或自行运行 <code>delta cron daemon</code>。
+    </p>
 
     <div class="tabs">
       <!-- F-59 项目作用域开关：跟随左侧选中的项目（cwd 归属过滤），可切「全部项目」 -->
@@ -326,6 +344,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .error { color: var(--red); font-size: 13px; }
 .toast { color: var(--orange); font-size: 12.5px; }
 .warn { color: var(--orange); font-size: 12px; }
+.warn code { font-family: var(--mono); font-size: 11px; background: var(--bg-elevated); padding: 1px 5px; border-radius: 4px; }
 .tabs { display: flex; gap: 6px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 /* 分段筛选：bg-elevated 药丸，激活提为 bg-active（不填充强调色底） */
 .tab {

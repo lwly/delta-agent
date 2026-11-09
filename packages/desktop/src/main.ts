@@ -70,6 +70,9 @@ async function bootstrap(): Promise<void> {
       authToken,
       webDistDir: resolveWebDistDir(),
       registerProject: false, // 桌面端无 cwd 概念：项目由 UI 创建（POST /api/projects）
+      // 桌面 v1 不注入 cronExecutor，调度器由 CLI serve 托管：显式 off 固化该语义，
+      // 防止将来注入 executor 后内置调度悄然启用（架构收口方案 T1 / D1 裁决）
+      cronScheduler: 'off',
       notify: notifier,
       log: (line) => console.log(line),
       logError: (line) => console.error(line),

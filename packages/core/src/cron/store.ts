@@ -56,7 +56,11 @@ export interface CronJob {
   updatedAt: string;
   /** 下次到期时间（ISO 字符串，本地时区语义；缺失时视为到期待计算） */
   nextRunAt?: string;
-  /** 运行中标记（执行前写入、完成后清除；残留超过 STALE_RUNNING_MS 视为崩溃残留） */
+  /**
+   * 运行中标记（执行前写入、完成后清除）。值为锁 token（`pid:epochMs:rand`，
+   * 见 formatCronLockToken；存量文件可能是旧版裸 ISO 串，parseCronLockTime 兼容）。
+   * 残留超过 STALE_RUNNING_MS 视为崩溃残留，可被 check-and-set 覆盖抢锁。
+   */
   runningSince?: string;
   lastRun?: CronRunRecord;
   /** 运行历史（最近 MAX_RUN_HISTORY 条，旧→新） */
@@ -104,6 +108,62 @@ export function isInValidWindow(job: Pick<CronJob, 'validFrom' | 'validUntil'>, 
 }
 /** runningSince 残留超过该时长视为上次进程崩溃（默认 24h） */
 export const STALE_RUNNING_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 生成可区分归属的运行锁 token（`pid:epochMs:rand`）。
+ * 取代旧版裸 ISO 串：多实例并发时能判定「锁是不是自己写的」，check-and-set 的
+ * 重读校验（acquireCronLock）依赖该唯一性。epochMs 不含冒号，与 ISO 串可区分。
+ */
+export function formatCronLockToken(now: Date = new Date()): string {
+  return `${process.pid}:${now.getTime()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * 解析锁 token 中的加锁时刻（epoch ms）。
+ * 兼容旧版裸 ISO 串（存量 cron.json 的 runningSince）；无法解析返回 undefined。
+ */
+export function parseCronLockTime(token: string): number | undefined {
+  const parts = token.split(':');
+  if (parts.length === 3) {
+    const ms = Number(parts[1]);
+    if (Number.isInteger(ms) && ms > 0) return ms;
+  }
+  const iso = Date.parse(token);
+  return Number.isNaN(iso) ? undefined : iso;
+}
+
+/**
+ * 运行锁 check-and-set：写锁 → 原子 rename → **重读文件** → 校验 runningSince === token。
+ * 返回 true = 本进程拿到锁；false = 锁被其它进程持有（或残留未过期）/ 任务不存在 / 文件损坏。
+ * 锁残留超过 STALE_RUNNING_MS 视为崩溃残留，允许覆盖抢锁。
+ */
+export function acquireCronLock(jobId: string, token: string, homeDir: string = os.homedir()): boolean {
+  const { jobs, corrupt } = loadCronJobs(homeDir);
+  if (corrupt) return false;
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) return false;
+  if (job.runningSince) {
+    const at = parseCronLockTime(job.runningSince);
+    const stale = at !== undefined && Date.now() - at > STALE_RUNNING_MS;
+    if (!stale) return false; // 其它进程正在跑（锁未过期）
+  }
+  job.runningSince = token;
+  saveCronJobs(jobs, homeDir);
+  // 重读校验：并发写时磁盘上只剩最后写入者的 token，先写者在此落败
+  const verify = loadCronJobs(homeDir).jobs.find((j) => j.id === jobId);
+  return verify?.runningSince === token;
+}
+
+/**
+ * 释放运行锁（仅当锁仍归属 token 时清除；已被其它进程覆盖或已清除则不动）。
+ */
+export function releaseCronLock(jobId: string, token: string, homeDir: string = os.homedir()): void {
+  const { jobs } = loadCronJobs(homeDir);
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job || job.runningSince !== token) return;
+  delete job.runningSince;
+  saveCronJobs(jobs, homeDir);
+}
 
 /** cron.json 路径（`~/.delta/cron.json`） */
 export function userCronConfigPath(homeDir: string = os.homedir()): string {

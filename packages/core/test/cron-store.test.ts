@@ -8,12 +8,16 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  acquireCronLock,
   addCronJob,
   cronJobToJson,
   findCronJob,
+  formatCronLockToken,
   isInValidWindow,
   loadCronJobs,
   MAX_RUN_HISTORY,
+  parseCronLockTime,
+  releaseCronLock,
   removeCronJob,
   saveCronJobs,
   updateCronJob,
@@ -309,5 +313,71 @@ describe('F-22b 有效期与权限字段', () => {
     expect(isInValidWindow({ ...win, validUntil: new Date(2026, 4, 30).toISOString() }, due)).toBe(false);
     // 非法日期字段（normalize 后不应出现，但函数容错）：视为无界
     expect(isInValidWindow({ validFrom: 'garbage', validUntil: 'garbage' }, due)).toBe(true);
+  });
+});
+
+describe('F-22 收口：运行锁 token 与 check-and-set', () => {
+  it('formatCronLockToken：pid:epochMs:rand 三段；parseCronLockTime 取回时刻；旧版裸 ISO 串兼容', () => {
+    const now = new Date(2026, 10, 9, 15, 0, 0);
+    const token = formatCronLockToken(now);
+    const parts = token.split(':');
+    expect(parts).toHaveLength(3);
+    expect(parts[0]).toBe(String(process.pid));
+    expect(Number(parts[1])).toBe(now.getTime());
+    expect(parts[2]!.length).toBeGreaterThan(0);
+    expect(parseCronLockTime(token)).toBe(now.getTime());
+    // 旧版裸 ISO 串（存量 cron.json）仍可解析
+    const iso = '2026-01-01T00:00:00.000Z';
+    expect(parseCronLockTime(iso)).toBe(Date.parse(iso));
+    expect(parseCronLockTime('garbage')).toBeUndefined();
+  });
+
+  it('acquireCronLock：无锁 → 拿到并落盘；有锁未过期 → 拒绝；残留过期 → 覆盖抢锁', () => {
+    const home = tmpHome();
+    const job = addSample(home, 'locky');
+    const t1 = formatCronLockToken();
+    expect(acquireCronLock(job.id, t1, home)).toBe(true);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(t1);
+    const t2 = formatCronLockToken();
+    expect(acquireCronLock(job.id, t2, home)).toBe(false); // 未过期：另一进程持有
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(t1);
+    // 25h 前的崩溃残留 → 覆盖抢锁
+    const { jobs } = loadCronJobs(home);
+    jobs[0]!.runningSince = `${process.pid}:${Date.now() - 25 * 3600_000}:stalepid`;
+    saveCronJobs(jobs, home);
+    expect(acquireCronLock(job.id, t2, home)).toBe(true);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(t2);
+  });
+
+  it('releaseCronLock：归属匹配才清除；token 不匹配不动；重复释放幂等', () => {
+    const home = tmpHome();
+    const job = addSample(home, 'unlocky');
+    const t1 = formatCronLockToken();
+    acquireCronLock(job.id, t1, home);
+    releaseCronLock(job.id, 'not-mine', home);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(t1);
+    releaseCronLock(job.id, t1, home);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBeUndefined();
+    releaseCronLock(job.id, t1, home); // 幂等：已清除不动
+  });
+
+  it('acquireCronLock：任务不存在 / cron.json 损坏 → false', () => {
+    const home = tmpHome();
+    expect(acquireCronLock('ghost', formatCronLockToken(), home)).toBe(false);
+    const job = addSample(home, 'corruptcase');
+    fs.writeFileSync(userCronConfigPath(home), '{ nope', 'utf8');
+    expect(acquireCronLock(job.id, formatCronLockToken(), home)).toBe(false);
+  });
+
+  it('同一任务先后两次 acquire（不同 token）：恰一次成功（重读校验放行赢家）', () => {
+    const home = tmpHome();
+    const job = addSample(home, 'cas');
+    // token 内嵌时刻必须是「刚刚」（远古时间戳会被判定为崩溃残留而放行覆盖）
+    const t1 = `p1:${Date.now()}:aaa`;
+    const t2 = `p2:${Date.now()}:bbb`;
+    const r1 = acquireCronLock(job.id, t1, home);
+    const r2 = acquireCronLock(job.id, t2, home);
+    expect([r1, r2].filter(Boolean)).toHaveLength(1);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(r1 ? t1 : t2);
   });
 });

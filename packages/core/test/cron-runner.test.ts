@@ -9,7 +9,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { runDueCronJobs, type CronExecutor, type CronExecutorResult } from '../src/cron/runner.js';
 import { startCronScheduler } from '../src/cron/scheduler.js';
-import { addCronJob, loadCronJobs, saveCronJobs, userCronConfigPath, type CronJob } from '../src/cron/store.js';
+import {
+  addCronJob,
+  loadCronJobs,
+  saveCronJobs,
+  STALE_RUNNING_MS,
+  updateCronJob,
+  userCronConfigPath,
+  type CronJob,
+} from '../src/cron/store.js';
 
 function tmpHome(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delta-cron-run-'));
@@ -270,5 +278,75 @@ describe('F-22 startCronScheduler', () => {
     ac.abort();
     expect(s.isRunning()).toBe(false);
     s.stop();
+  });
+});
+
+describe('F-22 收口：运行锁 check-and-set（多实例不双跑）', () => {
+  it('双实例并发 tick：一条到期任务只产生 1 条运行记录 / 1 次 executor 调用（硬验收）', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'race');
+    const calls: string[] = [];
+    const exec: CronExecutor = async (job) => {
+      calls.push(job.name);
+      await new Promise((r) => setTimeout(r, 30)); // 模拟执行耗时，放大并发窗口
+      return okResult();
+    };
+    await Promise.all([
+      runDueCronJobs({ executor: exec, homeDir: home, now: NOW, logger: () => {} }),
+      runDueCronJobs({ executor: exec, homeDir: home, now: NOW, logger: () => {} }),
+    ]);
+    expect(calls).toHaveLength(1);
+    const job = loadCronJobs(home).jobs[0]!;
+    expect(job.runs).toHaveLength(1);
+    expect(job.lastRun!.status).toBe('completed');
+    expect(job.runningSince).toBeUndefined(); // 赢家结束后清锁
+  });
+
+  it('执行期间磁盘上锁值为归属 token（pid:epochMs:rand），结束后清除', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'token');
+    let observed: string | undefined;
+    const exec: CronExecutor = async () => {
+      observed = loadCronJobs(home).jobs[0]!.runningSince;
+      return okResult();
+    };
+    await runDueCronJobs({ executor: exec, homeDir: home, now: NOW, logger: () => {} });
+    expect(observed).toMatch(/^\d+:\d+:[0-9a-z]+$/);
+    expect(loadCronJobs(home).jobs[0]!.runningSince).toBeUndefined();
+  });
+
+  it('崩溃残留：25h 前 token 锁被 STALE_RUNNING_MS 清除并照常执行；23h 未过期仍跳过', async () => {
+    const home = tmpHome();
+    const staleToken = `${process.pid}:${NOW.getTime() - 25 * 3600_000}:oldone`;
+    const freshish = `${process.pid}:${NOW.getTime() - 23 * 3600_000}:heldby`;
+    addDueJob(home, 'stale', { runningSince: staleToken });
+    addDueJob(home, 'freshish', { runningSince: freshish });
+    const calls: Array<{ name: string }> = [];
+    const logs: string[] = [];
+    const r = await runDueCronJobs({ executor: executorOf([okResult()], calls), homeDir: home, now: NOW, logger: (l) => logs.push(l) });
+    expect(r.ran).toEqual(['stale']);
+    expect(logs.some((l) => l.includes('自动解除'))).toBe(true);
+    const jobs = loadCronJobs(home).jobs;
+    expect(jobs.find((j) => j.name === 'stale')!.runningSince).toBeUndefined();
+    expect(jobs.find((j) => j.name === 'freshish')!.runningSince).toBe(freshish);
+    // 判定来源是 store 常量而非写死字面量：常量即 24h 边界
+    expect(STALE_RUNNING_MS).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('执行期间另一进程/用户改写其它任务不被本轮落盘覆盖（重读合并）', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'running');
+    addCronJob({ name: 'edited', cron: '30 8 * * *', prompt: '原始', cwd: home, from: new Date(2027, 0, 1) }, home); // 未到期
+    const exec: CronExecutor = async () => {
+      updateCronJob('edited', { prompt: '已被用户修改' }, home); // 模拟执行期间的外部写入
+      return okResult();
+    };
+    await runDueCronJobs({ executor: exec, homeDir: home, now: NOW, logger: () => {} });
+    const jobs = loadCronJobs(home).jobs;
+    // 外部写入保留（last-writer-wins 不再整份覆盖）
+    expect(jobs.find((j) => j.name === 'edited')!.prompt).toBe('已被用户修改');
+    // 本轮记录正常合并落盘
+    expect(jobs.find((j) => j.name === 'running')!.lastRun!.status).toBe('completed');
+    expect(jobs.find((j) => j.name === 'running')!.runningSince).toBeUndefined();
   });
 });

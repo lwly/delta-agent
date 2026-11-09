@@ -140,6 +140,13 @@ export interface ServeOptions {
    */
   dispatcher?: Dispatcher;
   /**
+   * F-22 收口（D3 裁决）：GET /api/status 的 cron 调度器状态数据源（serve 运行时注入）。
+   * 缺省不提供：/api/status 恒返回 running:false / mode:'off'（能力未装配口径）。
+   * 端点命名为 /api/status 而非 /api/cron/status——后者会被 GET /api/cron/:id
+   * 当成 id='status' 先匹配而恒 404（架构收口方案 T1 端点命名坑）。
+   */
+  cronStatus?: () => { running: boolean; mode: 'auto' | 'off' };
+  /**
    * F-55 外部 Agent 探测入口（缺省 ensureExternalAdapters；测试注入隔离探测副作用——
    * 真探测会跑 `--version` 子进程并写 ~/.delta/external.json，单测不能触碰真实 HOME/PATH）。
    */
@@ -408,6 +415,13 @@ export function createWebServer(opts: ServeOptions): http.Server {
       // ── projects ──────────────────────────────────────────────────────────
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
         return json(res, 200, service.listProjects());
+      }
+      // F-22 收口（D3 裁决）：cron 调度器运行状态（Web 定时任务页「调度器未运行」提示的数据源）。
+      // 命名红线：不可叫 /api/cron/status（会被下方 GET /api/cron/:id 当成 id 先匹配而恒 404），
+      // 也不可叫 /api/runs（与 F-18 回放 GET /api/sessions/:id/runs 撞名）。
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'status' && parts.length === 2) {
+        const st = opts.cronStatus?.() ?? { running: false, mode: 'off' as const };
+        return json(res, 200, { cron: st });
       }
       // PASI-9：运行中的会话 id 列表（侧栏 ⏸/✕ 切换与删除门禁的数据源）；
       // projects = 有会话运行中的项目 id（侧栏项目点运行中动效的数据源）

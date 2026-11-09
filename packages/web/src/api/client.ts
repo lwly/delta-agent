@@ -492,6 +492,15 @@ export interface CronListResponse {
   workspaces: string[];
 }
 
+/** GET /api/status 响应（架构收口 T1 / D3：cron 调度器运行状态，定时任务页提示数据源） */
+export interface StatusResponse {
+  cron: {
+    running: boolean;
+    /** auto = 随 serve 托管；off = 显式关闭（需自行跑 delta cron daemon） */
+    mode: 'auto' | 'off';
+  };
+}
+
 /** Composer「/ 技能」候选：skill 元数据（不含正文内容） */
 export interface SkillCandidate {
   name: string;
@@ -1138,6 +1147,7 @@ export const api = {
 
   // cron（F-22 定时任务面板；F-22b WorkBuddy 化改版）
   cronList: () => request<CronListResponse>('GET', '/api/cron'),
+  status: () => request<StatusResponse>('GET', '/api/status'),
   cronGet: (id: string) => request<CronJobView>('GET', `/api/cron/${id}`),
   cronAdd: (input: CronJobInput) => request<CronJobView>('POST', '/api/cron', input),
   cronUpdate: (id: string, patch: CronJobPatch) => request<CronJobView>('PATCH', `/api/cron/${id}`, patch),

@@ -672,7 +672,8 @@ program
   .option('--port <n>', '监听端口（缺省：--dev 为 7900，否则 7902）')
   .option('--web-dist <dir>', 'Vue 构建产物目录（缺省用包内嵌 packages/web/dist）')
   .option('--db <path>', 'SQLite 数据库路径（默认 ~/.delta/agent.db）')
-  .action(async (opts: { dev?: boolean; port?: string; webDist?: string; db?: string }) => {
+  .option('--cron-scheduler <mode>', 'cron 调度托管模式：auto（缺省，注入 cronExecutor 时随 serve 启停）| off（定时任务需自行跑 `delta cron daemon`）', 'auto')
+  .action(async (opts: { dev?: boolean; port?: string; webDist?: string; db?: string; cronScheduler?: string }) => {
     // Vue 构建产物候选：--web-dist > 包内嵌 cli/dist/web（npm 安装形态）> 仓库 packages/web/dist（开发形态）
     const distDir = path.dirname(fileURLToPath(import.meta.url));
     const webDist = [
@@ -685,6 +686,7 @@ program
 
     // 组装编排已下移 core（createServeRuntime，桌面宿主共用同一工厂）；
     // CLI 形态差异：注册 cwd 为默认项目 + spawn cron 执行器（nodePath = process.execPath 由 core 内部缺省）
+    const cronSchedulerMode = opts.cronScheduler === 'off' ? 'off' : 'auto';
     const runtime = await createServeRuntime({
       port,
       dbPath: opts.db,
@@ -692,6 +694,7 @@ program
       projectRoot: process.cwd(),
       registerProject: true,
       cronExecutor: createSpawnExecutor(),
+      cronScheduler: cronSchedulerMode,
       notify: createDesktopNotifier({ projectRoot: process.cwd() }),
     });
     console.log(`✔ delta Web 控制台已启动：http://127.0.0.1:${runtime.port}`);
