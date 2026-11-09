@@ -19,11 +19,16 @@ const mocks = vi.hoisted(() => ({
   decideWorkerTask: vi.fn(),
   cancelWorkerTask: vi.fn(),
   createWorkerTask: vi.fn(),
+  connectActivityStream: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({ api: mocks }));
+// T5b：activity SSE 连接在 store 测试中 mock（不触网）；用例通过捕获回调模拟连接状态切换
+vi.mock('../composables/useActivityStream', () => ({
+  connectActivityStream: mocks.connectActivityStream,
+}));
 
-import { POLL_INTERVAL_MS, useTasksStore } from './tasks';
+import { ACTIVITY_IDLE_INTERVAL_MS, POLL_INTERVAL_MS, useTasksStore } from './tasks';
 
 const task = (id: string, status: string, project = 'p1') => ({
   id,
@@ -74,8 +79,11 @@ beforeEach(() => {
   mocks.decideWorkerTask.mockReset();
   mocks.cancelWorkerTask.mockReset();
   mocks.createWorkerTask.mockReset();
+  mocks.connectActivityStream.mockReset();
   mocks.listWorkerTasks.mockResolvedValue({ tasks: [] });
   mocks.listUndeliveredInbox.mockResolvedValue({ items: [] });
+  // T5b：默认空句柄（未连接 → 轮询保持 2s 基础间隔）
+  mocks.connectActivityStream.mockReturnValue({ disconnect: () => undefined });
 });
 
 afterEach(async () => {
@@ -268,5 +276,61 @@ describe('tasks store (F-58 任务台)', () => {
     s.openTaskPanel('a');
     s.watch(null); // watch(null) 内部走 stop
     expect(s.openTaskId).toBeNull();
+  });
+});
+
+describe('tasks store (T5b：activity SSE 降级与即时刷新)', () => {
+  it('watch 后订阅 activity stream（同 id）；activity_changed 立即刷新', async () => {
+    const s = useTasksStore();
+    let onActivity: (() => void) | undefined;
+    mocks.connectActivityStream.mockImplementation((_pid: string, cb: () => void) => {
+      onActivity = cb;
+      return { disconnect: () => undefined };
+    });
+    mocks.listWorkerTasks.mockResolvedValue({ tasks: [task('a', 'running')] });
+    s.watch('p1');
+    await advance();
+    expect(mocks.connectActivityStream).toHaveBeenCalledWith('p1', expect.any(Function), expect.any(Function));
+    const baseCalls = mocks.listWorkerTasks.mock.calls.length;
+    onActivity?.(); // activity_changed：立即刷新，不等下一轮
+    await advance(0);
+    expect(mocks.listWorkerTasks.mock.calls.length).toBeGreaterThan(baseCalls);
+    s.watch(null);
+  });
+
+  it('SSE 在线 → 轮询放宽 10s；断线 → 自动回 2s', async () => {
+    const s = useTasksStore();
+    let onConn: ((connected: boolean) => void) | undefined;
+    mocks.connectActivityStream.mockImplementation((_pid: string, _a: () => void, cb: (c: boolean) => void) => {
+      onConn = cb;
+      return { disconnect: () => undefined };
+    });
+    s.watch('p1');
+    await advance();
+    // 未连接：2s 口径（POLL_INTERVAL_MS 节奏）
+    const c1 = mocks.listWorkerTasks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 3);
+    expect(mocks.listWorkerTasks.mock.calls.length).toBe(c1 + 3);
+    // 在线：10s 口径（10s 内只 1 轮）
+    onConn?.(true);
+    const c2 = mocks.listWorkerTasks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(ACTIVITY_IDLE_INTERVAL_MS);
+    expect(mocks.listWorkerTasks.mock.calls.length).toBe(c2 + 1);
+    // 断线：回 2s（10s 内 5 轮）
+    onConn?.(false);
+    const c3 = mocks.listWorkerTasks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 5);
+    expect(mocks.listWorkerTasks.mock.calls.length).toBe(c3 + 5);
+    s.watch(null);
+  });
+
+  it('stop 时断开 activity 订阅', async () => {
+    const s = useTasksStore();
+    const disconnect = vi.fn();
+    mocks.connectActivityStream.mockReturnValue({ disconnect });
+    s.watch('p1');
+    s.watch(null);
+    expect(disconnect).toHaveBeenCalled();
+    expect(mocks.connectActivityStream).toHaveBeenCalledTimes(1); // watch(null) 不订阅
   });
 });

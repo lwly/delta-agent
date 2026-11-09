@@ -11,12 +11,21 @@
  * 【术语锚点】本 store 的 Task 指的是 **委派任务（worker_tasks，Delegation）的视图
  * 状态**（见 docs/architecture-glossary.md §4/§11-3），不是 Plan 节点任务（core
  * session/tasks.ts）也不是会话内后台命令（bgTasks.ts）。
+ *
+ * 架构收口 T5b：轮询机制抽至 composables/usePollingResource（watch→stop→refresh+
+ * interval+切 id 清态+过期丢弃）；订阅 /api/projects/:id/activity/stream（T5a 端点）
+ * 后轮询 2s→10s 降级，activity_changed 立即刷新，断线自动回 2s（useActivityStream）。
  */
+import { markRaw } from 'vue';
 import { defineStore } from 'pinia';
 import { api, type InboxItem, type WorkerTaskView } from '../api/client';
+import { createPollingResource, type PollingResourceHandle } from '../composables/usePollingResource';
+import { connectActivityStream, type ActivityStreamHandle } from '../composables/useActivityStream';
 
-/** 轮询间隔（ms）；任务台是低频状态提示，2s 足够（§18-9：任务台比 Router 播报更快，数据同源不矛盾） */
+/** 基础轮询间隔（ms）；任务台是低频状态提示，2s 足够（§18-9：任务台比 Router 播报更快，数据同源不矛盾） */
 export const POLL_INTERVAL_MS = 2_000;
+/** T5 降级间隔：activity SSE 在线（状态变化 ≤1s 推送）时轮询放宽到 10s */
+export const ACTIVITY_IDLE_INTERVAL_MS = 10_000;
 
 export type TaskDecision = 'retry' | 'cancel' | 'accept';
 
@@ -37,7 +46,10 @@ export const useTasksStore = defineStore('tasks', {
     projectId: null as string | null,
     /** 轻首页/任务详情右滑面板：当前打开的任务 id（null = 面板关闭） */
     openTaskId: null as string | null,
-    _timer: null as ReturnType<typeof setInterval> | null,
+    /** T5b：轮询资源句柄（markRaw 防 reactive 代理；null = 未在轮询） */
+    _resource: null as PollingResourceHandle | null,
+    /** T5b：activity SSE 句柄（markRaw；null = 未订阅） */
+    _activity: null as ActivityStreamHandle | null,
   }),
 
   getters: {
@@ -64,12 +76,37 @@ export const useTasksStore = defineStore('tasks', {
       this.projectId = id;
       if (!id) return;
       void this.refresh();
-      this._timer = setInterval(() => void this.refresh(), POLL_INTERVAL_MS);
+      // T5b：轮询机制委托 usePollingResource（切 id 清态 + 过期丢弃在工厂内完成）
+      this._resource = markRaw(
+        createPollingResource<{ tasks: WorkerTaskView[]; inbox: InboxItem[] }>({
+          fetch: (pid) =>
+            Promise.all([api.listWorkerTasks(pid), api.listUndeliveredInbox(pid)]).then(([tasks, inbox]) => ({
+              tasks: tasks.tasks,
+              inbox: inbox.items,
+            })),
+          apply: (data) => {
+            this.tasks = data.tasks;
+            this.inbox = data.inbox;
+          },
+          intervalMs: POLL_INTERVAL_MS,
+        }),
+      );
+      this._resource.start(id);
+      // T5b：activity SSE 订阅（同项目多消费者共享连接）——在线放宽 10s，断线回 2s
+      this._activity = markRaw(
+        connectActivityStream(
+          id,
+          () => void this.refresh(), // activity_changed：立即刷新，不等下一轮
+          (connected) => this._resource?.setIntervalMs(connected ? ACTIVITY_IDLE_INTERVAL_MS : POLL_INTERVAL_MS),
+        ),
+      );
     },
 
     stop(): void {
-      if (this._timer) clearInterval(this._timer);
-      this._timer = null;
+      this._resource?.stop();
+      this._resource = null;
+      this._activity?.disconnect();
+      this._activity = null;
       this.projectId = null;
       this.tasks = [];
       this.inbox = [];
@@ -102,22 +139,9 @@ export const useTasksStore = defineStore('tasks', {
       return r.task;
     },
 
+    /** T5b：刷一轮（委托 usePollingResource；过期响应按当前 id 丢弃） */
     async refresh(): Promise<void> {
-      const id = this.projectId;
-      if (!id) return;
-      try {
-        const [tasks, inbox] = await Promise.all([
-          api.listWorkerTasks(id),
-          api.listUndeliveredInbox(id),
-        ]);
-        // 项目已切走：丢弃过期响应（不串台）
-        if (this.projectId === id) {
-          this.tasks = tasks.tasks;
-          this.inbox = inbox.items;
-        }
-      } catch {
-        /* 服务端能力未装配（501）或瞬时失败：保持现状，下轮重试 */
-      }
+      await this._resource?.refresh();
     },
 
     /** needs_decision 裁决（红线：无乐观更新——端点成功后才 refresh；失败向上抛给弹窗展示） */

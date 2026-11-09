@@ -14,11 +14,17 @@ import { createPinia, setActivePinia } from 'pinia';
 const mocks = vi.hoisted(() => ({
   backgroundTasks: vi.fn(),
   killBackgroundTask: vi.fn(),
+  connectActivityStream: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({ api: mocks }));
+// T5b：activity SSE 连接 mock（bgTasks 无项目上下文时不订阅；此处防触网）
+vi.mock('../composables/useActivityStream', () => ({
+  connectActivityStream: mocks.connectActivityStream,
+}));
 
-import { POLL_INTERVAL_MS, useBgTasksStore } from './bgTasks';
+import { ACTIVITY_IDLE_INTERVAL_MS, POLL_INTERVAL_MS, useBgTasksStore } from './bgTasks';
+import { useWorkspaceStore } from './workspace';
 
 const task = (id: string, status: string, session = 's1') => ({
   id,
@@ -39,6 +45,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   mocks.backgroundTasks.mockReset();
   mocks.killBackgroundTask.mockReset();
+  mocks.connectActivityStream.mockReset();
+  mocks.connectActivityStream.mockReturnValue({ disconnect: () => undefined });
 });
 
 afterEach(async () => {
@@ -117,5 +125,42 @@ describe('bgTasks store (F-54)', () => {
     expect(s.expanded).toBe(true);
     s.stop();
     expect(s.expanded).toBe(false);
+  });
+});
+
+describe('bgTasks store (T5b：activity 订阅口径)', () => {
+  it('无项目上下文（activeProjectId 为空）时不订阅 activity', async () => {
+    const s = useBgTasksStore();
+    mocks.backgroundTasks.mockResolvedValue([]);
+    s.watch('s1');
+    await advance();
+    expect(mocks.backgroundTasks).toHaveBeenCalled();
+    expect(mocks.connectActivityStream).not.toHaveBeenCalled();
+    s.watch(null);
+  });
+
+  it('有项目上下文时按项目订阅 activity（轮询降级由回调驱动）', async () => {
+    const ws = useWorkspaceStore();
+    ws.activeProjectId = 'p-ws';
+    const s = useBgTasksStore();
+    let onConn: ((connected: boolean) => void) | undefined;
+    mocks.connectActivityStream.mockImplementation((pid: string, _a: () => void, cb: (c: boolean) => void) => {
+      expect(pid).toBe('p-ws');
+      onConn = cb;
+      return { disconnect: () => undefined };
+    });
+    mocks.backgroundTasks.mockResolvedValue([]);
+    s.watch('s1');
+    await advance();
+    expect(mocks.connectActivityStream).toHaveBeenCalledTimes(1);
+    // 在线 → 10s；10s 内只 1 轮
+    onConn?.(true);
+    const c1 = mocks.backgroundTasks.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(ACTIVITY_IDLE_INTERVAL_MS);
+    expect(mocks.backgroundTasks.mock.calls.length).toBe(c1 + 1);
+    // stop 断开订阅
+    s.watch(null);
+    s.stop();
+    expect(mocks.connectActivityStream).toHaveBeenCalledTimes(1);
   });
 });
