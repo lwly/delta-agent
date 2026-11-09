@@ -32,6 +32,8 @@ import BackgroundTasksBar from '../components/BackgroundTasksBar.vue';
 import { useBgTasksStore } from '../stores/bgTasks';
 // F-58 任务台：轮询与状态在 store，本视图只做「随项目切换 watch」接线
 import TaskBoard from '../components/TaskBoard.vue';
+// 任务详情右滑面板（Worker 会话轻量视图；零新通道，复用既有会话 API）
+import TaskDetailPanel from '../components/TaskDetailPanel.vue';
 import { useTasksStore } from '../stores/tasks';
 // 桌面壳桥接：注册项目弹窗「浏览…」选择目录（浏览器形态自动隐藏，保留手输）
 import { hasDesktopBridge, pickDirectory } from '../utils/desktop';
@@ -123,8 +125,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown));
 onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown));
-/** hero 快捷键提示的平台检测：macOS 显示 ⌘K，其余显示 Ctrl+K */
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // ── 新对话偏好（模式 / 模型）────────────────────────────────
 // 执行模式枚举：value 为后端存储值，label 为界面中文显示名
@@ -1073,6 +1073,73 @@ async function submit() {
   await chat.send(text, images);
 }
 
+// ── 轻首页「输入即派任务」（委派式工作台；F-58 worker_tasks.dispatch:true 立即派发）──
+const homeInput = ref('');
+/** '' = 内置引擎（executor null）；'cli:*' / 'acp:*' = 外部 agent（externalAgents.id 即 executor 值） */
+const homeExecutor = ref('');
+const delegating = ref(false);
+/** 接手 toast：「{助手} 接手了"{title}"」+ 打开入口；超时自动消失 */
+const delegateToast = ref<{ assistant: string; title: string; taskId: string } | null>(null);
+let delegateToastTimer: ReturnType<typeof setTimeout> | null = null;
+onUnmounted(() => {
+  if (delegateToastTimer) clearTimeout(delegateToastTimer);
+});
+
+/** 首页任务分组（需要你 / 处理中 / 已完成，空组不渲染） */
+const homeTaskGroups = computed(() =>
+  [
+    { key: 'needYou', label: '需要你', items: tasksStore.groups.needYou },
+    { key: 'active', label: '处理中', items: tasksStore.groups.active },
+    { key: 'finished', label: '已完成', items: tasksStore.groups.finished },
+  ].filter((g) => g.items.length > 0),
+);
+
+const HOME_STATUS_LABEL: Record<string, string> = {
+  draft: '草稿', queued: '排队中', preflight: '准备中', running: '处理中',
+  needs_decision: '等待你', done: '已完成', failed: '失败', canceled: '已取消',
+};
+function taskStatusShort(status: string): string {
+  return HOME_STATUS_LABEL[status] ?? status;
+}
+
+/** executor 值 → 展示名（内置引擎兜底「内置助手」） */
+function assistantName(executor: string | null | undefined): string {
+  if (!executor) return '内置助手';
+  const a = externalAgents.value.find((x) => x.id === executor);
+  return a ? a.displayName || a.label || a.id : executor;
+}
+
+/** 首页输入 → 创建并立即派发 Worker 任务；成功后 toast 接手提示（面板由用户自行打开） */
+async function dispatchFromHome() {
+  const goal = homeInput.value.trim();
+  if (!goal || delegating.value) return;
+  if (!ws.activeProjectId) {
+    error.value = '先注册并选择一个项目，再委派任务';
+    return;
+  }
+  delegating.value = true;
+  try {
+    const task = await tasksStore.dispatch(ws.activeProjectId, {
+      goal,
+      executor: homeExecutor.value || null,
+    });
+    homeInput.value = '';
+    delegateToast.value = { assistant: assistantName(task.executor), title: task.title, taskId: task.id };
+    if (delegateToastTimer) clearTimeout(delegateToastTimer);
+    delegateToastTimer = setTimeout(() => (delegateToast.value = null), 8000);
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    delegating.value = false;
+  }
+}
+
+/** toast「打开」：打开任务详情右滑面板并收掉 toast */
+function openDelegated() {
+  if (delegateToast.value) tasksStore.openTaskPanel(delegateToast.value.taskId);
+  delegateToast.value = null;
+}
+
 // ── Composer 自动补全（@ 文件引用 / / 技能）─────────────────
 interface AcItem {
   kind: 'file' | 'skill';
@@ -1461,37 +1528,61 @@ watch(
       <!-- 工作台子路由（/cron 定时任务、/logs 运行日志）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
       <router-view v-if="isSubRoute" />
       <template v-else>
-        <!-- 空态 hero：图标 / 产品名 / 价值主张 / 主行动 + 快捷键提示 / 次级入口 / 三特性卡 -->
-        <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero">
-          <div class="hero-logo">Δ</div>
-          <h1>Delta-Agent</h1>
-          <p class="hero-tagline">在本地仓库中推理、规划并执行你的开发任务</p>
-          <div class="hero-actions">
-            <button class="hero-btn primary" :disabled="!ws.activeProjectId" @click="newSession()">新建对话</button>
-            <button class="hero-btn" @click="showNewProject = true">注册项目</button>
-            <!-- F-38：无会话时也可打开面板（数据根回落当前项目根） -->
-            <button class="hero-btn" :disabled="!ws.activeProjectId" @click="panel.togglePanel()">
-              📁 {{ panel.open ? '收起文件面板' : '项目文件' }}
-            </button>
-            <span class="kbd-hint" title="打开会话检索"><span class="kbd">{{ isMac ? '⌘ K' : 'Ctrl K' }}</span> 快速搜索</span>
+        <!-- 轻首页（委派式工作台）：居中 slogan + 输入即派任务 + 状态分组任务列表 -->
+        <div v-if="!chat.sessionId || !chat.sessionMeta" class="hero hero-home">
+          <h1 class="home-slogan">
+            把工作交出去。<br />
+            回来就能看到<span class="home-slogan-accent">答案</span>。
+          </h1>
+          <p class="home-sub">你的助手会接管并处理任务，每个答案都会在这里等你。</p>
+
+          <!-- 输入即派任务：助手选择器（内置引擎 / 外部 Agent）+ 发送 -->
+          <div class="home-composer">
+            <textarea
+              v-model="homeInput"
+              class="home-input"
+              rows="3"
+              placeholder="你想让助手做什么？"
+              @keydown.enter.exact.prevent="dispatchFromHome"
+            />
+            <div class="home-ops">
+              <select v-model="homeExecutor" class="home-executor" title="选择执行助手：内置引擎或外部 Agent">
+                <option value="">Δ 内置助手</option>
+                <option v-for="a in externalAgents" :key="a.id" :value="a.id">
+                  {{ assistantName(a.id) }}{{ a.loginState ? '' : '（未登录）' }}
+                </option>
+              </select>
+              <span class="home-ops-spacer" />
+              <button
+                class="home-send"
+                type="button"
+                :disabled="delegating || !homeInput.trim()"
+                :title="delegating ? '派发中…' : '委派任务（Enter）'"
+                @click="dispatchFromHome"
+              >↑</button>
+            </div>
           </div>
-          <div class="hero-features">
-            <div class="feature-card">
-              <span class="f-ico">⚡</span>
-              <span class="f-title">ReAct 推理</span>
-              <span class="f-desc">思考-行动循环逐步调用工具，MCP 扩展任意外部能力</span>
+
+          <!-- 状态分组任务列表（需要你 / 处理中 / 已完成；点击打开详情面板） -->
+          <template v-if="ws.activeProjectId">
+            <div v-for="g in homeTaskGroups" :key="g.key" class="home-group">
+              <div class="home-group-label">{{ g.label }} <span class="home-group-count">{{ g.items.length }}</span></div>
+              <button
+                v-for="t in g.items"
+                :key="t.id"
+                class="home-task"
+                type="button"
+                :title="t.goal"
+                @click="tasksStore.openTaskPanel(t.id)"
+              >
+                <span class="home-task-dot" :class="`home-task-dot--${t.status}`" />
+                <span class="home-task-title">{{ t.title }}</span>
+                <span v-if="t.status === 'running'" class="home-task-live">正在处理…</span>
+                <span v-else class="home-task-status">{{ taskStatusShort(t.status) }}</span>
+              </button>
             </div>
-            <div class="feature-card">
-              <span class="f-ico">📋</span>
-              <span class="f-title">计划执行</span>
-              <span class="f-desc">先拆解计划再逐步执行，关键节点支持人工审批</span>
-            </div>
-            <div class="feature-card">
-              <span class="f-ico">🤖</span>
-              <span class="f-title">多智能体</span>
-              <span class="f-desc">子任务分派协作，上下文自动压缩不失真</span>
-            </div>
-          </div>
+          </template>
+          <p v-else class="home-sub">先在左侧注册一个项目，就可以委派任务了。</p>
         </div>
 
       <template v-else>
@@ -1868,6 +1959,17 @@ watch(
       </router-link>
     </nav>
 
+    <!-- ══════════ 任务详情右滑面板（tasks.openTaskId 驱动；轻首页/任务台共用） ══════════ -->
+    <TaskDetailPanel />
+
+    <!-- ══════════ 委派接手 toast（底部居中，超时自动消失） ══════════ -->
+    <div v-if="delegateToast" class="delegate-toast">
+      <span class="dt-avatar">Δ</span>
+      <span class="dt-text"><b>{{ delegateToast.assistant }}</b> 接手了“{{ delegateToast.title }}”</span>
+      <button class="dt-open" type="button" @click="openDelegated">打开</button>
+      <button class="dt-close" type="button" title="关闭提示" @click="delegateToast = null">×</button>
+    </div>
+
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
       <!-- 桌面壳：桥接可用时只走系统目录选择器（输入框只读展示结果），不再要求手打绝对路径 -->
@@ -2154,42 +2256,100 @@ watch(
 /* ══════════ 主区域 ══════════ */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
-/* 空态 hero：极简居中（图标 / 产品名 / 一行提示 / 安静的行动按钮），共用同一套变量 */
+/* 轻首页（委派式工作台）：居中 slogan + 输入即派任务 + 状态分组任务列表 */
 .hero {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 24px; overflow-y: auto;
 }
-.hero-logo {
-  width: 56px; height: 56px; border-radius: 14px;
-  background: var(--logo-purple);
+.hero-home { gap: 10px; max-width: 560px; margin: 0 auto; width: 100%; }
+.home-slogan {
+  font-size: 26px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.5;
+  text-align: center; color: var(--text);
+}
+.home-slogan-accent { color: var(--accent); }
+.home-sub { color: var(--text-faint); font-size: 12.5px; text-align: center; }
+.home-composer {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 12px; margin-top: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.home-composer:focus-within { border-color: var(--border-strong); }
+.home-input {
+  width: 100%; border: none; background: transparent; resize: none; outline: none;
+  color: var(--text); font-size: 13.5px; line-height: 1.6;
+  font-family: inherit;
+}
+.home-input::placeholder { color: var(--text-faint); }
+.home-ops { display: flex; align-items: center; gap: 8px; }
+.home-ops-spacer { flex: 1; }
+.home-executor {
+  height: 28px; max-width: 220px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill, 999px);
+  background: var(--bg-hover); color: var(--text); font-size: 11.5px;
+  padding: 0 8px; outline: none; cursor: pointer;
+}
+.home-send {
+  width: 30px; height: 30px; border: none; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 14px; cursor: pointer;
+}
+.home-send:hover:not(:disabled) { background: var(--accent-strong); }
+.home-send:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 状态分组任务列表（需要你 / 处理中 / 已完成） */
+.home-group { width: 100%; margin-top: 8px; }
+.home-group-label { font-size: 11.5px; color: var(--text-faint); padding: 0 2px 4px; }
+.home-group-count { opacity: 0.8; }
+.home-task {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px;
+  border: none; background: transparent; cursor: pointer; text-align: left;
+}
+.home-task:hover { background: var(--bg-hover); }
+.home-task-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.home-task-dot--running { background: var(--green); animation: home-breathe 1.4s ease-in-out infinite; }
+.home-task-dot--preflight, .home-task-dot--queued { background: var(--accent); }
+.home-task-dot--needs_decision { background: var(--orange); }
+.home-task-dot--done { background: var(--green); }
+.home-task-dot--failed, .home-task-dot--canceled { background: var(--red); }
+@keyframes home-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.home-task-title {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-task-status { flex: none; font-size: 11px; color: var(--text-faint); }
+.home-task-live { flex: none; font-size: 11px; color: var(--accent); }
+/* 委派接手 toast：底部居中，非模态，超时自动消失 */
+.delegate-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 70;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: delegate-toast-in 0.18s ease-out;
+}
+@keyframes delegate-toast-in { from { transform: translateX(-50%) translateY(8px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+.dt-avatar {
+  width: 22px; height: 22px; border-radius: 6px; flex: none;
+  background: var(--logo-purple); color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 24px; color: #fff; font-family: var(--mono);
+  font-size: 11px; font-weight: 700; font-family: var(--mono);
 }
-.hero h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
-.hero-tagline { color: var(--text-faint); font-size: 13px; }
-.hero-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.hero-btn {
-  padding: 10px 24px; border-radius: 8px;
-  border: 1px solid var(--border); background: var(--bg-elevated);
-  color: var(--text); font-size: 13.5px; font-weight: 500; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+.dt-text { font-size: 12.5px; color: var(--text-dim); }
+.dt-text b { color: var(--text); font-weight: 600; }
+.dt-open {
+  flex: none; height: 24px; padding: 0 10px; border-radius: 6px;
+  border: none; background: var(--accent); color: #fff;
+  font-size: 11.5px; cursor: pointer;
 }
-.hero-btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
-.hero-btn:active:not(:disabled) { background: var(--bg-active); }
-.hero-btn.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
-.hero-btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
-.hero-btn.primary:active:not(:disabled) { background: var(--accent-press); }
-.hero-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.kbd-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 11.5px; }
-/* 三张等宽特性小卡 */
-.hero-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; max-width: 640px; margin-top: 24px; }
-.feature-card {
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
-  display: flex; flex-direction: column; gap: 6px; text-align: left;
+.dt-open:hover { background: var(--accent-strong); }
+.dt-close {
+  flex: none; width: 20px; height: 20px;
+  border: none; background: transparent; color: var(--text-faint);
+  font-size: 14px; cursor: pointer;
 }
-.f-ico { font-size: 18px; }
-.f-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.f-desc { font-size: 11.5px; line-height: 1.6; color: var(--text-dim); }
+.dt-close:hover { color: var(--text); }
 
 /* ══════════ 标签栏 tabbar（40px，chrome 底色） ══════════ */
 .tabbar {

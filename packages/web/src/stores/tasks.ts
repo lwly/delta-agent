@@ -16,11 +16,23 @@ export const POLL_INTERVAL_MS = 2_000;
 
 export type TaskDecision = 'retry' | 'cancel' | 'accept';
 
+/** 任务按注意力状态的三组分组（对齐轻首页/任务台的「需要你 / 处理中 / 已完成」渲染） */
+export interface TaskGroups {
+  /** needs_decision：占人不占槽位，最优先 */
+  needYou: WorkerTaskView[];
+  /** queued / preflight / running：已在推进或排队 */
+  active: WorkerTaskView[];
+  /** done / failed / canceled：终态 */
+  finished: WorkerTaskView[];
+}
+
 export const useTasksStore = defineStore('tasks', {
   state: () => ({
     tasks: [] as WorkerTaskView[],
     inbox: [] as InboxItem[],
     projectId: null as string | null,
+    /** 轻首页/任务详情右滑面板：当前打开的任务 id（null = 面板关闭） */
+    openTaskId: null as string | null,
     _timer: null as ReturnType<typeof setInterval> | null,
   }),
 
@@ -29,6 +41,14 @@ export const useTasksStore = defineStore('tasks', {
     interruptCount: (s) => s.inbox.filter((i) => i.severity === 'interrupt').length,
     /** 待人工裁决的任务（needs_decision 非终态、不占并发槽位但占人，§18-7） */
     pendingDecision: (s) => s.tasks.filter((t) => t.status === 'needs_decision'),
+    /** 三组分组（渲染顺序即数组顺序：需要你 → 处理中 → 已完成） */
+    groups: (s): TaskGroups => ({
+      needYou: s.tasks.filter((t) => t.status === 'needs_decision'),
+      active: s.tasks.filter((t) => t.status === 'queued' || t.status === 'preflight' || t.status === 'running'),
+      finished: s.tasks.filter((t) => t.status === 'done' || t.status === 'failed' || t.status === 'canceled'),
+    }),
+    /** 详情面板当前任务（任务被轮询刷新后引用自动跟随最新行） */
+    openTask: (s): WorkerTaskView | null => s.tasks.find((t) => t.id === s.openTaskId) ?? null,
   },
 
   actions: {
@@ -49,6 +69,33 @@ export const useTasksStore = defineStore('tasks', {
       this.projectId = null;
       this.tasks = [];
       this.inbox = [];
+      this.openTaskId = null;
+    },
+
+    /** 打开/关闭任务详情右滑面板（taskId 传 null = 关闭） */
+    openTaskPanel(taskId: string | null): void {
+      this.openTaskId = taskId;
+    },
+
+    /**
+     * 轻首页「输入即派任务」：立即派发（dispatch:true）并刷新列表。
+     * title 由 goal 收敛（首行截断，与截图形态一致）；executor null = 内置引擎。
+     * 失败向上抛给调用方 toast；成功后调用方拿返回的任务行做「接手」提示与面板打开。
+     */
+    async dispatch(projectId: string, opts: { goal: string; executor?: string | null; permissionMode?: 'plan' | 'default' | 'yolo' }): Promise<WorkerTaskView> {
+      const goal = opts.goal.trim();
+      if (!goal) throw new Error('任务内容为空');
+      const firstLine = goal.split('\n')[0]!.trim();
+      const title = firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine;
+      const r = await api.createWorkerTask(projectId, {
+        title,
+        goal,
+        executor: opts.executor ?? null,
+        permission_mode: opts.permissionMode ?? 'default',
+        dispatch: true,
+      });
+      await this.refresh();
+      return r.task;
     },
 
     async refresh(): Promise<void> {

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   listUndeliveredInbox: vi.fn(),
   decideWorkerTask: vi.fn(),
   cancelWorkerTask: vi.fn(),
+  createWorkerTask: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({ api: mocks }));
@@ -72,6 +73,7 @@ beforeEach(() => {
   mocks.listUndeliveredInbox.mockReset();
   mocks.decideWorkerTask.mockReset();
   mocks.cancelWorkerTask.mockReset();
+  mocks.createWorkerTask.mockReset();
   mocks.listWorkerTasks.mockResolvedValue({ tasks: [] });
   mocks.listUndeliveredInbox.mockResolvedValue({ items: [] });
 });
@@ -188,5 +190,83 @@ describe('tasks store (F-58 任务台)', () => {
     await s.refresh();
     expect(s.tasks).toHaveLength(1);
     s.watch(null);
+  });
+
+  // ── 轻首页委派式工作台：分组 getter / 面板状态 / dispatch action ──
+
+  it('groups 按「需要你 / 处理中 / 已完成」三组分组', async () => {
+    const s = useTasksStore();
+    mocks.listWorkerTasks.mockResolvedValue({
+      tasks: [
+        task('d', 'done'),
+        task('n', 'needs_decision'),
+        task('q', 'queued'),
+        task('r', 'running'),
+        task('f', 'failed'),
+        task('pf', 'preflight'),
+        task('c', 'canceled'),
+      ],
+    });
+    s.watch('p1');
+    await advance();
+    expect(s.groups.needYou.map((t) => t.id)).toEqual(['n']);
+    expect(s.groups.active.map((t) => t.id)).toEqual(['q', 'r', 'pf']);
+    expect(s.groups.finished.map((t) => t.id)).toEqual(['d', 'f', 'c']);
+    s.watch(null);
+  });
+
+  it('openTaskPanel / openTask：面板状态跟随轮询刷新的最新任务行', async () => {
+    const s = useTasksStore();
+    mocks.listWorkerTasks.mockResolvedValue({ tasks: [task('a', 'running')] });
+    s.watch('p1');
+    await advance();
+    s.openTaskPanel('a');
+    expect(s.openTask?.id).toBe('a');
+    // 轮询刷新后 openTask 跟随最新行（状态变化可见）
+    mocks.listWorkerTasks.mockResolvedValue({ tasks: [task('a', 'done')] });
+    await advance();
+    expect(s.openTask?.id).toBe('a');
+    expect(s.openTask?.status).toBe('done');
+    // 关闭面板
+    s.openTaskPanel(null);
+    expect(s.openTaskId).toBeNull();
+    expect(s.openTask).toBeNull();
+    s.watch(null);
+  });
+
+  it('dispatch：goal 收敛 title、透传 executor / dispatch:true，成功后刷新列表', async () => {
+    const s = useTasksStore();
+    s.watch('p1'); // dispatch 后的 refresh 依赖项目上下文（与首页 watch 接线一致）
+    mocks.createWorkerTask.mockResolvedValue({ task: task('new1', 'queued') });
+    const created = await s.dispatch('p1', { goal: '做一个 ppt\n要求 10 页', executor: 'cli:codebuddy' });
+    expect(created.id).toBe('new1');
+    expect(mocks.createWorkerTask).toHaveBeenCalledWith('p1', {
+      title: '做一个 ppt',
+      goal: '做一个 ppt\n要求 10 页',
+      executor: 'cli:codebuddy',
+      permission_mode: 'default',
+      dispatch: true,
+    });
+    // dispatch 内部已 refresh
+    expect(mocks.listWorkerTasks).toHaveBeenCalled();
+    // 空内容拒绝派单
+    await expect(s.dispatch('p1', { goal: '   ' })).rejects.toThrow('任务内容为空');
+    expect(mocks.createWorkerTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatch 失败向上抛（调用方 toast），不吞错', async () => {
+    const s = useTasksStore();
+    mocks.createWorkerTask.mockRejectedValue(new Error('HTTP 400'));
+    await expect(s.dispatch('p1', { goal: 'x' })).rejects.toThrow('HTTP 400');
+  });
+
+  it('stop 清空 openTaskId（面板状态不跨项目泄漏）', async () => {
+    const s = useTasksStore();
+    mocks.listWorkerTasks.mockResolvedValue({ tasks: [task('a', 'running')] });
+    s.watch('p1');
+    await advance();
+    s.openTaskPanel('a');
+    s.watch(null); // watch(null) 内部走 stop
+    expect(s.openTaskId).toBeNull();
   });
 });

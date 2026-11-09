@@ -5,7 +5,7 @@
 // + 裁决入口（needs_decision → TaskDecisionDialog）。
 // 外部 Worker 的 permission_mode 文案写「已请求只读」（裁决 Q5，不写「只读」）。
 // 数据源与轮询在 stores/tasks.ts（2s；watch 接线在 WorkbenchView，对齐 bgTasks 惯例）。
-import { onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useTasksStore } from '../stores/tasks';
 import type { FailureKind, WorkerTaskStatus, WorkerTaskView } from '../api/client';
 import TaskDecisionDialog from './TaskDecisionDialog.vue';
@@ -83,6 +83,18 @@ function readOnlyTag(t: WorkerTaskView): boolean {
 
 // 裁决弹窗：当前待裁决任务（弹窗内动作成功后经 store.refresh 对齐服务端真值）
 const deciding = ref<WorkerTaskView | null>(null);
+
+// 三组分组（需要你 → 处理中 → 已完成），空组不渲染
+const groups = computed(() => [
+  { key: 'needYou', label: '需要你', items: tasks.groups.needYou },
+  { key: 'active', label: '处理中', items: tasks.groups.active },
+  { key: 'finished', label: '已完成', items: tasks.groups.finished },
+].filter((g) => g.items.length > 0));
+
+/** 行点击 → 打开任务详情右滑面板（裁决按钮 stop 冒泡不触发） */
+function open(t: WorkerTaskView) {
+  tasks.openTaskPanel(t.id);
+}
 </script>
 
 <template>
@@ -94,27 +106,37 @@ const deciding = ref<WorkerTaskView | null>(null);
       </span>
     </div>
     <div class="tb-list">
-      <div v-for="t in tasks.tasks" :key="t.id" class="tb-row" :title="t.goal">
-        <span class="tb-dot" :class="dotCls(t.status)" />
-        <span class="tb-main">
-          <span class="tb-title-line">
-            <span class="tb-name">{{ t.title }}</span>
-            <span v-if="t.role_label" class="tb-role">{{ t.role_label }}</span>
-            <span v-if="readOnlyTag(t)" class="tb-readonly" title="外部 agent 的工具集无法收窄，已请求其以只读档运行">已请求只读</span>
-            <span v-if="t.watchdog_flag === 'suspect'" class="tb-suspect" title="看门狗 L3 粗筛标记：疑似越界，只标记不纠偏（§9.1）">存疑</span>
-          </span>
-          <span class="tb-sub">
-            <span class="tb-status">{{ STATUS_LABEL[t.status] }}</span>
-            <span v-if="t.status === 'running' || t.status === 'preflight'" class="tb-elapsed">已运行 {{ elapsedMin(t) }} 分钟</span>
-            <span v-else-if="t.status === 'failed'" class="tb-failure" :title="t.result_summary ?? undefined">
-              {{ FAILURE_LABEL[t.failure_kind ?? 'runtime'] }}
+      <div v-for="g in groups" :key="g.key" class="tb-group">
+        <div class="tb-group-label">{{ g.label }} <span class="tb-group-count">{{ g.items.length }}</span></div>
+        <div
+          v-for="t in g.items"
+          :key="t.id"
+          class="tb-row"
+          :class="{ clickable: true, open: tasks.openTaskId === t.id }"
+          :title="t.goal"
+          @click="open(t)"
+        >
+          <span class="tb-dot" :class="dotCls(t.status)" />
+          <span class="tb-main">
+            <span class="tb-title-line">
+              <span class="tb-name">{{ t.title }}</span>
+              <span v-if="t.role_label" class="tb-role">{{ t.role_label }}</span>
+              <span v-if="readOnlyTag(t)" class="tb-readonly" title="外部 agent 的工具集无法收窄，已请求其以只读档运行">已请求只读</span>
+              <span v-if="t.watchdog_flag === 'suspect'" class="tb-suspect" title="看门狗 L3 粗筛标记：疑似越界，只标记不纠偏（§9.1）">存疑</span>
             </span>
-            <span v-else-if="t.status === 'done' && t.result_summary" class="tb-result" :title="t.result_summary">{{ t.result_summary }}</span>
+            <span class="tb-sub">
+              <span class="tb-status">{{ STATUS_LABEL[t.status] }}</span>
+              <span v-if="t.status === 'running' || t.status === 'preflight'" class="tb-elapsed">已运行 {{ elapsedMin(t) }} 分钟</span>
+              <span v-else-if="t.status === 'failed'" class="tb-failure" :title="t.result_summary ?? undefined">
+                {{ FAILURE_LABEL[t.failure_kind ?? 'runtime'] }}
+              </span>
+              <span v-else-if="t.status === 'done' && t.result_summary" class="tb-result" :title="t.result_summary">{{ t.result_summary }}</span>
+            </span>
           </span>
-        </span>
-        <button v-if="t.status === 'needs_decision'" class="tb-decide" type="button" title="人工裁决：重试 / 取消 / 接受" @click="deciding = t">
-          裁决
-        </button>
+          <button v-if="t.status === 'needs_decision'" class="tb-decide" type="button" title="人工裁决：重试 / 取消 / 接受" @click.stop="deciding = t">
+            裁决
+          </button>
+        </div>
       </div>
       <div v-if="tasks.tasks.length === 0" class="tb-empty">（无任务记录）</div>
     </div>
@@ -142,7 +164,16 @@ const deciding = ref<WorkerTaskView | null>(null);
   background: var(--red); color: #fff;
   font-size: 10px; line-height: 16px; text-align: center;
 }
-.tb-list { max-height: 180px; overflow-y: auto; }
+.tb-list { max-height: 240px; overflow-y: auto; }
+/* 分组：需要你 / 处理中 / 已完成（空组不渲染） */
+.tb-group { padding-bottom: 4px; }
+.tb-group-label {
+  font-size: 10.5px; color: var(--text-faint);
+  padding: 3px 4px 2px;
+}
+.tb-group-count { color: var(--text-faint); opacity: 0.8; }
+.tb-row.clickable { cursor: pointer; }
+.tb-row.open { background: var(--bg-hover); }
 .tb-row {
   display: flex; align-items: flex-start; gap: 7px;
   padding: 4px; border-radius: 6px;
