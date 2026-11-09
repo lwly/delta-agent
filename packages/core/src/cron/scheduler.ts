@@ -8,6 +8,7 @@
  *  - 本模块只做循环编排，判定与执行语义全部在 runner.runDueCronJobs。
  */
 import { runDueCronJobs, type CronExecutor, type RunDueResult } from './runner.js';
+import type { CronProjectRootRef } from './store.js';
 
 export interface StartCronSchedulerOptions {
   executor: CronExecutor;
@@ -15,10 +16,12 @@ export interface StartCronSchedulerOptions {
   tickMs?: number;
   /** 任务清单存储目录（透传 runner） */
   homeDir?: string;
-  /** 进度旁路日志 */
-  logger?: (line: string) => void;
+  /** 进度旁路日志（T6：ctx.projectId 携带任务项目归属，serve 侧转 LogEntry.projectId） */
+  logger?: (line: string, ctx?: { projectId?: string }) => void;
   /** 外部中止信号（CLI SIGINT 接入）；abort 后调度器停止 */
   signal?: AbortSignal;
+  /** T6：项目根引用（透传 runner，旧任务 cwd 前缀惰性回填 projectId）；serve 侧由宿主传入 */
+  projectRoots?: CronProjectRootRef[];
 }
 
 export interface CronSchedulerHandle {
@@ -56,6 +59,7 @@ export function startCronScheduler(opts: StartCronSchedulerOptions): CronSchedul
         homeDir: opts.homeDir,
         trigger: 'schedule',
         logger: log,
+        ...(opts.projectRoots?.length ? { projectRoots: opts.projectRoots } : {}),
       });
     } catch (e) {
       // runDueCronJobs 约定不抛错；这里兜底保证循环不死

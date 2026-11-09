@@ -24,12 +24,15 @@ export interface LogEntry {
   source: string;
   /** 会话维度日志携带（Web 过滤用） */
   sessionId?: string;
+  /** 架构收口 T6：项目维度日志携带（cron 调度行等无会话条目的项目归属；Web ?project_id= 过滤用） */
+  projectId?: string;
   message: string;
 }
 
-/** 埋点方（hub 等）依赖的最小接口（design-f41 D4，测试可伪造） */
+/** 埋点方（hub 等）依赖的最小接口（design-f41 D4，测试可伪造）。
+ *  T6：第 5 参 projectId 追加在 sessionId 之后——前 4 参顺序与语义不变，既有调用零改动。 */
 export interface RunLogSink {
-  append(level: LogLevel, source: string, message: string, sessionId?: string): void;
+  append(level: LogLevel, source: string, message: string, sessionId?: string, projectId?: string): void;
 }
 
 export interface RunLogOptions {
@@ -64,13 +67,14 @@ export class RunLog implements RunLogSink {
     if (this.dir) this.pruneOldLogs(opts.retentionDays ?? DEFAULT_RETENTION_DAYS);
   }
 
-  append(level: LogLevel, source: string, message: string, sessionId?: string): void {
+  append(level: LogLevel, source: string, message: string, sessionId?: string, projectId?: string): void {
     const entry: LogEntry = {
       ts: this.now().toISOString(),
       level,
       source,
       message,
       ...(sessionId ? { sessionId } : {}),
+      ...(projectId ? { projectId } : {}),
     };
     // ① 环形缓冲
     this.ring.push(entry);

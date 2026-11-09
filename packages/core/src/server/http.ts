@@ -49,7 +49,7 @@ import { parseDispatchArgs } from '../tools/builtin/dispatch.js';
 import type { Dispatcher } from '../router/dispatcher.js';
 import type { WorkerTaskStatus } from '../router/types.js';
 // F-41 运行日志（/api/logs 尾读 + /api/logs/stream 实时推送）
-import type { RunLog } from '../logging/logger.js';
+import type { LogEntry, RunLog } from '../logging/logger.js';
 // F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
 import { handleBrowseRoute, type BrowseDeps } from './browse-routes.js';
 // F-39 专家库路由（5 端点；分发在静态托管分支之前）
@@ -304,6 +304,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
   };
   const err = (res: http.ServerResponse, code: number, message: string): void =>
     json(res, code, { error: message });
+  // T6：日志条目的项目归属判定——projectId 直属，或 sessionId 会话归属（全部 kind，T2 口径）
+  const logsInProject = (e: LogEntry, pid: string): boolean => {
+    if (e.projectId === pid) return true;
+    return e.sessionId != null && service.getSession(e.sessionId)?.project_id === pid;
+  };
 
   const readBody = (req: http.IncomingMessage): Promise<Record<string, unknown>> =>
     new Promise((resolve) => {
@@ -384,12 +389,18 @@ export function createWebServer(opts: ServeOptions): http.Server {
       }
 
       // ── F-41 运行日志（尾读 + SSE 实时；runLog 未装配时 404）──────────────
+      // T6：?project_id= 后端过滤——命中规则：条目 projectId === pid，或条目 sessionId
+      // 属于该项目（全部 kind，含 worker/router，T2 口径）。cron 调度行（source='cron'，
+      // 无 sessionId）经 T6 携带 projectId 后在项目作用域下可见。不带参数仍全量（旧客户端兼容）。
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && !opts.runLog) {
         return err(res, 404, 'run log not configured');
       }
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && parts.length === 2 && opts.runLog) {
         const limit = Number(url.searchParams.get('limit'));
-        return json(res, 200, { items: opts.runLog.tail(Number.isFinite(limit) && limit > 0 ? limit : 200) });
+        const projectIdFilter = url.searchParams.get('project_id');
+        let items = opts.runLog.tail(Number.isFinite(limit) && limit > 0 ? limit : 200);
+        if (projectIdFilter) items = items.filter((e) => logsInProject(e, projectIdFilter));
+        return json(res, 200, { items });
       }
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'logs' && parts[2] === 'stream' && parts.length === 3 && opts.runLog) {
         res.writeHead(200, {
@@ -397,12 +408,16 @@ export function createWebServer(opts: ServeOptions): http.Server {
           'cache-control': 'no-cache',
           connection: 'keep-alive',
         });
+        // T6：订阅参数 project_id 决定本连接的过滤口径（前端切项目/切作用域时重连）
+        const streamProjectFilter = url.searchParams.get('project_id');
+        const matchFilter = (e: LogEntry): boolean =>
+          streamProjectFilter ? logsInProject(e, streamProjectFilter) : true;
         // 连入即补发当前尾部（对齐 sessions/events 的「连入先发状态帧」惯例）
         for (const e of opts.runLog.tail(200)) {
-          res.write(`data: ${JSON.stringify(e)}\n\n`);
+          if (matchFilter(e)) res.write(`data: ${JSON.stringify(e)}\n\n`);
         }
         const unsub = opts.runLog.subscribe((e) => {
-          res.write(`data: ${JSON.stringify(e)}\n\n`);
+          if (matchFilter(e)) res.write(`data: ${JSON.stringify(e)}\n\n`);
         });
         const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
         req.on('close', () => {
@@ -1636,11 +1651,18 @@ export function createWebServer(opts: ServeOptions): http.Server {
       // ── cron（F-22 定时任务面板：清单/增改删/立即运行；存储与 CLI 共用 ~/.delta/cron.json）──
       if (parts[0] === 'api' && parts[1] === 'cron') {
         const cronHome = opts.cronHomeDir;
-        const cronJobs = (): ReturnType<typeof loadCronJobs>['jobs'] => loadCronJobs(cronHome).jobs;
+        // T6：项目根引用（旧文件任务按 cwd 前缀惰性回填 projectId，仅内存；编辑时才落盘）
+        const projectRoots = (): Array<{ id: string; root: string }> =>
+          service.listProjects().map((p) => ({ id: p.id, root: p.root_path }));
+        const cronJobs = (): ReturnType<typeof loadCronJobs>['jobs'] =>
+          loadCronJobs(cronHome, { projectRoots: projectRoots() }).jobs;
         const id = parts[2];
         // GET /api/cron → 全量清单（含 warnings 供面板提示配置异常；workspaces 供表单工作空间下拉）
+        // T6：?project_id= 后端过滤（不带参数仍全量，旧客户端兼容）——前端不再依赖 cwd 前缀匹配
         if (method === 'GET' && !id) {
-          const { jobs, warnings } = loadCronJobs(cronHome);
+          const { jobs, warnings } = loadCronJobs(cronHome, { projectRoots: projectRoots() });
+          const projectIdFilter = url.searchParams.get('project_id');
+          const scoped = projectIdFilter ? jobs.filter((j) => j.projectId === projectIdFilter) : jobs;
           // F-22b 工作空间候选：serve 启动目录优先 + 既有任务 cwd 按首次出现去重（服务端一次算好）
           const workspaces: string[] = [];
           const pushWorkspace = (dir: string): void => {
@@ -1649,7 +1671,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
           };
           pushWorkspace(process.cwd());
           for (const j of jobs) pushWorkspace(j.cwd);
-          return json(res, 200, { jobs: jobs.map(cronJobToJson), warnings, workspaces });
+          return json(res, 200, { jobs: scoped.map(cronJobToJson), warnings, workspaces });
         }
         // GET /api/cron/:id → 单任务（运行中轮询用）
         if (method === 'GET' && id) {
@@ -1666,6 +1688,13 @@ export function createWebServer(opts: ServeOptions): http.Server {
           // F-22b 新字段校验（permission 枚举 / ISO 日期 / start<=end），失败 400
           const fields = parseCronPermissionAndValidity(body);
           if (!fields.ok) return err(res, 400, fields.error);
+          // T6（D4 裁决）：project_id 可不传 = 全局任务（桌面端无 cwd 概念）；传了必须存在于 projects 表
+          let projectId: string | undefined;
+          if (body.project_id != null && body.project_id !== '') {
+            const pid = String(body.project_id);
+            if (!service.getProject(pid)) return err(res, 400, `project not found: ${pid}`);
+            projectId = pid;
+          }
           // 既有口径修复：Web 端发送 snake_case max_cost_usd，服务端双读兼容 camelCase
           const maxCostRaw = body.max_cost_usd ?? body.maxCostUsd;
           try {
@@ -1681,6 +1710,7 @@ export function createWebServer(opts: ServeOptions): http.Server {
                 ...(fields.permission ? { permission: fields.permission } : {}),
                 ...(fields.validFrom ? { validFrom: fields.validFrom } : {}),
                 ...(fields.validUntil ? { validUntil: fields.validUntil } : {}),
+                ...(projectId ? { projectId } : {}),
               },
               cronHome,
             );
@@ -1690,13 +1720,25 @@ export function createWebServer(opts: ServeOptions): http.Server {
           }
         }
         if (id) {
-          // PATCH /api/cron/:id → 编辑（enabled / cron / prompt / cwd / name / maxCostUsd / permission / 有效期）
+          // PATCH /api/cron/:id → 编辑（enabled / cron / prompt / cwd / name / maxCostUsd / permission / 有效期 / project_id）
           if (method === 'PATCH') {
             const body = await readBody(req);
             // F-22b 新字段校验；null = 清除（恢复默认权限 / 长期有效）
             const fields = parseCronPermissionAndValidity(body);
             if (!fields.ok) return err(res, 400, fields.error);
             const maxCostRaw = body.max_cost_usd ?? body.maxCostUsd;
+            // T6：project_id 校验（null = 清除恢复全局任务；undefined = 不动——
+            // 旧文件任务经 loadCronJobs 惰性回填的归属随本次编辑一并落盘）
+            let projectIdPatch: string | null | undefined;
+            if (body.project_id !== undefined) {
+              if (body.project_id === null || body.project_id === '') {
+                projectIdPatch = null;
+              } else {
+                const pid = String(body.project_id);
+                if (!service.getProject(pid)) return err(res, 400, `project not found: ${pid}`);
+                projectIdPatch = pid;
+              }
+            }
             try {
               const job = updateCronJob(
                 id,
@@ -1710,8 +1752,10 @@ export function createWebServer(opts: ServeOptions): http.Server {
                   ...(fields.permission !== undefined ? { permission: fields.permission } : {}),
                   ...(fields.validFrom !== undefined ? { validFrom: fields.validFrom } : {}),
                   ...(fields.validUntil !== undefined ? { validUntil: fields.validUntil } : {}),
+                  ...(projectIdPatch !== undefined ? { projectId: projectIdPatch } : {}),
                 },
                 cronHome,
+                { projectRoots: projectRoots() },
               );
               return json(res, 200, cronJobToJson(job));
             } catch (e) {
@@ -1739,9 +1783,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
               onlyJobId: job.id,
               trigger: 'manual',
               homeDir: cronHome,
-              // F-41：调度过程行（到期/跳过/结果）落运行日志（Web 日志页可见）
+              projectRoots: projectRoots(), // T6：立即运行同样按 cwd 回填归属（运行记录/日志带 project_id）
+              // F-41：调度过程行（到期/跳过/结果）落运行日志（Web 日志页可见）；
+              // T6：ctx.projectId → LogEntry.projectId（项目作用域下可见 cron 调度行）
               ...(opts.runLog
-                ? { logger: (line: string) => opts.runLog!.append('info', 'cron', line) }
+                ? { logger: (line: string, ctx?: { projectId?: string }) => opts.runLog!.append('info', 'cron', line, undefined, ctx?.projectId) }
                 : {}),
             }).catch(() => undefined);
             return json(res, 202, { ok: true, running: true });

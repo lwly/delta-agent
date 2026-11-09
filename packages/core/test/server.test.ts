@@ -506,3 +506,31 @@ describe('架构收口 T2：sessions 端点 kind / projects session_kind 参数'
     expect(full.json).toMatchObject([expect.objectContaining({ id: projectId, session_count: 6 })]);
   });
 });
+
+describe('架构收口 T6：/api/logs project_id 后端过滤', () => {
+  it('projectId 直属条目命中；项目会话条目命中；无归属条目不命中；不带参数全量', async () => {
+    // 独立 server：注入 RunLog + 两条日志源（cron 调度行带 projectId；hub 行带会话）
+    const { RunLog } = await import('../src/logging/logger.js');
+    const runLog = new RunLog();
+    const sidA = service.createSession(projectId, { title: 'pa-chat' }).id;
+    runLog.append('info', 'cron', '⏰ 定时任务到期', undefined, projectId); // cron 调度行（无会话）
+    runLog.append('info', 'hub', '任务开始', sidA); // 会话归属行
+    runLog.append('info', 'serve', '全局启动行'); // 无归属
+
+    const hub2 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv2 = createWebServer({ service, hub: hub2, port: 0, runLog });
+    await new Promise<void>((r) => srv2.listen(0, '127.0.0.1', r));
+    const addr = srv2.address();
+    const base2 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    try {
+      const scoped = await fetch(`${base2}/api/logs?project_id=${projectId}`).then((r) => r.json() as Promise<{ items: Array<{ source: string; message: string }> }>);
+      const sources = scoped.items.map((e) => `${e.source}:${e.message}`).sort();
+      expect(sources).toEqual(['cron:⏰ 定时任务到期', 'hub:任务开始']);
+
+      const all = await fetch(`${base2}/api/logs`).then((r) => r.json() as Promise<{ items: unknown[] }>);
+      expect(all.items).toHaveLength(3);
+    } finally {
+      srv2.close();
+    }
+  });
+});

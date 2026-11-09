@@ -381,3 +381,64 @@ describe('F-22 收口：运行锁 token 与 check-and-set', () => {
     expect(loadCronJobs(home).jobs[0]!.runningSince).toBe(r1 ? t1 : t2);
   });
 });
+
+describe('架构收口 T6：projectId 惰性回填与编辑落盘', () => {
+  const ROOT = '/tmp/t6-proj-a';
+
+  function addJobAtRoot(home: string, name: string): CronJob {
+    fs.mkdirSync(`${ROOT}/sub`, { recursive: true }); // addCronJob 校验 cwd 存在
+    // cwd 落在项目根内（子目录），但任务本身无 projectId（模拟旧文件）
+    return addCronJob({ name, cron: '30 8 * * *', prompt: 'p', cwd: `${ROOT}/sub`, from: FROM }, home);
+  }
+
+  it('loadCronJobs 携带 projectRoots：旧任务按 cwd 前缀在内存回填 projectId，磁盘不变', () => {
+    const home = tmpHome();
+    const job = addJobAtRoot(home, 'backfill');
+    expect(job.projectId).toBeUndefined(); // addCronJob 不回填（写入即所见）
+    // 磁盘无 projectId（JSON 里没有该键）
+    const diskRaw = JSON.parse(fs.readFileSync(userCronConfigPath(home), 'utf8')) as { jobs: Array<Record<string, unknown>> };
+    expect('projectId' in diskRaw.jobs[0]!).toBe(false);
+
+    const { jobs, warnings } = loadCronJobs(home, { projectRoots: [{ id: 'p-a', root: ROOT }] });
+    expect(warnings).toHaveLength(0);
+    expect(jobs[0]!.projectId).toBe('p-a'); // 内存回填
+    // 磁盘仍未写（惰性）
+    const diskRaw2 = JSON.parse(fs.readFileSync(userCronConfigPath(home), 'utf8')) as { jobs: Array<Record<string, unknown>> };
+    expect('projectId' in diskRaw2.jobs[0]!).toBe(false);
+    // version 保持 1（零迁移承诺）
+    expect(diskRaw2.version).toBe(1);
+  });
+
+  it('不传 projectRoots 不回填；cwd 不匹配的根不误归属', () => {
+    const home = tmpHome();
+    addJobAtRoot(home, 'nomatch');
+    expect(loadCronJobs(home).jobs[0]!.projectId).toBeUndefined();
+    const r = loadCronJobs(home, { projectRoots: [{ id: 'p-other', root: '/tmp/t6-other' }] });
+    expect(r.jobs[0]!.projectId).toBeUndefined();
+  });
+
+  it('编辑该任务时回填值随补丁一并落盘（惰性 → 持久化）', () => {
+    const home = tmpHome();
+    addJobAtRoot(home, 'editme');
+    const roots = [{ id: 'p-a', root: ROOT }];
+    const updated = updateCronJob('editme', { prompt: 'p2' }, home, { projectRoots: roots });
+    expect(updated.projectId).toBe('p-a');
+    // 落盘确认：编辑后磁盘出现 projectId
+    const disk = loadCronJobs(home).jobs.find((j) => j.name === 'editme')!;
+    expect(disk.projectId).toBe('p-a');
+  });
+
+  it('PATCH projectId null 清除恢复全局任务；「移动目录」后归属仍以 projectId 为准', () => {
+    const home = tmpHome();
+    fs.mkdirSync(`${ROOT}/sub`, { recursive: true });
+    const elsewhere = tmpProject(); // 已存在的另一个目录（updateCronJob 校验 cwd 存在）
+    addCronJob({ name: 'pinned', cron: '30 8 * * *', prompt: 'p', cwd: `${ROOT}/sub`, from: FROM, projectId: 'p-a' }, home);
+    // cwd 移到别处：projectId 不受 cwd 前缀影响（不再因前缀失配而丢失）
+    const moved = updateCronJob('pinned', { cwd: elsewhere }, home, { projectRoots: [{ id: 'p-b', root: elsewhere }] });
+    expect(moved.projectId).toBe('p-a'); // 归属以 projectId 为准
+    // null 清除
+    const cleared = updateCronJob('pinned', { projectId: null }, home);
+    expect(cleared.projectId).toBeUndefined();
+    expect(loadCronJobs(home).jobs[0]!.projectId).toBeUndefined();
+  });
+});

@@ -26,6 +26,7 @@ import {
   releaseCronLock,
   saveCronJobs,
   type CronJob,
+  type CronProjectRootRef,
   type CronRunRecord,
 } from './store.js';
 
@@ -57,8 +58,12 @@ export interface RunDueOptions {
   trigger?: 'schedule' | 'manual';
   /** 只跑指定任务（id 或 name），且无视调度到期（手动测试用） */
   onlyJobId?: string;
-  /** 进度旁路日志（CLI 打印用；不影响主流程） */
-  logger?: (line: string) => void;
+  /** 进度旁路日志（CLI 打印用；不影响主流程）。
+   *  T6：ctx.projectId 携带当前任务归属（serve 侧落 RunLog 时转成 LogEntry.projectId，
+   *  项目作用域 /logs 由此可见 cron 调度行）；CLI 侧 1 参 logger 兼容不受影响。 */
+  logger?: (line: string, ctx?: { projectId?: string }) => void;
+  /** T6：项目根引用（旧文件任务按 cwd 前缀惰性回填 projectId，仅内存）；serve 侧由宿主传入 */
+  projectRoots?: CronProjectRootRef[];
 }
 
 export interface RunDueResult {
@@ -78,7 +83,10 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
   const trigger = opts.trigger ?? 'schedule';
   const log = opts.logger ?? (() => {});
 
-  const { jobs, warnings, corrupt } = loadCronJobs(opts.homeDir);
+  const { jobs, warnings, corrupt } = loadCronJobs(
+    opts.homeDir,
+    opts.projectRoots?.length ? { projectRoots: opts.projectRoots } : {},
+  );
   for (const w of warnings) log(`⚠ ${w.message}`);
   if (corrupt) return { ran: [], skipped: 0 };
 
@@ -124,17 +132,17 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
         fresh.nextRunAt = nextAt;
         fresh.updatedAt = now.toISOString();
       });
-      log(`⏭ ${job.name} 在有效期窗口外，跳过本次调度`);
+      log(`⏭ ${job.name} 在有效期窗口外，跳过本次调度`, { projectId: job.projectId });
       continue;
     }
     // ② 既有执行流程：锁 CAS → executor → 重读合并落盘 → 推进 nextRunAt
     const startedAt = new Date();
-    log(`⏰ 定时任务到期：${job.name}（${job.cron}）`);
+    log(`⏰ 定时任务到期：${job.name}（${job.cron}）`, { projectId: job.projectId });
     // 写锁 check-and-set 防并发（与 serve 内置调度 / daemon / 手动补跑互斥）：
     // 写锁 → 原子 rename → 重读校验 token 归属，失败即另一进程已抢到，跳过本轮
     const lockToken = formatCronLockToken(startedAt);
     if (!acquireCronLock(job.id, lockToken, opts.homeDir)) {
-      log(`⏭ ${job.name} 已被其它进程抢到运行锁，跳过本轮`);
+      log(`⏭ ${job.name} 已被其它进程抢到运行锁，跳过本轮`, { projectId: job.projectId });
       continue;
     }
 
@@ -159,6 +167,8 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
       ...(result.turns !== undefined ? { turns: result.turns } : {}),
       ...(result.error ? { error: result.error } : {}),
       ...(result.resultPreview ? { resultPreview: result.resultPreview } : {}),
+      // T6：运行记录携带任务项目归属（判据 3：项目作用域下 cron 运行行可见）
+      ...(job.projectId ? { projectId: job.projectId } : {}),
     };
     // 重读合并落盘：清锁（仅当仍归属本 token）+ 运行记录 + 调度推进一次完成，
     // 避免覆盖执行期间另一进程写入的锁或记录；合并失败（文件损坏/任务被删）兜底释放锁
@@ -176,7 +186,7 @@ export async function runDueCronJobs(opts: RunDueOptions): Promise<RunDueResult>
     ran.push(job.name);
 
     const brief = record.error ? `：${record.error.slice(0, 120)}` : `（${record.durationMs}ms）`;
-    log(`${record.status === 'completed' ? '✔' : '✘'} ${job.name} ${record.status}${brief}`);
+    log(`${record.status === 'completed' ? '✔' : '✘'} ${job.name} ${record.status}${brief}`, { projectId: job.projectId });
   }
 
   return { ran, skipped };

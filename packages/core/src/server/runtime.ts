@@ -268,7 +268,14 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
         executor: opts.cronExecutor,
         tickMs: 30_000,
         homeDir: opts.cronHomeDir,
-        logger: (l) => log(l),
+        // T6：cron 调度行 source='cron' 且携带 projectId（项目作用域 /logs 由此可见；
+        // 此前走 log() 落 source='serve'，无会话维度的调度行在项目作用域下被过滤掉）
+        logger: (line, ctx) => {
+          runLog.append('info', 'cron', line, undefined, ctx?.projectId);
+          (opts.log ?? ((l: string) => console.log(l)))(line);
+        },
+        // T6：项目根引用（旧任务 cwd 前缀惰性回填 projectId，运行记录/日志带归属）
+        projectRoots: service.listProjects().map((p) => ({ id: p.id, root: p.root_path })),
       });
       cronSchedulerActive = true;
       log('✔ cron 调度器已随 serve 托管（tick 30s，配置 ~/.delta/cron.json；可用 --cron-scheduler off 关闭）');

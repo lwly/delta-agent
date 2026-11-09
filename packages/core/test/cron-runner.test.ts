@@ -350,3 +350,47 @@ describe('F-22 收口：运行锁 check-and-set（多实例不双跑）', () => 
     expect(jobs.find((j) => j.name === 'running')!.runningSince).toBeUndefined();
   });
 });
+
+describe('架构收口 T6：运行记录与日志上下文携带 projectId', () => {
+  it('到期执行的 CronRunRecord 继承任务 projectId；日志 ctx 携带 projectId', async () => {
+    const home = tmpHome();
+    addDueJob(home, 'withproj', { projectId: 'p-a' });
+    const ctxSeen: Array<{ projectId?: string } | undefined> = [];
+    const exec: CronExecutor = async (job) => {
+      void job;
+      return okResult();
+    };
+    await runDueCronJobs({
+      executor: exec,
+      homeDir: home,
+      now: NOW,
+      logger: (line, ctx) => ctxSeen.push(ctx),
+    });
+    const job = loadCronJobs(home).jobs[0]!;
+    expect(job.lastRun!.projectId).toBe('p-a');
+    // 到期 / 结果两行日志都带归属
+    expect(ctxSeen.filter((c) => c?.projectId === 'p-a')).toHaveLength(2);
+  });
+
+  it('serve 托管路径：projectRoots 惰性回填使调度日志带归属', async () => {
+    const home = tmpHome();
+    fs.mkdirSync('/tmp/t6-runner-root/sub', { recursive: true });
+    addCronJob({ name: 'rooted', cron: '30 8 * * *', prompt: 'x', cwd: '/tmp/t6-runner-root/sub', from: new Date(2026, 8, 1) }, home);
+    const { jobs } = loadCronJobs(home);
+    jobs.find((j) => j.name === 'rooted')!.nextRunAt = '2020-01-01T00:00:00.000Z';
+    saveCronJobs(jobs, home);
+    const ctxSeen: Array<string | undefined> = [];
+    await runDueCronJobs({
+      executor: async () => okResult(),
+      homeDir: home,
+      now: NOW,
+      projectRoots: [{ id: 'p-root', root: '/tmp/t6-runner-root' }],
+      logger: (line, ctx) => {
+        void line;
+        ctxSeen.push(ctx?.projectId);
+      },
+    });
+    expect(ctxSeen.filter((p) => p === 'p-root')).toHaveLength(2);
+    expect(loadCronJobs(home).jobs[0]!.lastRun!.projectId).toBe('p-root');
+  });
+});

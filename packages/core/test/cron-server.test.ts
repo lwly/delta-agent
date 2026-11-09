@@ -253,3 +253,105 @@ describe('F-22 /api/cron 未配置执行器', () => {
     await new Promise<void>((resolve) => s2.close(() => resolve()));
   });
 });
+
+describe('架构收口 T6：/api/cron project_id 后端过滤与校验', () => {
+  let svc: SessionService;
+  let pidA: string;
+  let pidB: string;
+  let srv: ReturnType<typeof createWebServer>;
+  let baseT6: string;
+  let homeT6: string;
+
+  beforeEach(async () => {
+    homeT6 = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-cron-t6-'));
+    const tmp6 = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-cron-t6-db-'));
+    svc = new SessionService(path.join(tmp6, 'db.sqlite'));
+    pidA = svc.ensureProject('/tmp/t6-proj-a').id;
+    pidB = svc.ensureProject('/tmp/t6-proj-b').id;
+    await fs.mkdir('/tmp/t6-proj-a/sub', { recursive: true });
+    await fs.mkdir('/tmp/t6-proj-b/sub', { recursive: true });
+    const hub = new SessionHub({
+      service: svc,
+      registry: new ToolRegistry(),
+      resolveProvider: async () => new NoopProvider(),
+    });
+    srv = createWebServer({
+      service: svc,
+      hub,
+      port: 0,
+      cronHomeDir: homeT6,
+      cronExecutor: async () => ({ status: 'completed' as const, exitCode: 0 }),
+    });
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
+    const addr = srv.address();
+    baseT6 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => srv.close(() => resolve()));
+    svc.close();
+  });
+
+  const call = async (method: string, p: string, body?: unknown) => {
+    const res = await fetch(`${baseT6}${p}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, json: (await res.json().catch(() => ({}))) as Record<string, unknown> };
+  };
+
+  it('POST：project_id 存在校验（不存在 400）；合法值落盘并在 GET 单任务回显 project_id', async () => {
+    const bad = await call('POST', '/api/cron', { name: 'bad', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-a/sub', project_id: 'ghost' });
+    expect(bad.status).toBe(400);
+
+    const ok = await call('POST', '/api/cron', { name: 'bound', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-a/sub', project_id: pidA });
+    expect(ok.status).toBe(200);
+    expect(ok.json.project_id).toBe(pidA);
+    expect((loadCronJobs(homeT6).jobs[0]! as { projectId?: string }).projectId).toBe(pidA);
+
+    // D4：不传 = 全局任务（合法，无 project_id）
+    const global = await call('POST', '/api/cron', { name: 'global', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-a/sub' });
+    expect(global.status).toBe(200);
+    expect('project_id' in global.json).toBe(false);
+  });
+
+  it('GET ?project_id= 只返回归属任务；不带参数全量（兼容断言）', async () => {
+    await call('POST', '/api/cron', { name: 'in-a', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-a/sub', project_id: pidA });
+    await call('POST', '/api/cron', { name: 'in-b', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-b/sub', project_id: pidB });
+    await call('POST', '/api/cron', { name: 'free', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-a/sub' });
+
+    const scoped = await call('GET', `/api/cron?project_id=${pidA}`);
+    expect(scoped.status).toBe(200);
+    const names = (scoped.json.jobs as Array<{ name: string; project_id?: string }>).map((j) => j.name).sort();
+    expect(names).toEqual(['free', 'in-a']); // free 经 cwd 前缀惰性回填归属 pidA
+    expect((scoped.json.jobs as Array<{ project_id?: string }>).every((j) => j.project_id === pidA)).toBe(true);
+
+    const all = await call('GET', '/api/cron');
+    expect((all.json.jobs as unknown[])).toHaveLength(3);
+  });
+
+  it('旧文件任务（无 projectId）经 cwd 回填后 GET 归属正确；PATCH null 清除', async () => {
+    // 直接写旧格式文件（无 projectId 键）
+    await call('POST', '/api/cron', { name: 'legacy', cron: '30 8 * * *', prompt: 'p', cwd: '/tmp/t6-proj-b/sub' });
+    const raw = JSON.parse(await fs.readFile(path.join(homeT6, '.delta', 'cron.json'), 'utf8')) as { jobs: Array<Record<string, unknown>> };
+    delete raw.jobs[0]!.projectId;
+    await fs.writeFile(path.join(homeT6, '.delta', 'cron.json'), JSON.stringify(raw, null, 2), 'utf8');
+
+    const scoped = await call('GET', `/api/cron?project_id=${pidB}`);
+    const scopedJobs = scoped.json.jobs as Array<{ name: string; project_id?: string }>;
+    expect(scopedJobs).toHaveLength(1);
+    expect(scopedJobs[0]!.name).toBe('legacy');
+    expect(scopedJobs[0]!.project_id).toBe(pidB); // cwd 回填生效
+
+    // PATCH null = 清除恢复全局任务：磁盘上的 projectId 被移除。
+    // 注意（回填语义）：cwd 仍落在项目根内时，下一次 GET 会重新惰性回填归属——
+    // 如需彻底脱离项目归属，应同时把 cwd 改出项目根（T6 遗留确认项）
+    const patched = await call('PATCH', '/api/cron/legacy', { project_id: null });
+    expect(patched.status).toBe(200);
+    const diskAfter = JSON.parse(await fs.readFile(path.join(homeT6, '.delta', 'cron.json'), 'utf8')) as {
+      jobs: Array<Record<string, unknown>>;
+    };
+    expect(diskAfter.jobs[0]!.projectId).toBeUndefined();
+  });
+});

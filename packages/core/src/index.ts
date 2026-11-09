@@ -747,6 +747,7 @@ export {
   type LoadedCronStore,
   type AddCronJobInput,
   type CronJobPatch,
+  type CronProjectRootRef,
 } from './cron/store.js';
 export {
   runDueCronJobs,

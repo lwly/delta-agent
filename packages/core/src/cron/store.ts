@@ -30,6 +30,8 @@ export interface CronRunRecord {
   error?: string;
   /** 最终结果预览（截断存储，避免 cron.json 无限膨胀） */
   resultPreview?: string;
+  /** T6：所属项目（继承自任务 projectId；无归属任务缺省，Web 日志项目过滤用） */
+  projectId?: string;
 }
 
 /** 单条定时任务 */
@@ -52,6 +54,11 @@ export interface CronJob {
   validFrom?: string;
   /** F-22b 有效期终点（ISO）；缺省 = 长期有效（无上界）。Web 端提交「当日」时落 23:59:59 */
   validUntil?: string;
+  /**
+   * 架构收口 T6：项目归属（projects.id，非外键——cron.json 是用户级文件，项目可删）。
+   * 旧文件无此字段时按 cwd 前缀惰性回填（仅内存，编辑该任务时才落盘，见 loadCronJobs）。
+   */
+  projectId?: string;
   createdAt: string;
   updatedAt: string;
   /** 下次到期时间（ISO 字符串，本地时区语义；缺失时视为到期待计算） */
@@ -86,6 +93,21 @@ export interface LoadedCronStore {
 
 /** 运行历史保留条数 */
 export const MAX_RUN_HISTORY = 20;
+
+/** T6：项目根引用（loadCronJobs 惰性回填用；调用方从 projects 表取，store 不感知 DB） */
+export interface CronProjectRootRef {
+  id: string;
+  root: string;
+}
+
+/**
+ * T6：cwd 是否归属某项目根（根本身或其子目录）。与 web/utils/scope.ts cwdInRoot
+ * 同语义（不做 .. 归一化）；独立实现避免 core 依赖 web。
+ */
+function cwdMatchesRoot(cwd: string, root: string): boolean {
+  if (!cwd || !root) return false;
+  return cwd === root || cwd.startsWith(root.endsWith('/') ? root : `${root}/`);
+}
 
 /** 任务级权限模式枚举（Web 下拉与 API 校验共用口径） */
 export const CRON_PERMISSIONS = ['plan', 'default', 'yolo'] as const;
@@ -173,8 +195,15 @@ export function userCronConfigPath(homeDir: string = os.homedir()): string {
 /**
  * 加载任务清单。永不 throw：坏 JSON → corrupt=true + warning（ jobs 为空）；
  * 单条任务结构非法 → 跳过该条 + warning。
+ *
+ * T6 惰性回填：opts.projectRoots 提供时，旧文件任务（无 projectId）按 cwd 前缀
+ * 匹配项目根，**仅在内存对象中补 projectId**，不改写磁盘——直到该任务下一次被
+ * 编辑（updateCronJob 携带 roots 重载后落盘）才持久化。不传 roots 时不回填。
  */
-export function loadCronJobs(homeDir: string = os.homedir()): LoadedCronStore {
+export function loadCronJobs(
+  homeDir: string = os.homedir(),
+  opts: { projectRoots?: CronProjectRootRef[] } = {},
+): LoadedCronStore {
   const file = userCronConfigPath(homeDir);
   const warnings: CronStoreWarning[] = [];
   if (!fs.existsSync(file)) return { jobs: [], warnings, corrupt: false };
@@ -198,7 +227,7 @@ export function loadCronJobs(homeDir: string = os.homedir()): LoadedCronStore {
   }
   const jobs: CronJob[] = [];
   for (const item of record.jobs) {
-    const job = normalizeJob(item);
+    const job = normalizeJob(item, opts.projectRoots);
     if (job) jobs.push(job);
     else warnings.push({ message: `cron 配置中存在非法任务条目，已跳过：${JSON.stringify(item).slice(0, 120)}` });
   }
@@ -230,6 +259,8 @@ export interface AddCronJobInput {
   validFrom?: string;
   /** F-22b 有效期终点（ISO）；缺省长期有效 */
   validUntil?: string;
+  /** T6：项目归属（projects.id）；Web POST 已校验存在性后传入，CLI 手工添加可不传 */
+  projectId?: string;
   /** 从该时间起计算首次 nextRunAt；缺省 new Date() */
   from?: Date;
 }
@@ -263,6 +294,7 @@ export function addCronJob(input: AddCronJobInput, homeDir: string = os.homedir(
     ...(input.permission !== undefined ? { permission: input.permission } : {}),
     ...(input.validFrom !== undefined ? { validFrom: input.validFrom } : {}),
     ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}),
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
     createdAt: now,
     updatedAt: now,
     ...(next ? { nextRunAt: next.toISOString() } : {}),
@@ -287,15 +319,19 @@ export interface CronJobPatch {
   validFrom?: string | null;
   /** null = 清除（恢复长期有效）；undefined = 不动 */
   validUntil?: string | null;
+  /** T6：项目归属；null = 清除（恢复全局任务）；undefined = 不动 */
+  projectId?: string | null;
 }
 
-/** 更新任务的可编辑字段（name/cron/prompt/cwd/enabled/maxCostUsd/permission/有效期）；返回更新后的任务。 */
+/** 更新任务的可编辑字段（name/cron/prompt/cwd/enabled/maxCostUsd/permission/有效期/projectId）；返回更新后的任务。
+ *  T6：opts.projectRoots 传入时，旧任务（无 projectId）的 cwd 前缀回填值随本次编辑一并落盘。 */
 export function updateCronJob(
   idOrName: string,
   patch: CronJobPatch,
   homeDir: string = os.homedir(),
+  opts: { projectRoots?: CronProjectRootRef[] } = {},
 ): CronJob {
-  const { jobs, warnings, corrupt } = loadCronJobs(homeDir);
+  const { jobs, warnings, corrupt } = loadCronJobs(homeDir, opts.projectRoots ? { projectRoots: opts.projectRoots } : {});
   if (corrupt) throw new Error(`cron 配置无法解析（${warnings[0]?.message ?? ''}），请手工修复后再试`);
   const job = findCronJob(jobs, idOrName);
   if (!job) throw new Error(`未找到任务：${idOrName}`);
@@ -334,6 +370,11 @@ export function updateCronJob(
     if (patch.validUntil === null) delete job.validUntil;
     else job.validUntil = patch.validUntil;
   }
+  // T6：null = 清除（恢复全局任务）；undefined = 不动
+  if (patch.projectId !== undefined) {
+    if (patch.projectId === null) delete job.projectId;
+    else job.projectId = patch.projectId;
+  }
   job.updatedAt = new Date().toISOString();
   saveCronJobs(jobs, homeDir);
   return job;
@@ -371,6 +412,7 @@ export function cronRunToJson(r: CronRunRecord): Record<string, unknown> {
     ...(r.turns !== undefined ? { turns: r.turns } : {}),
     ...(r.error ? { error: r.error } : {}),
     ...(r.resultPreview ? { result_preview: r.resultPreview } : {}),
+    ...(r.projectId ? { project_id: r.projectId } : {}),
   };
 }
 
@@ -387,6 +429,7 @@ export function cronJobToJson(j: CronJob): Record<string, unknown> {
     ...(j.permission ? { permission: j.permission } : {}),
     ...(j.validFrom ? { valid_from: j.validFrom } : {}),
     ...(j.validUntil ? { valid_until: j.validUntil } : {}),
+    ...(j.projectId ? { project_id: j.projectId } : {}),
     created_at: j.createdAt,
     updated_at: j.updatedAt,
     ...(j.nextRunAt ? { next_run_at: j.nextRunAt } : {}),
@@ -398,8 +441,9 @@ export function cronJobToJson(j: CronJob): Record<string, unknown> {
 
 // ── 内部 ────────────────────────────────────────────────────────────────────
 
-/** 单条任务结构校验：必填字段齐全且类型正确才接受，否则返回 undefined（由调用方记 warning）。 */
-function normalizeJob(raw: unknown): CronJob | undefined {
+/** 单条任务结构校验：必填字段齐全且类型正确才接受，否则返回 undefined（由调用方记 warning）。
+ *  T6：roots 提供时对无 projectId 的任务按 cwd 前缀惰性回填（仅内存）。 */
+function normalizeJob(raw: unknown, projectRoots?: CronProjectRootRef[]): CronJob | undefined {
   if (raw === null || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   if (typeof r.id !== 'string' || typeof r.name !== 'string') return undefined;
@@ -409,7 +453,7 @@ function normalizeJob(raw: unknown): CronJob | undefined {
   const permission = (r as { permission?: unknown }).permission;
   const validFrom = (r as { validFrom?: unknown }).validFrom;
   const validUntil = (r as { validUntil?: unknown }).validUntil;
-  return {
+  const base: CronJob = {
     id: r.id,
     name: r.name,
     cron: r.cron,
@@ -426,11 +470,18 @@ function normalizeJob(raw: unknown): CronJob | undefined {
     ...(typeof validUntil === 'string' && !Number.isNaN(Date.parse(validUntil)) ? { validUntil } : {}),
     ...(typeof r.nextRunAt === 'string' ? { nextRunAt: r.nextRunAt } : {}),
     ...(typeof r.runningSince === 'string' ? { runningSince: r.runningSince } : {}),
+    ...(typeof r.projectId === 'string' && r.projectId ? { projectId: r.projectId } : {}),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     ...(isRunRecord(r.lastRun) ? { lastRun: r.lastRun } : {}),
     runs: Array.isArray(r.runs) ? r.runs.filter(isRunRecord).slice(-MAX_RUN_HISTORY) : [],
   };
+  // T6 惰性回填：仅内存补值，不改写磁盘（磁盘直到下一次编辑才更新）
+  if (!base.projectId && projectRoots?.length) {
+    const hit = projectRoots.find((p) => cwdMatchesRoot(base.cwd, p.root));
+    if (hit) base.projectId = hit.id;
+  }
+  return base;
 }
 
 /** 运行记录结构校验（宽松：核心字段存在即可）。 */
