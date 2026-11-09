@@ -413,8 +413,11 @@ export function createWebServer(opts: ServeOptions): http.Server {
       }
 
       // ── projects ──────────────────────────────────────────────────────────
+      // 架构收口 T2（B2 裁决）：?session_kind=chat → session_count 只计 chat 会话；
+      // 不带参数仍全量计数（旧客户端兼容，core 缺省口径不变——D2 裁决）。
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {
-        return json(res, 200, service.listProjects());
+        const chatOnly = url.searchParams.get('session_kind') === 'chat';
+        return json(res, 200, service.listProjects(chatOnly ? { chatOnly: true } : {}));
       }
       // F-22 收口（D3 裁决）：cron 调度器运行状态（Web 定时任务页「调度器未运行」提示的数据源）。
       // 命名红线：不可叫 /api/cron/status（会被下方 GET /api/cron/:id 当成 id 先匹配而恒 404），
@@ -997,11 +1000,19 @@ export function createWebServer(opts: ServeOptions): http.Server {
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'sessions') {
         // F-53：带 limit 走游标分页（AC-53-2）；不带保持全量旧口径（旧客户端兼容）
         const limitParam = url.searchParams.get('limit');
+        // 架构收口 T2（D2 裁决）：?kind=chat|all，缺省 all = 全量（旧客户端兼容）。
+        // core 不改缺省，过滤只由 Web 显式发起；否则 CLI --resume 等全量消费方会丢会话。
+        const kindParam = url.searchParams.get('kind');
+        const kinds = kindParam === 'chat' ? ['chat' as const] : undefined;
         if (limitParam != null) {
           const before = url.searchParams.get('before');
-          return json(res, 200, service.listSessionsPage(parts[2]!, { ...(before ? { before } : {}), limit: Number(limitParam) || 50 }));
+          return json(res, 200, service.listSessionsPage(parts[2]!, {
+            ...(before ? { before } : {}),
+            ...(kinds ? { kinds } : {}),
+            limit: Number(limitParam) || 50,
+          }));
         }
-        return json(res, 200, service.listSessions(parts[2]!));
+        return json(res, 200, service.listSessions(parts[2]!, kinds ? { kinds } : {}));
       }
       if (parts[0] === 'api' && parts[1] === 'sessions' && parts[2]) {
         const sessionId = parts[2];

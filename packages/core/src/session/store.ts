@@ -4,6 +4,9 @@ import * as fs from 'node:fs';
 import type { ChatMessage } from '@delta/shared';
 import { migrate } from './migrations.js';
 
+/** 架构收口 T2：sessions.kind 枚举（列表过滤用；kind 本身不可变，见裁决 Q1） */
+export type SessionKind = 'chat' | 'router' | 'worker';
+
 export interface SessionRow {
   id: string;
   project_id: string;
@@ -126,17 +129,26 @@ export class SessionStore {
   }
 
   /** Live projects with per-project live session counts. */
-  listProjects(): ProjectRow[] {
+  listProjects(opts: { chatOnly?: boolean } = {}): ProjectRow[] {
+    // 架构收口 T2（B2 裁决）：chatOnly=true 时 session_count 只计 chat 会话
+    // （Web 侧栏口径）；不传仍按全量计数（旧客户端兼容）。
+    const countSubquery = opts.chatOnly
+      ? `(SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL AND s.kind = 'chat') AS session_count`
+      : `(SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL) AS session_count`;
     return this.db.prepare(
       `SELECT p.id, p.name, p.root_path, p.created_at,
-              (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL) AS session_count
+              ${countSubquery}
        FROM projects p WHERE p.deleted_at IS NULL ORDER BY p.created_at ASC`,
     ).all() as ProjectRow[];
   }
 
-  getProject(id: string): ProjectRow | undefined {    return this.db.prepare(
+  getProject(id: string, opts: { chatOnly?: boolean } = {}): ProjectRow | undefined {
+    const countSubquery = opts.chatOnly
+      ? `(SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL AND s.kind = 'chat') AS session_count`
+      : `(SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL) AS session_count`;
+    return this.db.prepare(
       `SELECT p.id, p.name, p.root_path, p.created_at,
-              (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.deleted_at IS NULL) AS session_count
+              ${countSubquery}
        FROM projects p WHERE p.id = ? AND p.deleted_at IS NULL`,
     ).get(id) as ProjectRow | undefined;
   }
@@ -190,32 +202,46 @@ export class SessionStore {
       .get(id) as SessionRow | undefined;
   }
 
-  listSessions(projectId: string): SessionRow[] {
+  /**
+   * 架构收口 T2：kinds 缺省 undefined = 全量（旧客户端兼容口径，D2 裁决——
+   * core 不改缺省，过滤只由 Web 显式发起）；传数组时追加 AND kind IN (...)。
+   */
+  listSessions(projectId: string, opts: { kinds?: SessionKind[] } = {}): SessionRow[] {
+    const kindClause = opts.kinds?.length
+      ? ` AND kind IN (${opts.kinds.map(() => '?').join(',')})`
+      : '';
     return this.db
       .prepare(
-        `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`,
+        `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL${kindClause} ORDER BY updated_at DESC`,
       )
-      .all(projectId) as SessionRow[];
+      .all(...[projectId, ...(opts.kinds?.length ? opts.kinds : [])]) as SessionRow[];
   }
 
   /**
    * F-53 会话列表游标分页（updated_at DESC, id DESC 复合排序）。
    * before = 上一页末条游标（`${updated_at}|${id}`，同毫秒并列不丢页）。
+   * 架构收口 T2：kinds 过滤后 has_more / next_cursor 基于过滤后集合计算；
+   * 两条 SQL 分支的 args 顺序与占位符严格对齐。
    */
   listSessionsPage(
     projectId: string,
-    opts: { before?: string; limit: number },
+    opts: { before?: string; limit: number; kinds?: SessionKind[] },
   ): { sessions: SessionRow[]; has_more: boolean; next_cursor: string | null } {
     const limit = Math.max(1, Math.min(200, Math.floor(opts.limit)));
     const sep = opts.before?.lastIndexOf('|') ?? -1;
     const beforeAt = sep > 0 ? opts.before!.slice(0, sep) : undefined;
     const beforeId = sep > 0 ? opts.before!.slice(sep + 1) : undefined;
+    const kinds = opts.kinds?.length ? opts.kinds : undefined;
+    const kindClause = kinds ? ` AND kind IN (${kinds.map(() => '?').join(',')})` : '';
+    const kindArgs = kinds ?? [];
     const sql = beforeAt
-      ? `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL
+      ? `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL${kindClause}
          AND (updated_at < ? OR (updated_at = ? AND id < ?)) ORDER BY updated_at DESC, id DESC LIMIT ?`
-      : `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL
+      : `SELECT ${sessionColumns()} FROM sessions WHERE project_id = ? AND deleted_at IS NULL${kindClause}
          ORDER BY updated_at DESC, id DESC LIMIT ?`;
-    const args = beforeAt ? [projectId, beforeAt, beforeAt, beforeId, limit + 1] : [projectId, limit + 1];
+    const args = beforeAt
+      ? [projectId, ...kindArgs, beforeAt, beforeAt, beforeId, limit + 1]
+      : [projectId, ...kindArgs, limit + 1];
     const rows = this.db.prepare(sql).all(...args) as SessionRow[];
     const has_more = rows.length > limit;
     const sessions = has_more ? rows.slice(0, limit) : rows;

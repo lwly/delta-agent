@@ -448,3 +448,61 @@ describe('settings/budget 端点', () => {
     }
   });
 });
+
+describe('架构收口 T2：sessions 端点 kind / projects session_kind 参数', () => {
+  beforeEach(() => {
+    // 造 1 router + 3 worker + 已有 1 chat（beforeEach 建 t1）→ 判据 1 的 6 会话口径
+    service.store.setSessionKind(service.createSession(projectId, { title: 'chat-2' }).id, 'chat');
+    service.store.setSessionKind(service.createSession(projectId, { title: 'router-1' }).id, 'router');
+    for (const t of ['w1', 'w2', 'w3']) {
+      const s = service.createSession(projectId, { title: t });
+      service.store.setSessionKind(s.id, 'worker');
+      service.store.setSessionTask(s.id, `task-${t}`);
+    }
+  });
+
+  it('?kind=chat 恰好 2 条；缺省（不带 kind）全量 6 条（旧口径兼容）', async () => {
+    const filtered = await api('GET', `/api/projects/${projectId}/sessions?kind=chat`);
+    expect(filtered.status).toBe(200);
+    expect(filtered.json).toHaveLength(2);
+    expect((filtered.json as Array<{ kind: string }>).every((s) => s.kind === 'chat')).toBe(true);
+
+    const all = await api('GET', `/api/projects/${projectId}/sessions`);
+    expect(all.json).toHaveLength(6);
+    expect((all.json as Array<{ kind: string }>).map((s) => s.kind).sort()).toEqual([
+      'chat',
+      'chat',
+      'router',
+      'worker',
+      'worker',
+      'worker',
+    ]);
+  });
+
+  it('?kind=all 与缺省一致；分页 ?kind=chat&limit=1 游标基于过滤后集合不重不漏', async () => {
+    const all = await api('GET', `/api/projects/${projectId}/sessions?kind=all`);
+    expect((all.json as unknown[])).toHaveLength(6);
+
+    const page1 = await api('GET', `/api/projects/${projectId}/sessions?kind=chat&limit=1`);
+    const page1Body = page1.json as { sessions: Array<{ id: string; kind: string }>; has_more: boolean; next_cursor: string | null };
+    expect(page1Body.sessions).toHaveLength(1);
+    expect(page1Body.sessions[0]!.kind).toBe('chat');
+    expect(page1Body.has_more).toBe(true);
+
+    const page2 = await api('GET', `/api/projects/${projectId}/sessions?kind=chat&limit=1&before=${encodeURIComponent(page1Body.next_cursor!)}`);
+    const page2Body = page2.json as { sessions: Array<{ id: string; kind: string }>; has_more: boolean };
+    expect(page2Body.sessions).toHaveLength(1);
+    expect(page2Body.sessions[0]!.kind).toBe('chat');
+    expect(page2Body.sessions[0]!.id).not.toBe(page1Body.sessions[0]!.id);
+    expect(page2Body.has_more).toBe(false);
+  });
+
+  it('GET /api/projects?session_kind=chat → session_count 只计 chat（B2 裁决硬断言）；不带参数全量', async () => {
+    const chatOnly = await api('GET', '/api/projects?session_kind=chat');
+    expect(chatOnly.status).toBe(200);
+    expect(chatOnly.json).toMatchObject([expect.objectContaining({ id: projectId, session_count: 2 })]);
+
+    const full = await api('GET', '/api/projects');
+    expect(full.json).toMatchObject([expect.objectContaining({ id: projectId, session_count: 6 })]);
+  });
+});

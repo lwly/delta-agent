@@ -36,6 +36,66 @@ describe('项目列表', () => {
   });
 });
 
+describe('架构收口 T2：kind 过滤 + chatOnly 计数（D2/B2 裁决）', () => {
+  function seedKinds(): { projectId: string } {
+    const p = svc.ensureProject('/tmp/proj-kind');
+    svc.createSession(p.id, { title: 'chat-1' });
+    svc.createSession(p.id, { title: 'chat-2' });
+    svc.store.setSessionKind(svc.createSession(p.id, { title: 'router-1' }).id, 'router');
+    for (const t of ['w1', 'w2', 'w3']) {
+      svc.createWorkerSession(p.id, { title: t, model: 'm', taskId: `task-${t}` });
+    }
+    return { projectId: p.id };
+  }
+
+  it('listSessions 缺省全量（旧口径）；kinds=["chat"] 恰好 2 条', () => {
+    const { projectId } = seedKinds();
+    expect(svc.listSessions(projectId)).toHaveLength(6);
+    const chats = svc.listSessions(projectId, { kinds: ['chat'] });
+    expect(chats).toHaveLength(2);
+    expect(chats.every((s) => s.kind === 'chat')).toBe(true);
+    // router / worker 单独过滤
+    expect(svc.listSessions(projectId, { kinds: ['router'] })).toHaveLength(1);
+    expect(svc.listSessions(projectId, { kinds: ['worker'] })).toHaveLength(3);
+    // 多 kind 合取
+    expect(svc.listSessions(projectId, { kinds: ['chat', 'router'] })).toHaveLength(3);
+  });
+
+  it('listSessionsPage kinds 过滤：分页游标基于过滤后集合，不重不漏', () => {
+    const { projectId } = seedKinds();
+    // 页大小 1：首页只回 chat，游标跨过被过滤的行
+    const page1 = svc.listSessionsPage(projectId, { limit: 1, kinds: ['chat'] });
+    expect(page1.sessions).toHaveLength(1);
+    expect(page1.sessions[0]!.kind).toBe('chat');
+    expect(page1.has_more).toBe(true);
+    const page2 = svc.listSessionsPage(projectId, {
+      limit: 1,
+      kinds: ['chat'],
+      before: page1.next_cursor!,
+    });
+    expect(page2.sessions).toHaveLength(1);
+    expect(page2.sessions[0]!.kind).toBe('chat');
+    expect(page2.sessions[0]!.id).not.toBe(page1.sessions[0]!.id);
+    expect(page2.has_more).toBe(false);
+    expect(page2.next_cursor).toBeNull();
+    // 全量分页不受影响：6 条 / limit=4 → 第二页 2 条
+    const all1 = svc.listSessionsPage(projectId, { limit: 4 });
+    expect(all1.sessions).toHaveLength(4);
+    const all2 = svc.listSessionsPage(projectId, { limit: 4, before: all1.next_cursor! });
+    expect(all2.sessions).toHaveLength(2);
+  });
+
+  it('listProjects chatOnly=true：session_count 只计 chat；缺省全量（B2 裁决）', () => {
+    const { projectId } = seedKinds();
+    const all = svc.listProjects().find((p) => p.id === projectId)!;
+    expect(all.session_count).toBe(6);
+    const chatOnly = svc.listProjects({ chatOnly: true }).find((p) => p.id === projectId)!;
+    expect(chatOnly.session_count).toBe(2);
+    expect(svc.getProject(projectId, { chatOnly: true })!.session_count).toBe(2);
+    expect(svc.getProject(projectId)!.session_count).toBe(6);
+  });
+});
+
 describe('会话软删除 / 回收站 / 恢复', () => {
   it('removeSession 默认软删除：列表消失、回收站出现、restore 恢复', () => {
     const p = svc.ensureProject('/tmp/proj-a');

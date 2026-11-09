@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { FILES, userConfigDir } from '../paths.js';
 import type { ChatMessage, LLMProvider } from '@delta/shared';
-import { SessionStore, type ProjectRow, type SessionRow, type TrashItem } from './store.js';
+import { SessionStore, type ProjectRow, type SessionKind, type SessionRow, type TrashItem } from './store.js';
 import { TaskStore } from './tasks.js';
 import { MemoryStore } from './memory.js';
 import { FileChangeStore } from './changes.js';
@@ -180,14 +180,15 @@ export class SessionService {
     return this.store.getSession(id);
   }
 
-  listSessions(projectId: string): SessionRow[] {
-    return this.store.listSessions(projectId);
+  /** 架构收口 T2：kinds 缺省全量（旧客户端兼容）；过滤只由调用方显式发起（D2 裁决） */
+  listSessions(projectId: string, opts: { kinds?: SessionKind[] } = {}): SessionRow[] {
+    return this.store.listSessions(projectId, opts);
   }
 
-  /** F-53：会话列表游标分页（AC-53-2）。 */
+  /** F-53：会话列表游标分页（AC-53-2）；T2 增 kinds 过滤（分页游标基于过滤后集合）。 */
   listSessionsPage(
     projectId: string,
-    opts: { before?: string; limit: number },
+    opts: { before?: string; limit: number; kinds?: SessionKind[] },
   ): { sessions: SessionRow[]; has_more: boolean; next_cursor: string | null } {
     return this.store.listSessionsPage(projectId, opts);
   }
@@ -368,12 +369,13 @@ export class SessionService {
 
   // ── M4：项目/会话管理（§8.2 服务接口）────────────────────────────────────
 
-  listProjects(): ProjectRow[] {
-    return this.store.listProjects();
+  /** 架构收口 T2（B2 裁决）：chatOnly=true 时 session_count 只计 chat 会话；缺省全量兼容 */
+  listProjects(opts: { chatOnly?: boolean } = {}): ProjectRow[] {
+    return this.store.listProjects(opts);
   }
 
-  getProject(id: string): ProjectRow | undefined {
-    return this.store.getProject(id);
+  getProject(id: string, opts: { chatOnly?: boolean } = {}): ProjectRow | undefined {
+    return this.store.getProject(id, opts);
   }
 
   renameSession(id: string, title: string): void {
