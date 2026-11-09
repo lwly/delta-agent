@@ -1,6 +1,10 @@
 # delta-agent 下一轮路线图与任务拆解（F-41 ~ F-53）
 
 > 版本：v0.1 ｜ 日期：2026-10-28 ｜ 对应：docs/prd-f41-f53-next-round.md · docs/design-f41-f53-next-round.md
+>
+> **状态标注（架构收口 T3 回写）**：本路线图中 F-49 `jobs` 队列 / `JobsView` /
+> `CronJob.target=queue`（T2.10/T2.11）均为**规划，未实现**；F-49 编号在现行代码中
+> 指会话分享导出（`packages/core/src/session/export.ts`），勿混淆。
 
 ## 1. 里程碑划分
 

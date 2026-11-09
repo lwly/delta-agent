@@ -3,6 +3,11 @@
 > 状态：架构设计 v1 · 2026-06 · 依赖 F-22（design-f22-cron.md）· 基于 PRD docs/prd-f22b-cron-workbuddy-ui.md
 > 本文为**增量设计**，只描述变更；F-22 已交付的解析内核 / 存储 / 执行框架 / API 骨架不再重复。
 > 总监已拍板 4 项决策（有效期语义 / 工作空间候选 / version 保持 1 / yolo 二次确认）全部采纳，见各节标注。
+>
+> **路径漂移回写（架构收口 T3）**：实施时面板由弹窗改为独立页面——本文各处所写的
+> `packages/web/src/components/CronModal.vue` 现行实现为 **`packages/web/src/views/CronView.vue`**
+> （路由 `/cron`，CronModal.vue 文件已不存在；`CronJobCard.vue` / `CronJobForm.vue`
+> 仍为 components）。阅读时按此映射，不改写历史正文。
 
 ## 1. 增量方案概述
 

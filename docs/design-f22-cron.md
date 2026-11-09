@@ -17,12 +17,15 @@ check-and-set 保证，见 §5；跨机 leader election 不做）。
 ```
 ~/.delta/cron.json ──┐
                       ├─ core/cron/parse.ts      5 字段表达式解析 + nextRun（纯函数，零依赖）
-                      ├─ core/cron/store.ts      任务清单 CRUD / 原子写 / 坏 JSON 降级
+                      ├─ core/cron/store.ts      任务清单 CRUD / 原子写 / 坏 JSON 降级 / 运行锁 CAS
                       ├─ core/cron/runner.ts     到期扫描 + 执行编排（执行器注入）
                       ├─ core/cron/scheduler.ts  常驻 tick 循环（busy 保护 / signal 停止）
-cli/cron-executor.ts ─┘ 默认执行器：spawn `delta run -p <prompt> --json` 子进程
+core/cron/spawn-executor.ts ─┘ 默认执行器（自 cli/cron-executor.ts 下移）：spawn `delta run -p <prompt> --json` 子进程
 cli/cron.ts            delta cron 子命令组
 ```
+
+> 路径漂移回写（T3）：默认执行器已由早期文档所写的 `cli/cron-executor.ts` 下移至
+> `packages/core/src/cron/spawn-executor.ts`（core 依赖注入口径不变，CLI 侧 `createSpawnExecutor` 仅薄封装）。
 
 关键决策：**执行采用子进程隔离**（而非进程内复用 headless 内核）。每次运行都是全新的
 `delta run` 进程——MCP / hooks / 权限 / 预算按该项目配置完整重新装配，崩溃不波及
@@ -118,10 +121,12 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 | `DELETE /api/cron/:id` | 删除 |
 | `POST /api/cron/:id/run` | 立即运行一次：202 后台执行（trigger=manual、不推进 nextRunAt、runningSince 锁防重复）；未配执行器 400、运行中 409 |
 
-**前端**（`web/src/components/CronModal.vue`，工作台「⏰ 定时」入口，沿用 UsageModal 弹窗惯例）：
+**前端**（`web/src/views/CronView.vue` 独立页面，路由 `/cron`；早期文档所写的
+`components/CronModal.vue` 已迁移为独立页面并删除，F-22b 改版见 design-f22b 头部标注）：
 任务卡列表（状态点/表达式/下次运行/上次结果摘要）+ 新增表单 + 启停/删除（二次确认）/
-立即运行；「立即运行」提交后每 2s 轮询单任务端点，`running_since` 清除后自动展开
-运行历史；warnings 降级为顶部提示不阻塞面板。
+批量管理 + 30s 倒计时刷新；「立即运行」提交后每 2s 轮询单任务端点，`running_since`
+清除后自动展开运行历史；warnings 降级为顶部提示不阻塞面板；T1 起展示「调度器未运行」
+提示（`GET /api/status`）。
 
 ## 7. 安全与口径
 
@@ -130,8 +135,11 @@ exitCode / sessionId / costUsd / turns / error / resultPreview（截 500 字）�
 - headless 非交互语义原样继承：高危确认自动拒绝（写任务用任务级 `--max-cost` +
   项目 `.delta` 权限配置；如需放行在项目级配置 yolo，与交互运行同等审慎）；
 - 用量与费用按会话正常落库，`costUsd` 进入运行记录与 `delta usage` 口径；
-- F-33 桌面通知不接入 cron 子进程（子进程无确认卡；如需完成通知可在项目级
-  hooks.json 用 Stop 钩子实现）。
+- F-33 桌面通知与 cron **两路并存**（T3 漂移回写——本节原写「不接入」与实现矛盾）：
+  headless cron 子进程完成时已接入 `notifyDone`（`cli/src/headless-run.ts:411`，
+  经 `createDesktopNotifier` 注入）；serve 内置调度器的运行过程行落 RunLog
+  （`/api/logs` 可见）。子进程无确认卡，高危确认仍自动拒绝；项目级 hooks.json
+  的 Stop 钩子是第三条可选旁路。
 
 ## 8. 测试与验收
 

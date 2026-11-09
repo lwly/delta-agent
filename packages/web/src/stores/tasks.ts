@@ -7,6 +7,10 @@
  * - watch(projectId) 项目切换/清空即重置轮询；过期响应丢弃防串台
  * - interruptCount = 未送达 interrupt 条数 → 任务台红点（AC8 Web 侧）
  * - 裁决/取消不做乐观状态机（红线）：端点成功后才 refresh；失败时列表保持服务端真值
+ *
+ * 【术语锚点】本 store 的 Task 指的是 **委派任务（worker_tasks，Delegation）的视图
+ * 状态**（见 docs/architecture-glossary.md §4/§11-3），不是 Plan 节点任务（core
+ * session/tasks.ts）也不是会话内后台命令（bgTasks.ts）。
  */
 import { defineStore } from 'pinia';
 import { api, type InboxItem, type WorkerTaskView } from '../api/client';

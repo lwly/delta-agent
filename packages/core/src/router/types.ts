@@ -2,6 +2,10 @@
  * F-58 Router–Worker 调度层：类型定义（设计稿 §3/§7）。
  * Router = kind='router' 的普通会话（工具集收窄到 dispatch_task/task_status），
  * Worker = 每任务临时创建、终态即封存的独立会话。本目录不 import server/（依赖方向红线）。
+ *
+ * 【术语锚点】本模块的 Task 指的是 **委派任务（Delegation）**（`worker_tasks` 表，
+ * 见 docs/architecture-glossary.md §4），不是 session/tasks.ts 的 Plan 节点任务
+ * （`tasks` 表，glossary §3），也不是 cron 定时任务（glossary §5）。
  */
 
 /** 任务状态机（设计稿 §7.4）。终态 done/failed/canceled 不可回退；needs_decision 非终态、不占并发槽位。 */

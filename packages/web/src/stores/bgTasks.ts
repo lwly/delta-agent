@@ -7,6 +7,10 @@
  * - watch(sessionId) 会话切换/清空即重置轮询；切会话清空旧列表防串台
  * - expanded 仅是 UI 态（胶囊点开的面板），会话切换时收起
  * - kill 成功后立即刷新列表（不等下一轮轮询）
+ *
+ * 【术语锚点】本 store 的 Task 指的是 **会话内后台命令（BackgroundCommand，内存
+ * Map、不落库）的视图状态**（见 docs/architecture-glossary.md §6/§11-4），不是
+ * worker_tasks 委派任务（tasks.ts）也不是 cron 定时任务。
  */
 import { defineStore } from 'pinia';
 import { api, type BackgroundTaskView } from '../api/client';

@@ -3,6 +3,10 @@
 > 版本：v0.1 ｜ 日期：2026-10-28 ｜ 状态：待评审
 > 本文为下一轮 13 项需求的合并 PRD。各功能进入实施前，从本文对应章节拆出独立的 `docs/prd-fXX-*.md`（对齐 f30~f40 惯例），以拆出稿为实施权威。
 > 技术方案见 `docs/design-f41-f53-next-round.md`，排期见 `docs/roadmap-f41-f53.md`。
+>
+> **状态标注（架构收口 T3 回写）**：本文 §10 F-49 后台任务队列（`jobs` 表 / `JobsView`
+> / `CronJob.target=queue`）为**规划，未实现**；F-49 编号在现行代码中指会话分享导出
+> （`packages/core/src/session/export.ts`），勿混淆。
 
 ---
 

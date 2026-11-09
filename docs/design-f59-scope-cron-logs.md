@@ -2,6 +2,11 @@
 
 > 状态：已实施回填 v1 · 2026-11-09 ｜ 上游：prd-f59-scope-cron-logs.md
 > 零协议变更：F-22 的 cron.json（任务自带 `cwd`）与 F-41 的 LogEntry（自带 `sessionId`，D10 明确「Web 过滤用」）已携带归属字段，过滤在 Web 端完成；core / cli / shared 不动。
+>
+> **定位标注（架构收口 T3 回写）**：本特性是**前端可见性过滤，非权限边界**——
+> 数据 API 不带过滤参数，绕过 Web 前端仍可见全量。架构收口 T6 将后端化为
+> `project_id` 参数过滤（届时 `web/src/utils/scope.ts` 标注 legacy）。术语口径见
+> `docs/architecture-glossary.md` §10-①。
 
 ## 1. 方案概述
 

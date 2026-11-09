@@ -1,7 +1,9 @@
 # PRD F-54：会话内后台任务（run_in_background + Web 任务条）
 
 > 关联 issue：PASI-22。配套设计：docs/design-f54-background-tasks.md。
-> 注意区分：F-49 后台任务队列（jobs 表 + JobRunner，任务级"派活—跑—回 PR"）面向跨会话任务编排；
+> 注意区分：F-49 后台任务队列（jobs 表 + JobRunner，任务级"派活—跑—回 PR"）面向跨会话任务编排
+> **（状态：规划，未实现；F-49 编号在现行代码中指会话分享导出，见
+> docs/design-f41-f53-next-round.md 头部标注）**；
 > 本特性面向**单会话内**的长耗时命令（安装依赖 / 构建 / dev server），是工具层能力 + 会话级 UI。
 
 ## 1. 背景与问题

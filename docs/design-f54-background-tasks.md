@@ -6,7 +6,7 @@
 
 | # | 决策 | 理由与备选 |
 |---|------|-----------|
-| D54-1 | `BackgroundTaskManager` 进程级单例（serve 运行时创建，hub deps 与 http opts 共用同一实例），不落 SQLite | 会话内短生命周期状态；持久化属 F-49 范畴，本特性不重复建设。备选"复用 F-15b tasks 表"被否：那是 Plan 任务编排语义，塞命令进程会污染状态机 |
+| D54-1 | `BackgroundTaskManager` 进程级单例（serve 运行时创建，hub deps 与 http opts 共用同一实例），不落 SQLite | 会话内短生命周期状态；持久化属 F-49 范畴（**状态：规划，未实现**，见 design-f41-f53-next-round.md 头部标注），本特性不重复建设。备选"复用 F-15b tasks 表"被否：那是 Plan 任务编排语义，塞命令进程会污染状态机 |
 | D54-2 | spawn 直连 ShellAdapter（复用 `engine/shell.ts` 的 detectShell，跨平台一致），不走 `execViaBackend` / `runWithShell` | 后台任务无超时语义（runWithShell 强绑 timeoutMs + signal）；沙箱后端不支持非阻塞执行 → 明确拒绝而非降级 |
 | D54-3 | 输出环形收集保尾巴（`MAX_BG_OUTPUT = 50_000` 字符），不落数据库 | task_output 只需尾部诊断；全量落盘的日志需求由用户重定向文件解决（agent 可自主组合 `> /tmp/x.log 2>&1`） |
 | D54-4 | 与运行的 AbortSignal 解耦：本轮 abort / 会话停止不影响后台任务 | 这正是后台语义（用户停止对话 ≠ 杀 dev server）；serve dispose 时 killAll 兜底 |

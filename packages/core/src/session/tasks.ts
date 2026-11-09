@@ -3,6 +3,10 @@
  * 状态机：queued → running → completed | failed | canceled
  *         running --租约过期/心跳丢失（崩溃恢复）--> queued（孤儿重排，retries+1）
  * 口诀：状态落库 + 租约心跳，让任务崩溃后可恢复。
+ *
+ * 【术语锚点】本模块的 Task 指的是 **Plan 节点任务**（F-15b plan-execute 的
+ * `tasks` 表，见 docs/architecture-glossary.md §3），不是 worker_tasks 委派任务
+ * （router/）也不是 cron 定时任务（cron/）。
  */
 import type { Plan, TaskNode } from '@delta/shared';
 import type Database from 'better-sqlite3';
@@ -52,6 +56,10 @@ export function emptyCheckpoint(): TaskCheckpoint {
 
 /**
  * TaskStore：与 SessionStore 同库（复用其 SQLite 连接），原子状态迁移。
+ *
+ * 【术语锚点】语义更精确的别名：`PlanTaskStore`（架构收口 T3 / glossary §11）——
+ * 本类管理的是 Plan 节点任务而非 worker_tasks 委派任务；新代码优先用别名，
+ * 旧名 `TaskStore` 保留兼容（同一类型，零行为差异）。
  */
 export class TaskStore {
   constructor(private readonly db: Database.Database) {}
@@ -227,3 +235,6 @@ export class TaskStore {
       .map((r) => JSON.parse(r.node_json) as TaskNode);
   }
 }
+
+/** PlanTaskStore = TaskStore 的语义精确别名（架构收口 T3 / glossary §11：本模块是 Plan 节点任务，非 worker_tasks）。 */
+export type PlanTaskStore = TaskStore;

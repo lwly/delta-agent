@@ -3,6 +3,11 @@
 > 版本：v0.1 ｜ 日期：2026-10-28 ｜ 对应 PRD：docs/prd-f41-f53-next-round.md
 > 各功能进入实施前，从本文对应章节拆出独立的 `docs/design-fXX-*.md`（对齐 f30~f40 惯例），以拆出稿为实施权威。
 > 代码引用基于当前 agent 分支实况（包内路径均相对 `packages/`）。
+>
+> **状态标注（架构收口 T3 回写）**：本文 §9 及 roadmap 中的 F-49 `jobs` 队列 /
+> `JobsView` / `CronJob.target=queue` 均为**规划，未实现**；F-49 编号在现行代码中
+> 指会话分享导出（`packages/core/src/session/export.ts`），勿混淆。术语口径见
+> `docs/architecture-glossary.md`。
 
 ## 0. 横切结论（先读）
 
@@ -299,6 +304,10 @@ cli/src/symbols.ts              delta symbols index/status/query
 ---
 
 ## 9. F-49 后台任务队列
+
+> **状态：规划，未实现**（架构收口 T3 标注）。本节为原始规划稿；F-49 编号在现行
+> 代码中已被占用，指会话分享导出（`packages/core/src/session/export.ts`）。
+> `jobs` 表 / `JobsView` / `CronJob.target=queue` 均不存在于现行代码。
 
 ### 决策表
 
