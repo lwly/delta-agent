@@ -312,7 +312,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .tilde { color: var(--text-faint); }
 .sub-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
-  border: 1px solid var(--border); border-radius: 14px; background: transparent;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent;
   color: var(--text-dim); font-size: 12px; padding: 4px 12px; cursor: pointer;
 }
 .chip:hover { color: var(--text); }
@@ -322,7 +322,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .yolo-hint { color: var(--orange); font-size: 11.5px; }
 .yolo-confirm {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid var(--orange); background: rgba(210, 153, 34, 0.08);
+  border: 1px solid var(--orange); background: var(--orange-soft);
   border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text);
 }
 .link { border: none; background: transparent; color: var(--accent); font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }

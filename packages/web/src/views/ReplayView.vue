@@ -184,56 +184,57 @@ onMounted(loadRuns);
 </template>
 
 <style scoped>
-/* 深色主题：与工作台（prototype/index.html 设计系统）一致 */
-.page { color: var(--text); padding: 20px 28px; max-width: 1100px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
+/* 深色极简主题：与工作台一致（13px/600 标题、elevated 卡片、6px 控件圆角） */
+.page { color: var(--text); padding: 16px 24px 24px; max-width: 1100px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
 .head { display: flex; align-items: baseline; gap: 12px; }
-h2 { margin: 0; font-size: 18px; }
-.muted { color: var(--text-faint); font-size: 13px; }
-.back { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
-.back:hover { text-decoration: underline; }
+h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.muted { color: var(--text-faint); font-size: 12px; }
+.back { margin-left: auto; font-size: 12px; color: var(--text-dim); text-decoration: none; }
+.back:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .export-row { display: inline-flex; gap: 6px; }
-.export-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border, #d0d0d0); border-radius: 6px; background: transparent; cursor: pointer; }
+.export-btn { font-size: 12px; padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-dim); cursor: pointer; transition: background 0.12s ease-out, color 0.12s ease-out; }
 .export-btn:disabled { opacity: .5; cursor: default; }
-.export-btn:hover:not(:disabled) { background: var(--accent-weak, #eef4ff); }
+.export-btn:hover:not(:disabled) { background: var(--bg-elevated-2); color: var(--text); }
 .error { color: var(--red); }
 .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-top: 14px; flex: 1; min-height: 0; }
-.runs { border: 1px solid var(--border); border-radius: 10px; padding: 10px; overflow-y: auto; background: var(--bg-panel); }
-.runs h3 { margin: 0 0 8px; font-size: 14px; }
-.run { padding: 8px; border-radius: 7px; cursor: pointer; border: 1px solid transparent; }
+.runs { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; overflow-y: auto; background: var(--bg-elevated); }
+.runs h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.run { position: relative; padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; border: none; }
 .run:hover { background: var(--bg-hover); }
-.run.active { background: var(--accent-soft); border-color: rgba(88, 166, 255, 0.4); }
+.run.active { background: var(--bg-active); box-shadow: inset 2px 0 0 var(--accent); }
 .run .preview { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run .meta { color: var(--text-faint); font-size: 12px; margin-top: 2px; }
 /* F-46 分叉入口：默认隐藏，悬停任务条目时浮现（与工作台消息操作一致） */
 .run-fork {
-  margin-left: 6px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint);
-  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s;
+  margin-left: 6px; border: 1px solid var(--border); background: var(--bg-elevated-2); color: var(--text-faint);
+  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s ease-out;
 }
 .run:hover .run-fork { opacity: 1; }
-.run-fork:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
-.timeline { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; overflow-y: auto; background: var(--bg-panel); }
+.run-fork:hover { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.timeline { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; overflow-y: auto; background: var(--bg-elevated); }
 .tl-head { color: var(--text-dim); font-size: 13px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 .step { display: flex; gap: 10px; margin: 12px 0; }
 .icon { width: 28px; text-align: center; }
-.body { flex: 1; min-width: 0; }
-.when { color: var(--text-faint); font-size: 11px; display: flex; align-items: center; gap: 8px; }
+.body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.when { width: 100%; color: var(--text-faint); font-size: 11px; display: flex; align-items: center; gap: 8px; }
 /* 快捷复制：默认隐藏，悬停步骤时浮现（与工作台消息操作一致） */
 .copy-row { margin-left: auto; display: flex; gap: 6px; }
 .mini-copy {
-  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint);
-  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s;
+  border: 1px solid var(--border); background: var(--bg-elevated-2); color: var(--text-faint);
+  border-radius: 5px; font-size: 10.5px; padding: 0 6px; cursor: pointer; opacity: 0; transition: all 0.12s ease-out;
 }
 .step:hover .mini-copy { opacity: 1; }
-.mini-copy:hover { color: var(--accent); border-color: rgba(88, 166, 255, 0.4); background: var(--accent-soft); }
-.text { border-radius: 10px; padding: 8px 12px; margin-top: 2px; white-space: pre-wrap; font-size: 13px; }
-.text.user { background: var(--accent-soft); border: 1px solid rgba(88, 166, 255, 0.25); display: inline-block; }
-.text.assistant { background: var(--bg-elevated); border: 1px solid var(--border); }
-.toolcall { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--bg-elevated); }
+.mini-copy:hover { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+/* 用户消息右对齐气泡（与工作台消息区同语言），助手纯文本弱底 */
+.text { border-radius: var(--radius-lg); padding: 8px 12px; margin-top: 2px; white-space: pre-wrap; font-size: 13px; max-width: 85%; }
+.text.user { background: var(--bg-elevated-2); border: none; align-self: flex-end; }
+.text.assistant { background: transparent; border: none; padding-left: 0; }
+.toolcall { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 10px; font-size: 13px; background: var(--bg); }
 .call-head { display: flex; gap: 10px; align-items: center; }
 .call-head code { font-family: var(--mono); color: var(--accent); }
 .call-head .ok { color: var(--green); font-size: 12px; }
 .call-head .fail { color: var(--red); font-size: 12px; }
-.args, .result { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: var(--mono); overflow-x: auto; max-height: 200px; overflow-y: auto; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); }
+.args, .result { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; font-family: var(--mono); overflow-x: auto; max-height: 200px; overflow-y: auto; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--text-dim); }
 .result { max-height: 300px; }
-.empty { color: var(--text-faint); text-align: center; padding: 30px; }
+.empty { color: var(--text-faint); text-align: center; padding: 30px; font-size: 13px; }
 </style>

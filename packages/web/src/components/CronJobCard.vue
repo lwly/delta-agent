@@ -139,9 +139,10 @@ function describeRun(r: CronRunRecordView): string {
 </template>
 
 <style scoped>
-.job { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+/* 卡片：bg-elevated + 8px 圆角（深色极简规范） */
+.job { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; margin-bottom: 10px; }
 .job.disabled { opacity: 0.6; }
-.job.picked { border-color: var(--accent); }
+.job.picked { border-color: var(--accent-border); }
 .head { display: flex; align-items: center; gap: 8px; }
 .pick { accent-color: var(--accent); }
 .name { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -163,11 +164,11 @@ function describeRun(r: CronRunRecordView): string {
 .badge { color: var(--text-faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 10.5px; flex: none; }
 .countdown { color: var(--text-faint); font-size: 11.5px; flex: none; }
 .ops { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.op { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim); font-size: 11.5px; padding: 3px 9px; cursor: pointer; }
-.op:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
+.op { border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); font-size: 11.5px; padding: 3px 9px; cursor: pointer; transition: background 0.12s ease-out, color 0.12s ease-out; }
+.op:hover:not(:disabled) { color: var(--text); background: var(--bg-elevated-2); border-color: var(--border-strong); }
 .op:disabled { opacity: 0.5; cursor: default; }
 .menu-wrap { position: relative; }
-.menu { position: absolute; right: 0; top: 26px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; min-width: 96px; z-index: 5; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.menu { position: absolute; right: 0; top: 26px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 4px; display: flex; flex-direction: column; min-width: 96px; z-index: 5; box-shadow: var(--shadow-pop); }
 .menu-item { border: none; background: transparent; color: var(--text-dim); font-size: 12px; text-align: left; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
 .menu-item:hover { background: var(--bg-hover); color: var(--text); }
 .menu-item.danger { color: var(--red); }

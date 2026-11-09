@@ -35,16 +35,17 @@ function onMaskClick(e: MouseEvent) {
 .modal {
   max-width: calc(100vw - 48px); max-height: calc(100vh - 80px);
   background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 14px; padding: 20px 22px 18px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-  animation: fadeIn 0.18s ease; display: flex; flex-direction: column;
+  border-radius: var(--radius-lg); padding: 20px 22px 18px;
+  box-shadow: var(--shadow-pop);
+  animation: fadeIn 0.15s ease-out; display: flex; flex-direction: column;
 }
 .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-h3 { font-size: 15px; display: flex; align-items: center; gap: 8px; }
+h3 { font-size: 13px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; }
 .ico { font-size: 14px; }
 .x {
-  width: 26px; height: 26px; border-radius: 7px; border: none;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); border: none;
   background: transparent; color: var(--text-faint); cursor: pointer; font-size: 13px;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
 }
 .x:hover { background: var(--bg-hover); color: var(--text); }
 .body { overflow-y: auto; min-height: 0; }

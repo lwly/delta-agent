@@ -67,9 +67,7 @@ function switchTab(key: SectionKey) {
           class="nav-item"
           :class="{ on: activeTab === s.key }"
           @click="switchTab(s.key)"
-        >
-          <span class="ni-ico">{{ s.ico }}</span>{{ s.label }}
-        </button>
+        >{{ s.label }}</button>
       </nav>
 
       <!-- 右侧内容区：面板自身滚动 -->
@@ -92,23 +90,25 @@ function switchTab(key: SectionKey) {
 <style scoped>
 .settings { display: flex; flex-direction: column; height: 100vh; }
 
-/* 顶栏 */
+/* 顶栏：chrome 底色与工作台标签栏同层 */
 .head {
   display: flex; align-items: center; gap: 14px;
-  padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--bg-panel);
+  padding: 0 16px; height: 40px; min-height: 40px; border-bottom: 1px solid var(--border); background: var(--bg-chrome);
 }
+/* 返回：静默描边小钮 */
 .back {
-  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--bg-elevated); color: var(--text-dim); font-size: 12.5px;
-  text-decoration: none; transition: all 0.12s;
+  height: 28px; display: inline-flex; align-items: center;
+  padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text-dim); font-size: 12px;
+  text-decoration: none; transition: all 0.12s ease-out;
 }
-.back:hover { background: var(--bg-hover); color: var(--text); }
-.title { font-size: 15px; font-weight: 600; }
+.back:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--border-strong); }
+.title { font-size: 13px; font-weight: 600; margin: 0; }
 
 /* 左右布局主体 */
 .body { flex: 1; display: flex; min-height: 0; }
 
-/* 左侧设置导航（视觉对齐 WorkbenchView 侧栏 .nav-item） */
+/* 左侧设置导航（bg-base 与工作台侧栏同层；激活项左侧 2px 蓝条，不填充强调色底） */
 .side-nav {
   width: 220px; min-width: 220px;
   padding: 12px 10px; border-right: 1px solid var(--border);
@@ -116,18 +116,19 @@ function switchTab(key: SectionKey) {
   display: flex; flex-direction: column; gap: 2px;
 }
 .nav-item {
+  position: relative;
   display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 8px 12px; border: 1px solid transparent; border-radius: 8px;
+  padding: 7px 12px; border: none; border-radius: var(--radius-md);
   background: transparent; color: var(--text-dim); font-size: 13px;
   cursor: pointer; text-align: left;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
 }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
-.nav-item.on {
-  background: var(--accent-soft); border-color: rgba(88, 166, 255, 0.35);
-  color: var(--accent); font-weight: 600;
+.nav-item.on { background: var(--bg-active); color: var(--text); font-weight: 600; }
+.nav-item.on::before {
+  content: ''; position: absolute; left: 0; top: 7px; bottom: 7px;
+  width: 2px; border-radius: 1px; background: var(--accent);
 }
-.ni-ico { width: 20px; flex: none; text-align: center; font-size: 14px; }
 
 /* 右侧内容区：宽度自适应，滚动发生在内容区（原弹窗 body 的 overflow-y:auto 职责转移至此） */
 .content {

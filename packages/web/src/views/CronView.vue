@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="page">
     <div class="head">
-      <h2>⏰ 定时任务</h2>
+      <h2>定时任务</h2>
     </div>
     <p class="sub">
       按 cron 规则定期自动运行 agent 任务（本地时区；存储 ~/.delta/cron.json，与 CLI <code>delta cron</code> 共用）
@@ -287,38 +287,33 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 页面骨架：作为工作台（WorkbenchView）的子路由渲染在 .main（flex column、flex:1、无 padding）内，
    用 flex:1 + min-height:0 撑满主区并内部滚动（.main 高度由 .app 100vh 约束），避免双滚动条；
-   sticky 批量栏相对本滚动容器贴底。原「返回工作台」链接已移除——侧栏常驻后冗余。 */
-.page { color: var(--text); padding: 20px 28px 40px; max-width: 900px; margin: 0 auto; flex: 1; min-height: 0; overflow-y: auto; }
-.head { display: flex; align-items: baseline; gap: 12px; }
-h2 { margin: 0; font-size: 18px; }
-.sub { color: var(--text-dim); font-size: 12px; margin-bottom: 10px; }
-.sub code { font-family: var(--mono); font-size: 11px; background: var(--bg-panel); padding: 1px 5px; border-radius: 4px; }
+   sticky 批量栏相对本滚动容器贴底。原「返回工作台」链接已移除——侧栏常驻后冗余。
+   视觉规范：与深色极简工作台一致（13px/600 标题、elevated 卡片、6px 控件圆角、无 emoji 标题） */
+.page { color: var(--text); padding: 16px 24px 40px; max-width: 900px; margin: 0 auto; flex: 1; min-height: 0; overflow-y: auto; }
+h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.sub { color: var(--text-faint); font-size: 12px; margin: 4px 0 12px; }
+.sub code { font-family: var(--mono); font-size: 11px; background: var(--bg-elevated); padding: 1px 5px; border-radius: 4px; }
 .error { color: var(--red); font-size: 13px; }
 .toast { color: var(--orange); font-size: 12.5px; }
 .warn { color: var(--orange); font-size: 12px; }
 .tabs { display: flex; gap: 6px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+/* 分段筛选：bg-elevated 药丸，激活提为 bg-active（不填充强调色底） */
 .tab {
-  border: 1px solid var(--border); border-radius: 16px; background: transparent;
-  color: var(--text-dim); font-size: 12.5px; padding: 4px 14px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated);
+  color: var(--text-dim); font-size: 12px; padding: 4px 12px; cursor: pointer;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
 }
 .tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.tab.active { color: var(--text); border-color: var(--border-strong); background: var(--bg-active); }
 .grow { flex: 1; }
 .meta { color: var(--text-faint); font-size: 11.5px; }
 .meta.running { color: var(--orange); }
-.btn {
-  border: 1px solid var(--border); border-radius: 8px; background: transparent;
-  color: var(--text-dim); font-size: 12px; padding: 4px 12px; cursor: pointer; white-space: nowrap;
-}
-.btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.danger { color: var(--red); }
-.btn.danger:hover { border-color: var(--red); }
+/* 批量删除两步确认态：红底实心（主题 .btn.danger 之上加强） */
 .btn.danger.armed { background: var(--red); border-color: var(--red); color: #fff; }
-.empty { color: var(--text-faint); text-align: center; padding: 16px; font-size: 12.5px; }
+.empty { color: var(--text-faint); text-align: center; padding: 16px; font-size: 13px; }
 .batch-bar {
   position: sticky; bottom: 12px; display: flex; align-items: center; gap: 8px;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
-  padding: 8px 12px; margin-top: 8px; box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 8px 12px; margin-top: 8px; box-shadow: var(--shadow-pop);
 }
 </style>
