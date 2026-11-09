@@ -159,6 +159,7 @@ pnpm --filter @delta/cli build
 
 ## 文档
 
+- [docs/project-concepts.html](docs/project-concepts.html) —— 项目概念地图（交互式）与 [源定义](docs/project-concepts.architecture.json)
 - [docs/PRD.md](docs/PRD.md) —— 产品需求文档总览
 - [docs/technical-design.md](docs/technical-design.md) —— 总体技术设计
 - `docs/prd-f30~f40*.md` / `docs/design-f30~f40*.md` —— 各功能（容器沙箱、费用报告、模型路由、桌面通知、项目引导、CLI TUI、桌面化）的 PRD 与设计
