@@ -7,8 +7,16 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { api, type CronJobView } from '../api/client';
 import CronJobCard from '../components/CronJobCard.vue';
 import CronJobForm from '../components/CronJobForm.vue';
+import { useWorkspaceStore } from '../stores/workspace';
+import { cwdInRoot } from '../utils/scope';
 
 type Tab = 'all' | 'enabled' | 'paused';
+
+// ── F-59 项目作用域：默认只显示 cwd 落在当前项目根内（含子目录）的任务，可切「全部项目」──
+const ws = useWorkspaceStore();
+const projectScoped = ref(true);
+const activeProjectName = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.name ?? '');
+const activeRoot = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.root_path ?? '');
 
 const jobs = ref<CronJobView[]>([]);
 const workspaces = ref<string[]>([]);
@@ -36,16 +44,23 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 const anyRunning = computed(() => jobs.value.some((j) => j.running_since) || runningIds.value.size > 0);
 
+/** 项目作用域后的任务集（Tab 计数与列表同源，数字与所见一致） */
+const scopedJobs = computed(() => {
+  if (!projectScoped.value || !activeRoot.value) return jobs.value;
+  const root = activeRoot.value;
+  return jobs.value.filter((j) => cwdInRoot(j.cwd, root));
+});
+
 const counts = computed(() => ({
-  all: jobs.value.length,
-  enabled: jobs.value.filter((j) => j.enabled).length,
-  paused: jobs.value.filter((j) => !j.enabled).length,
+  all: scopedJobs.value.length,
+  enabled: scopedJobs.value.filter((j) => j.enabled).length,
+  paused: scopedJobs.value.filter((j) => !j.enabled).length,
 }));
 
 const filteredJobs = computed(() => {
-  if (tab.value === 'enabled') return jobs.value.filter((j) => j.enabled);
-  if (tab.value === 'paused') return jobs.value.filter((j) => !j.enabled);
-  return jobs.value;
+  if (tab.value === 'enabled') return scopedJobs.value.filter((j) => j.enabled);
+  if (tab.value === 'paused') return scopedJobs.value.filter((j) => !j.enabled);
+  return scopedJobs.value;
 });
 
 function showToast(msg: string): void {
@@ -235,6 +250,14 @@ onBeforeUnmount(() => {
     <p v-for="w in warnings" :key="w" class="warn">⚠ {{ w }}</p>
 
     <div class="tabs">
+      <!-- F-59 项目作用域开关：跟随左侧选中的项目（cwd 归属过滤），可切「全部项目」 -->
+      <button
+        v-if="activeRoot"
+        class="tab scope"
+        :class="{ active: projectScoped }"
+        :title="projectScoped ? `只显示 ${activeProjectName}（${activeRoot}）内的任务，点击查看全部项目` : '显示全部项目的定时任务，点击回到当前项目'"
+        @click="projectScoped = !projectScoped"
+      >{{ projectScoped ? `📁 ${activeProjectName}` : '全部项目' }}</button>
       <button class="tab" :class="{ active: tab === 'all' }" @click="tab = 'all'">全部 {{ counts.all }}</button>
       <button class="tab" :class="{ active: tab === 'enabled' }" @click="tab = 'enabled'">已启用 {{ counts.enabled }}</button>
       <button class="tab" :class="{ active: tab === 'paused' }" @click="tab = 'paused'">已暂停 {{ counts.paused }}</button>
@@ -249,7 +272,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="filteredJobs.length === 0" class="empty">
-      （{{ tab === 'all' ? '暂无定时任务——点「+ 新建」创建，或用 CLI delta cron add' : '该分组下暂无任务' }}）
+      （{{ projectScoped && activeRoot && jobs.length > 0
+        ? '当前项目暂无定时任务——点「全部项目」查看其它项目的任务'
+        : tab === 'all' ? '暂无定时任务——点「+ 新建」创建，或用 CLI delta cron add' : '该分组下暂无任务' }}）
     </div>
 
     <CronJobCard
@@ -305,6 +330,8 @@ h2 { margin: 0; font-size: 13px; font-weight: 600; }
 }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-color: var(--border-strong); background: var(--bg-active); }
+/* 作用域开关：关闭态弱化为纯筛选 chip（与级别 tab 同款），激活态不变 */
+.tab.scope { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grow { flex: 1; }
 .meta { color: var(--text-faint); font-size: 11.5px; }
 .meta.running { color: var(--orange); }
