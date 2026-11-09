@@ -5,7 +5,7 @@
 // + 裁决入口（needs_decision → TaskDecisionDialog）。
 // 外部 Worker 的 permission_mode 文案写「已请求只读」（裁决 Q5，不写「只读」）。
 // 数据源与轮询在 stores/tasks.ts（2s；watch 接线在 WorkbenchView，对齐 bgTasks 惯例）。
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { onUnmounted, ref, watch } from 'vue';
 import { useTasksStore } from '../stores/tasks';
 import type { FailureKind, WorkerTaskStatus, WorkerTaskView } from '../api/client';
 import TaskDecisionDialog from './TaskDecisionDialog.vue';
@@ -31,8 +31,6 @@ watch(
 onUnmounted(() => {
   if (ticker) clearInterval(ticker);
 });
-
-const visible = computed(() => tasks.tasks.length > 0 || tasks.inbox.length > 0);
 
 /** 状态点颜色（各状态一色；语义色仅用于运行/危险/待决策，对齐 theme.css 口径） */
 function dotCls(status: WorkerTaskStatus): string {
@@ -88,7 +86,7 @@ const deciding = ref<WorkerTaskView | null>(null);
 </script>
 
 <template>
-  <div v-if="visible" class="task-board">
+  <div class="task-board">
     <div class="tb-head">
       <span class="tb-title">任务台</span>
       <span v-if="tasks.interruptCount > 0" class="tb-red-dot" :title="`${tasks.interruptCount} 条需要你注意（待裁决 / 被终止）`">
