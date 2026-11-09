@@ -1336,6 +1336,16 @@ watch(
     <!-- ══════════ 最左图标栏 rail（48px；<768px 隐藏，入口下沉底部 dock） ══════════ -->
     <nav class="rail">
       <span class="rail__logo" title="Delta-Agent">Δ</span>
+      <!-- 工作台入口：子路由（/cron /logs）常驻后唯一的全局返回口；用 button 而非 router-link，避免父路由 `/` 在子路由下误亮 router-link-active -->
+      <button
+        class="rail__btn"
+        type="button"
+        :class="{ 'rail__btn--on': !isSubRoute }"
+        title="工作台（对话）"
+        @click="router.push('/')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.36-4.1-1L3 20l1.1-5.2A8.5 8.5 0 1 1 21 11.5Z" /></svg>
+      </button>
       <button class="rail__btn" type="button" title="会话检索（⌘K）" @click="showSearch = true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
       </button>

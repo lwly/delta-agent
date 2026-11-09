@@ -144,6 +144,7 @@ watch([levelFilter, textFilter], () => scrollToBottom());
     <div class="head">
       <h2>运行日志</h2>
       <div class="head-actions">
+        <router-link class="btn-sm" to="/">← 工作台</router-link>
         <!-- F-59 项目作用域开关：跟随左侧选中的项目（会话归属过滤） -->
         <button
           v-if="activeRoot"
@@ -209,6 +210,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 600; }
   transition: background 0.12s ease-out, color 0.12s ease-out, border-color 0.12s ease-out;
 }
 .btn-sm:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--border-strong); }
+a.btn-sm { text-decoration: none; }
 /* 作用域开关：激活态提亮（与 chip.active 同口径）；关闭态为普通 btn-sm */
 .btn-sm.scope { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-sm.scope:not(:disabled) { color: var(--text-dim); }

@@ -241,6 +241,8 @@ onBeforeUnmount(() => {
   <div class="page">
     <div class="head">
       <h2>定时任务</h2>
+      <span class="grow" />
+      <router-link class="btn" to="/">← 工作台</router-link>
     </div>
     <p class="sub">
       按 cron 规则定期自动运行 agent 任务（本地时区；存储 ~/.delta/cron.json，与 CLI <code>delta cron</code> 共用）
@@ -312,9 +314,12 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 页面骨架：作为工作台（WorkbenchView）的子路由渲染在 .main（flex column、flex:1、无 padding）内，
    用 flex:1 + min-height:0 撑满主区并内部滚动（.main 高度由 .app 100vh 约束），避免双滚动条；
-   sticky 批量栏相对本滚动容器贴底。原「返回工作台」链接已移除——侧栏常驻后冗余。
+   sticky 批量栏相对本滚动容器贴底。头部「← 工作台」返回链接保留（rail 亦有工作台入口，双保险）。
    视觉规范：与深色极简工作台一致（13px/600 标题、elevated 卡片、6px 控件圆角、无 emoji 标题） */
 .page { color: var(--text); padding: 16px 24px 40px; max-width: 900px; margin: 0 auto; flex: 1; min-height: 0; overflow-y: auto; }
+.head { display: flex; align-items: center; gap: 12px; }
+/* 返回工作台链接：对齐 .btn 规格，弱化为普通跳转（不做强调色） */
+a.btn { text-decoration: none; }
 h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .sub { color: var(--text-faint); font-size: 12px; margin: 4px 0 12px; }
 .sub code { font-family: var(--mono); font-size: 11px; background: var(--bg-elevated); padding: 1px 5px; border-radius: 4px; }
