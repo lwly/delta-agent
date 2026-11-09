@@ -19,7 +19,7 @@ import {
   writeMarketSources,
   type MarketEntry,
   type MarketSourceKind,
-} from '@delta/core';
+} from '@delta/core/market';
 
 type Kind = 'skill' | 'mcp';
 

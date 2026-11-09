@@ -18,7 +18,7 @@ import {
   encryptMcpHeaders,
   maskMcpHeaderValue,
   type McpServerConfig,
-} from '@delta/core';
+} from '@delta/core/mcp';
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
 

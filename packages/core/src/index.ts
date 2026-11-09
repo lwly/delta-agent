@@ -1,3 +1,7 @@
+/**
+ * P7 兼容主桶：新代码优先 `@delta/core/<domain>`；产物装配见 `@delta/host`。
+ * `SessionHub` 等内部模块不再依赖本桶，避免循环聚合。
+ */
 export * from '@delta/shared';
 export * from './paths.js';
 
@@ -24,66 +28,7 @@ export {
 
 export { parseSse, parseDataFrames } from './llm/sse.js';
 
-export {
-  PromptAssembler,
-  ASSEMBLER_VERSION,
-  formatPrompt,
-  renderValue,
-} from './prompt/assembler.js';
-export {
-  IdentityLayer,
-  EnvironmentLayer,
-  ProjectLayer,
-  ToolsLayer,
-  SkillsLayer,
-  MemoryLayer,
-  SessionLayer,
-  createDefaultLayers,
-} from './prompt/layers.js';
-export { applyOverrides, deepMerge, unionDedupe } from './prompt/merge.js';
-export {
-  NullMemoryProvider,
-  StaticMemoryProvider,
-  type MemoryProvider,
-  type RecallQuery,
-} from './prompt/memory-provider.js';
-export {
-  PromptBuilder,
-  DEFAULT_PROMPT_BUDGET,
-  type BuilderOptions,
-  type FinalPrompt,
-  type PromptBudget,
-  type TrimAction,
-} from './prompt/builder.js';
-export {
-  buildDebugReport,
-  formatDebugReport,
-  promptSectionsLog,
-  type DebugReportInput,
-  type PromptDebugReport,
-  type PromptSectionsLogEntry,
-} from './prompt/debug.js';
-export {
-  SplitPromptAssembler,
-  composeSystemPrompt,
-  type AssembleSplitResult,
-  type DynamicPromptResult,
-  type SplitAssemblerOptions,
-  type StaticPromptEntry,
-} from './prompt/split-assembler.js';
-export type {
-  AssembleContext,
-  AssembleResult,
-  AssembleWarning,
-  ExpertSegmentInput,
-  LayerId,
-  LayerOverride,
-  LayerValue,
-  OverrideSet,
-  PromptLayer,
-  PromptSection,
-  SystemPrompt,
-} from './prompt/types.js';
+export * from './prompt/index.js';
 export { ToolCallAccumulator, parseLenientJson } from './llm/accumulator.js';
 export { AnthropicProvider } from './llm/providers/anthropic.js';
 export { OpenAICompatibleProvider } from './llm/providers/openai-compatible.js';
@@ -279,7 +224,7 @@ export {
   type ToolCapability,
 } from './tools/permissions.js';
 
-export { runReAct, type RunContext, type PlanOptions } from './engine/react.js';
+export * from './plugins/index.js';
 // F-55 外部 CLI Agent 事件映射引擎（ExternalEvent → AgentEvent，不 import 协议解析）
 export { runExternalAgent } from './engine/external.js';
 export {
@@ -379,45 +324,7 @@ export { createEventPump, type EventPump } from './engine/pump.js';
 export { modeSegment, type EngineMode } from './engine/mode-prompt.js';
 export { detectShell, cmdAdapter, runWithShell, type ShellAdapter } from './engine/shell.js';
 
-export { SessionStore, type SessionRow, type ProjectRow, type TrashItem } from './session/store.js';
-export {
-  exportSession,
-  EXPORT_PAGE_SIZE,
-  type ExportFormat,
-  type ExportMeta,
-  type ExportOptions,
-  type ExportRedaction,
-  type ExportUsage,
-  type ExportUsageRow,
-} from './session/export.js';
-export {
-  MIGRATIONS,
-  LATEST_SCHEMA_VERSION,
-  currentSchemaVersion,
-  migrate,
-  type Migration,
-  type MigrateResult,
-} from './session/migrations.js';
-export {
-  SessionService,
-  defaultDbPath,
-  resolveProviderFromEnv,
-  resolveWorkRoot,
-  TRASH_RETENTION_DAYS,
-  type ProviderId,
-  type RunSummary,
-  type RunTimeline,
-} from './session/service.js';
-export {
-  TaskStore,
-  taskId,
-  LEASE_MS,
-  HEARTBEAT_MS,
-  emptyCheckpoint,
-  type TaskRow,
-  type TaskStatus,
-  type TaskCheckpoint,
-} from './session/tasks.js';
+export * from './session/index.js';
 export {
   authorizeRun,
   buildRunPolicy,
@@ -451,62 +358,6 @@ export {
   type CronRunMachineStatus,
   type BgTaskMachineStatus,
 } from './run-status.js';
-export {
-  FileChangeStore,
-  readSnapshot,
-  countLineDelta,
-  renderSummary,
-  MAX_SNAPSHOT_BYTES,
-  type FileChangeRow,
-  type RecordChangeInput,
-  type ChangeSummaryItem,
-  type RollbackResult,
-} from './session/changes.js';
-export {
-  MemoryStore,
-  memoryTokenize,
-  estimateTokens as estimateMemoryTokens,
-  coverageOf,
-  MEMORY_QUOTA,
-  MEMORY_DECAY_HALF_LIFE_DAYS,
-  RECALL_THRESHOLD,
-  type MemoryItem,
-  type MemoryHit,
-  type MemoryKind,
-  type MemoryStatus,
-  type SaveInput,
-  type SaveResult,
-} from './session/memory.js';
-export {
-  distillMemories,
-  createMemoryProvider,
-  type DistillResult,
-} from './session/distill.js';
-
-export {
-  SearchStore,
-  ftsTokenize,
-  buildFtsQuery,
-  makeSnippet,
-  formatSearchHits,
-  type SearchMode,
-  type SearchOptions,
-  type SearchHit,
-} from './session/search.js';
-export {
-  UsageStore,
-  normalizeRange,
-  rangeCutoff,
-  usageReportToJson,
-  type UsageRange,
-  type UsageFilter,
-  type UsageTotals,
-  type UsageProjectRow,
-  type UsageModelRow,
-  type UsageSessionRow,
-  type UsageReport,
-  type UsageReportJson,
-} from './session/usage.js';
 export {
   EmbeddingClient,
   resolveEmbedding,
@@ -559,20 +410,36 @@ export {
   type PreToolUseVerdict,
 } from './hooks/manager.js';
 
+// P7 server 领域：实现见 `@delta/core/server`（此处仅兼容再导出）
 export {
   SessionHub,
   createSkillRuntime,
+  createWebServer,
+  createServeRuntime,
+  appendRoutes,
+  assertRouteDecls,
+  matchRoute,
+  handleBrowseRoute,
+  handleExpertsRoute,
+  resolveExpertForCreate,
+  listExpertNames,
   type HubEvent,
   type SessionHubDeps,
   type SessionGitState,
   type BranchSwitchResult,
-} from './server/hub.js';
-export { createWebServer, type ServeOptions } from './server/http.js';
-export {
-  createServeRuntime,
+  type ServeOptions,
   type ServeRuntime,
   type ServeRuntimeOptions,
-} from './server/runtime.js';
+  type RouteAuth,
+  type RouteDef,
+  type RouteHandlerCtx,
+  type RouteMethod,
+  type RouteParams,
+  type BrowseDeps,
+  type BrowseRouteInput,
+  type BrowseRouteOutcome,
+  type ExpertsRouteDeps,
+} from './server/index.js';
 
 // F-41 运行日志
 export {
@@ -851,13 +718,6 @@ export {
   type ChangesResult,
   type FileDiffResult,
 } from './files/changes.js';
-export {
-  handleBrowseRoute,
-  type BrowseDeps,
-  type BrowseRouteInput,
-  type BrowseRouteOutcome,
-} from './server/browse-routes.js';
-
 // F-39 专家 / 专家团：包协议、三层发现、Prompt 段、白名单、会话绑定、成员委派
 // 详见 docs/design-f39-experts.md（core 侧零 UI 依赖，纯函数可直测）
 export {
@@ -918,12 +778,6 @@ export {
   toTeamRuntime,
 } from './experts/team.js';
 export { buildAssembleContext, type BuildAssembleContextInput } from './experts/assemble-context.js';
-export {
-  handleExpertsRoute,
-  resolveExpertForCreate,
-  listExpertNames,
-  type ExpertsRouteDeps,
-} from './server/experts-routes.js';
 export {
   expertsConfigPath,
   readExpertsConfig,

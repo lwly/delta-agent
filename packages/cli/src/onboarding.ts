@@ -15,9 +15,9 @@ import {
   memoryMdDraftPath,
   agentMdTargetPath,
   memoryMdTargetPath,
-  resolveProviderFromEnv,
-  defaultModelFor,
-} from '@delta/core';
+} from '@delta/core/onboarding';
+import { defaultModelFor } from '@delta/core/llm';
+import { resolveProviderFromEnv } from '@delta/core/session';
 
 /** status：打印状态与草案/目标文件情况（不做任何写操作）。 */
 export function onboardingStatusCommand(): void {

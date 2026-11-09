@@ -8,6 +8,150 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./plugins": {
+      "types": "./dist/plugins/index.d.ts",
+      "default": "./dist/plugins/index.js"
+    },
+    "./plugins/host": {
+      "types": "./dist/plugins/host.d.ts",
+      "default": "./dist/plugins/host.js"
+    },
+    "./plugins/engines-register": {
+      "types": "./dist/plugins/engines-register.d.ts",
+      "default": "./dist/plugins/engines-register.js"
+    },
+    "./plugins/builtin-services": {
+      "types": "./dist/plugins/builtin-services/index.d.ts",
+      "default": "./dist/plugins/builtin-services/index.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox/index.d.ts",
+      "default": "./dist/sandbox/index.js"
+    },
+    "./update": {
+      "types": "./dist/update/index.d.ts",
+      "default": "./dist/update/index.js"
+    },
+    "./onboarding": {
+      "types": "./dist/onboarding/index.d.ts",
+      "default": "./dist/onboarding/index.js"
+    },
+    "./notify": {
+      "types": "./dist/notify/index.d.ts",
+      "default": "./dist/notify/index.js"
+    },
+    "./cron": {
+      "types": "./dist/cron/index.d.ts",
+      "default": "./dist/cron/index.js"
+    },
+    "./git": {
+      "types": "./dist/git/index.d.ts",
+      "default": "./dist/git/index.js"
+    },
+    "./experts": {
+      "types": "./dist/experts/index.d.ts",
+      "default": "./dist/experts/index.js"
+    },
+    "./skills": {
+      "types": "./dist/skills/index.d.ts",
+      "default": "./dist/skills/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "default": "./dist/mcp/index.js"
+    },
+    "./market": {
+      "types": "./dist/market/index.d.ts",
+      "default": "./dist/market/index.js"
+    },
+    "./evals": {
+      "types": "./dist/evals/index.d.ts",
+      "default": "./dist/evals/index.js"
+    },
+    "./external": {
+      "types": "./dist/external/index.d.ts",
+      "default": "./dist/external/index.js"
+    },
+    "./usage": {
+      "types": "./dist/usage/index.d.ts",
+      "default": "./dist/usage/index.js"
+    },
+    "./prompt": {
+      "types": "./dist/prompt/index.d.ts",
+      "default": "./dist/prompt/index.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "default": "./dist/hooks/index.js"
+    },
+    "./logging": {
+      "types": "./dist/logging/index.d.ts",
+      "default": "./dist/logging/index.js"
+    },
+    "./diff": {
+      "types": "./dist/diff/index.d.ts",
+      "default": "./dist/diff/index.js"
+    },
+    "./media": {
+      "types": "./dist/media/index.d.ts",
+      "default": "./dist/media/index.js"
+    },
+    "./headless": {
+      "types": "./dist/headless.d.ts",
+      "default": "./dist/headless.js"
+    },
+    "./gateway": {
+      "types": "./dist/gateway/index.d.ts",
+      "default": "./dist/gateway/index.js"
+    },
+    "./search": {
+      "types": "./dist/search/index.d.ts",
+      "default": "./dist/search/index.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions/index.d.ts",
+      "default": "./dist/permissions/index.js"
+    },
+    "./budget": {
+      "types": "./dist/budget/index.d.ts",
+      "default": "./dist/budget/index.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "default": "./dist/llm/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "default": "./dist/engine/index.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "default": "./dist/context/index.js"
+    },
+    "./changes": {
+      "types": "./dist/changes/index.d.ts",
+      "default": "./dist/changes/index.js"
+    },
+    "./paths": {
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
+    "./session": {
+      "types": "./dist/session/index.d.ts",
+      "default": "./dist/session/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./server/builtin-routes": {
+      "types": "./dist/server/builtin-routes/index.d.ts",
+      "default": "./dist/server/builtin-routes/index.js"
     }
   },
   "files": [

@@ -1,6 +1,6 @@
 /**
  * SessionHub：会话运行桥（technical-design §10 关键时序）
- * - send(sessionId, input)：组装 RunContext → runReAct → 事件扇出（SSE 订阅者）+ 落库
+ * - send(sessionId, input)：组装 RunContext → resolveEngine → 事件扇出（SSE 订阅者）+ 落库
  * - 确认/提问流：confirm_request / ask 事件 + waiter，由 HTTP 端点回填决策
  * - 运行中会话注册表复用 SessionService（删除前中止语义一致）
  */
@@ -14,43 +14,36 @@ import type {
   PlanDecision,
   ToolCall,
 } from '@delta/shared';
+import type { BudgetConfig } from '@delta/shared';
+import { BudgetManager } from '../context/budget.js';
+import { defaultModelFor } from '../llm/defaults.js';
+import { PromptBuilder } from '../prompt/builder.js';
+import { SplitPromptAssembler } from '../prompt/split-assembler.js';
+import { SessionService, resolveWorkRoot } from '../session/service.js';
+import { SkillBuffer } from '../skills/buffer.js';
+import { discoverSkills } from '../skills/loader.js';
+import { ToolRegistry } from '../tools/registry.js';
+import { PermissionState, type PermissionMode } from '../tools/permissions.js';
+import type { SkillRuntime } from '../tools/types.js';
+import { GitIntegration, type GitPolicy } from '../git/repo.js';
 import {
-  BudgetManager,
-  defaultModelFor,
-  PromptBuilder,
-  SessionService,
-  SkillBuffer,
-  SplitPromptAssembler,
-  ToolRegistry,
-  PermissionState,
-  GitIntegration,
   WorktreeManager,
-  discoverSkills,
-  ExpertStore,
   branchSwitchMessage,
   worktreeOnMessage,
   worktreeOffMessage,
-  resolveWorkRoot,
-  buildAssembleContext,
-  resolveToolAllow,
-  restrictRegistry,
-  seedExpertSkills,
-  toTeamRuntime,
-  UnavailableProvider,
-  type ExpertRecord,
-  type SkillRuntime,
-  type PermissionMode,
-  type GitPolicy,
-  type Notifier,
   type BranchInfo,
-  type BudgetConfig,
-} from '../index.js';
-import { runReAct, type RunContext, type PlanOptions } from '../engine/react.js';
-import { runPlanExecute } from '../engine/plan-execute.js';
-import { runMultiAgent } from '../engine/orchestrator.js';
-import { runExternalAgent } from '../engine/external.js';
+} from '../git/worktree.js';
+import { ExpertStore } from '../experts/store.js';
+import type { ExpertRecord } from '../experts/types.js';
+import { buildAssembleContext } from '../experts/assemble-context.js';
+import { resolveToolAllow, restrictRegistry, seedExpertSkills } from '../experts/policy.js';
+import { toTeamRuntime } from '../experts/team.js';
+import { UnavailableProvider } from '../llm/placeholders.js';
+import type { Notifier } from '../notify/types.js';
 import { isExternalModel } from '../external/registry.js';
-import { modeSegment } from '../engine/mode-prompt.js';
+import '../plugins/builtins.js';
+import { type RunContext, type PlanOptions, modeSegment } from '../plugins/contract.js';
+import { resolveEngine } from '../plugins/host.js';
 import { distillMemories } from '../session/distill.js';
 import { ModelRouter, type RoutingTaskKind } from '../llm/router.js';
 import { buildRouterLedger } from '../router/ledger.js';
@@ -968,15 +961,8 @@ export class SessionHub {
 
       const history: ChatMessage[] = service.getHistory(sessionId);
 
-      // M5: 按会话模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）；
-      // F-55：外部会话走第 4 引擎 runExternalAgent（判定在先，外部会话忽略 mode——无 DAG 语义）
-      const engine = isExternal
-        ? runExternalAgent
-        : ctx.mode === 'plan-execute'
-          ? runPlanExecute
-          : ctx.mode === 'multi-agent'
-            ? runMultiAgent
-            : runReAct;
+      // 引擎槽：外部模型前缀优先，未知 mode 落 react（plugins/host.ts）
+      const engine = resolveEngine(ctx.mode, session.model);
       for await (const ev of engine(ctx, history.slice(0, -1), input, images)) {
         this.publish(sessionId, ev);
         switch (ev.type) {

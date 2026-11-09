@@ -8,7 +8,7 @@
  *
  * enable/disable 经 core 的 updateUserSandboxMode：只改 mode、写前读、tmp+rename 原子写。
  */
-import { createSandboxRuntime, updateUserSandboxMode, type SandboxStatus } from '@delta/core';
+import { createSandboxRuntime, updateUserSandboxMode, type SandboxStatus } from '@delta/core/sandbox';
 
 /** status 的人类可读格式化（R7：macOS bind mount 慢提示固定追加）。 */
 export function formatSandboxStatus(st: SandboxStatus): string {

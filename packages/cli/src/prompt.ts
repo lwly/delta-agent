@@ -10,22 +10,15 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { FILES, projectConfigDir } from '@delta/core/paths';
 import {
-  FILES,
-  projectConfigDir,
   SplitPromptAssembler,
   PromptBuilder,
-  SkillBuffer,
-  discoverSkills,
-  suggestSkill,
   buildDebugReport,
   formatDebugReport,
-  buildAssembleContext,
-  seedExpertSkills,
-  type ExpertRecord,
-  type SkillMeta,
-  type SkillRuntime,
-} from '@delta/core';
+} from '@delta/core/prompt';
+import { buildAssembleContext, seedExpertSkills, type ExpertRecord } from '@delta/core/experts';
+import { SkillBuffer, discoverSkills, suggestSkill, type SkillMeta, type SkillRuntime } from '@delta/core/skills';
 
 export interface AssemblePromptOptions {
   /** 项目根；传函数 = 每次组装时动态解析当前工作根（F-37 TUI 用法） */

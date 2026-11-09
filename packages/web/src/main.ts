@@ -1,11 +1,17 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
-import { router } from './router';
+import './builtin-views/register';
+import { createAppRouter } from './router';
+import { bootstrapPluginViews } from './plugin-views/bootstrap';
 import { initAuthToken } from './api/auth';
 import './theme.css';
 
-// 桌面宿主鉴权 token：须在任意 API 调用前读取并从地址栏清除
-initAuthToken();
+async function main(): Promise<void> {
+  initAuthToken();
+  await bootstrapPluginViews();
+  const router = createAppRouter();
+  createApp(App).use(createPinia()).use(router).mount('#app');
+}
 
-createApp(App).use(createPinia()).use(router).mount('#app');
+void main();

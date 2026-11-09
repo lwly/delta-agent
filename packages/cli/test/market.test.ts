@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { planModeRefusal, scriptsRequiringConfirmation } from '../src/market.js';
-import type { MarketEntry } from '@delta/core';
+import type { MarketEntry } from '@delta/core/market';
 
 describe('planModeRefusal（AC-52-3：plan 权限模式拒绝安装）', () => {
   it('plan 拒绝并给出改法；default / yolo / 未传允许', () => {

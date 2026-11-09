@@ -16,7 +16,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell, Tray } from 'electron';
-import { FILES, RunLog, checkForUpdate, createServeRuntime, userConfigDir, type ServeRuntime, type UpdateCheckResult } from '@delta/core';
+import { createServeRuntime, type ServeRuntime } from '@delta/host';
+import { FILES, userConfigDir } from '@delta/core/paths';
+import { RunLog } from '@delta/core/logging';
+import { checkForUpdate, type UpdateCheckResult } from '@delta/core/update';
 import { ElectronNotifier } from './electron-notifier.js';
 
 const APP_ID = 'com.delta.agent';

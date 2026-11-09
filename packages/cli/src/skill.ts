@@ -9,20 +9,17 @@
  */
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { FILES, projectConfigDir, userConfigDir } from '@delta/core/paths';
 import {
   DEFAULT_SKILL_HUB_BASE,
   SKILL_HUB_ENV,
-  CONFIG_DIR,
-  FILES,
-  projectConfigDir,
-  userConfigDir,
   discoverSkills,
   installHubSkill,
   resolveSkillHubBase,
   searchHubSkills,
   userSkillHubConfigPath,
   writeSkillHubUrl,
-} from '@delta/core';
+} from '@delta/core/skills';
 
 interface HubOpts {
   hub?: string;

@@ -18,7 +18,7 @@ import {
   startCronScheduler,
   updateCronJob,
   type CronRunRecord,
-} from '@delta/core';
+} from '@delta/core/cron';
 import { createSpawnExecutor } from './cron-executor.js';
 
 /** list：任务清单（人类可读表格；--json 输出原始结构）。 */

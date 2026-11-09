@@ -12,46 +12,26 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import {
-  autoOnboardProject,
-  BudgetManager,
-  createRunFileLogger,
-  defaultModelFor,
-  FILES,
-  GitIntegration,
-  McpManager,
-  ModelRouter,
-  PermissionState,
-  SessionService,
-  ToolRegistry,
-  buildHeadlessReport,
-  headlessExitCode,
-  loadMcpConfig,
-  prepareImages,
-  describeImage,
-  ImageError,
-  ensureExternalAdapters,
-  resolveProviderFromEnv,
-  runExternalAgent,
-  runHeadless,
-  runMultiAgent,
-  runPlanExecute,
-  runReAct,
-  authorizeRun,
-  isExternalModel,
-  modeSegment,
-  createDesktopNotifier,
-  UnavailableProvider,
-  userConfigDir,
-  type AgentEvent,
-  type ChatMessage,
-  type EngineMode,
-  type MessageImage,
-  type PreparedImage,
-  type RunContext,
-} from '@delta/core';
+import { type AgentEvent } from '@delta/shared';
+import { SessionService, resolveProviderFromEnv } from '@delta/core/session';
+import { FILES, userConfigDir } from '@delta/core/paths';
+import { modeSegment, type EngineMode, type RunContext } from '@delta/core/engine';
+import { ModelRouter, UnavailableProvider, defaultModelFor } from '@delta/core/llm';
+import { ToolRegistry } from '@delta/core/tools';
+import { resolveEngine } from '@delta/core/plugins';
+import { autoOnboardProject } from '@delta/core/onboarding';
+import { createDesktopNotifier } from '@delta/core/notify';
+import { GitIntegration } from '@delta/core/git';
+import { McpManager, loadMcpConfig } from '@delta/core/mcp';
+import { ensureExternalAdapters, isExternalModel } from '@delta/core/external';
 import { assemblePrompt } from './prompt.js';
-import { HookManager } from '@delta/core';
+import { HookManager } from '@delta/core/hooks';
+import { createRunFileLogger } from '@delta/core/logging';
+import { describeImage, ImageError, prepareImages, type PreparedImage } from '@delta/core/media';
+import { buildHeadlessReport, headlessExitCode, runHeadless } from '@delta/core/headless';
+import { authorizeRun } from '@delta/core/gateway';
+import { PermissionState } from '@delta/core/permissions';
+import { BudgetManager } from '@delta/core/budget';
 import {
   normalizeGitPolicy,
   normalizeMode,
@@ -410,7 +390,7 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   }
 
   const outcome = await runHeadless(
-    { base: baseCtx, service, engine: dispatchEngine(engineMode, isExternal), externalSignal: external.signal, onEvent },
+    { base: baseCtx, service, engine: resolveEngine(engineMode, session.model), externalSignal: external.signal, onEvent },
     task,
     images,
   );
@@ -480,19 +460,3 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
   process.exitCode = headlessExitCode(outcome.status);
 }
 
-/** M5 模式 → 引擎分发（与 TUI App 同构）；F-55 外部会话走 ExternalEvent→AgentEvent 映射引擎。 */
-function dispatchEngine(
-  mode: EngineMode,
-  isExternal: boolean,
-): (ctx: RunContext, history: ChatMessage[], input: string, images?: MessageImage[]) => AsyncIterable<AgentEvent> {
-  // 外部会话优先于模式：plan/multi 等 DAG 语义黑盒 CLI 无法承载（design-f55 §16）
-  if (isExternal) return runExternalAgent;
-  switch (mode) {
-    case 'plan-execute':
-      return runPlanExecute;
-    case 'multi-agent':
-      return runMultiAgent;
-    default:
-      return runReAct;
-  }
-}

@@ -9,13 +9,15 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { encryptKey, LATEST_SCHEMA_VERSION } from '@delta/core';
+import { encryptKey } from '@delta/core/llm';
+import { LATEST_SCHEMA_VERSION } from '@delta/core/session';
 import {
   collectDoctorChecks,
   doctorExitCode,
   MIN_NODE_VERSION,
   type DoctorCheckResult,
 } from '../src/doctor.js';
+import { sqliteNativeOk } from './setup.js';
 
 const tmpRoot = mkdtempSync(path.join(tmpdir(), 'delta-doctor-test-'));
 const home = path.join(tmpRoot, 'home');
@@ -67,7 +69,8 @@ describe('collectDoctorChecks（offline 注入 home）', () => {
   it('空 home：版本/Node/系统/配置目录全 ok 或 info，无 fail', async () => {
     const results = await collectDoctorChecks({ homeDir: home, offline: true });
     const byId = new Map(results.map((r) => [r.id, r]));
-    expect(byId.get('node')!.status).toBe('ok'); // 测试运行时 Node >= 20
+    const nodeMajor = Number(process.versions.node.split('.')[0]);
+    expect(byId.get('node')!.status).toBe(nodeMajor >= 20 ? 'ok' : 'warn');
     expect(byId.get('node')!.detail).toContain(process.versions.node);
     expect(byId.get('os')!.status).toBe('ok');
     // 配置目录不存在 → info（首次运行自动创建），不是 fail
@@ -100,12 +103,12 @@ describe('collectDoctorChecks（offline 注入 home）', () => {
     expect(models.next).toContain('delta models add');
   });
 
-  it('会话库：新建库 quick_check ok 且 schema 版本对齐 → ok', async () => {
+  it.skipIf(!sqliteNativeOk)('会话库：新建库 quick_check ok 且 schema 版本对齐 → ok', async () => {
     const h = path.join(tmpRoot, 'home-db');
     const dbPath = path.join(h, '.delta', 'agent.db');
     mkdirSync(path.dirname(dbPath), { recursive: true });
     // 先真实初始化一次库（存在 + 最新 schema），再体检
-    const { SessionStore } = await import('@delta/core');
+    const { SessionStore } = await import('@delta/core/session');
     new SessionStore(dbPath).close();
     const results = await collectDoctorChecks({ homeDir: h, dbPath, offline: true });
     const db = results.find((r) => r.id === 'db')!;
@@ -113,7 +116,7 @@ describe('collectDoctorChecks（offline 注入 home）', () => {
     expect(db.detail).toContain(`v${LATEST_SCHEMA_VERSION}`);
   });
 
-  it('会话库文件损坏 → fail 带「下一步」', async () => {
+  it.skipIf(!sqliteNativeOk)('会话库文件损坏 → fail 带「下一步」', async () => {
     const h = path.join(tmpRoot, 'home-db-broken');
     const dbPath = path.join(h, '.delta', 'agent.db');
     mkdirSync(path.dirname(dbPath), { recursive: true });

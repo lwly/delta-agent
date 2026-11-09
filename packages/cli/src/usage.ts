@@ -6,14 +6,14 @@
  *   delta usage --range 7d --project <id|名>   # 时间范围 + 项目过滤
  *   delta usage --json                         # 结构化输出（与 GET /api/usage/summary 同构，jq 可直接消费）
  */
+import { SessionService } from '@delta/core/session';
 import {
-  SessionService,
   normalizeRange,
   usageReportToJson,
   type UsageProjectRow,
   type UsageModelRow,
   type UsageSessionRow,
-} from '@delta/core';
+} from '@delta/core/usage';
 
 export interface UsageCommandOptions {
   range?: string;

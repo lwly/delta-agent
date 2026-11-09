@@ -6,6 +6,7 @@ export default defineConfig({
   cacheDir: 'node_modules/.vitest',
   test: {
     include: ['test/**/*.test.ts'],
+    setupFiles: ['./test/setup.ts'],
     environment: 'node',
     // Inline the MCP SDK so vite-node transforms it in-process instead of
     // routing through its cross-process ssr file-cache under TMPDIR, which

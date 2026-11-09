@@ -134,6 +134,35 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
 
+  # P7：macOS SEA 构建冒烟（darwin-arm64；与 windows-installer 互补）
+  sea-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build SEA binary (darwin-arm64)
+        run: pnpm sea:build
+
+      - name: Smoke (SEA binary)
+        run: |
+          ./build/delta-darwin-arm64 --version
+          export DELTA_HOME="${RUNNER_TEMP}/delta-home"
+          mkdir -p "$DELTA_HOME"
+          export HOME="$DELTA_HOME"
+          ./build/delta-darwin-arm64 doctor --offline
+
   # F-51 AC-51-3：Windows SEA 构建 → NSIS 安装器工件 + 安装冒烟（--version / doctor --offline）
   windows-installer:
     runs-on: windows-latest
@@ -153,7 +182,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build SEA binary (win32-x64)
-        run: node scripts/build-sea.mjs
+        run: pnpm sea:build
 
       - name: Smoke (SEA binary)
         shell: pwsh

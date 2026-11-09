@@ -5,7 +5,7 @@
  * - prune：清理孤儿（目录已不存在的注册项）
  * git 调用全部走 core WorktreeManager（G3 单点沉淀），CLI 仅做展示壳。
  */
-import { WorktreeManager } from '@delta/core';
+import { WorktreeManager } from '@delta/core/git';
 
 /** delta worktree list */
 export async function worktreeListCommand(): Promise<void> {

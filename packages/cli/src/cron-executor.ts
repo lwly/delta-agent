@@ -12,7 +12,7 @@ import {
   createSpawnExecutor as createCoreSpawnExecutor,
   DEFAULT_CRON_TIMEOUT_MS,
   type CronExecutor,
-} from '@delta/core';
+} from '@delta/core/cron';
 
 export { buildCronSpawnArgs, DEFAULT_CRON_TIMEOUT_MS };
 

@@ -102,6 +102,23 @@ export function matchRoute(defs: RouteDef[], method: string, parts: string[]): R
 }
 
 /**
+ * 把插件路由并进表。同 method + pattern 视为重复，启动期抛错。
+ */
+export function appendRoutes(table: RouteDef[], extra: readonly RouteDef[]): void {
+  const seen = new Set(table.map((def) => routeKey(def)));
+  for (const def of extra) {
+    const key = routeKey(def);
+    if (seen.has(key)) throw new Error(`route already registered: ${def.method} ${def.pattern}`);
+    seen.add(key);
+    table.push(def);
+  }
+}
+
+function routeKey(def: RouteDef): string {
+  return `${def.method} ${def.pattern.replace(/^\//, '')}`;
+}
+
+/**
  * 启动断言（判据 2）：任何路由未声明 auth → createWebServer() 构造时直接抛错。
  * 这保证「权限标注不散落」是编译/启动期可测约束，而非代码评审约定。
  */

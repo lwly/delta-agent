@@ -94,6 +94,8 @@ if (!SUPPORTED.has(target)) {
 }
 const OUT = path.join(BUILD, IS_WIN ? `delta-${target}.exe` : `delta-${target}`);
 
+run('node', ['scripts/verify-node.mjs']);
+
 // ── 1. 编译 ─────────────────────────────────────────────────────────────
 if (!skipBuild) {
   log('1/7', '编译全部子包');
@@ -131,6 +133,12 @@ const required = [
   // F-39：内置专家/技能包必须随运行时分发（packages/core 的 files 字段已纳入，缺失 = files 回退）
   path.join(RUNTIME, 'node_modules/@delta/core/experts/software-dev-team/expert.json'),
   path.join(RUNTIME, 'node_modules/@delta/core/skills/commit-review/SKILL.md'),
+  // P7：宿主门面 + 内置贡献包须随 CLI deploy 闭包（与 desktop / createServeRuntime 一致）
+  path.join(RUNTIME, 'node_modules/@delta/host/dist/index.js'),
+  path.join(RUNTIME, 'node_modules/@delta/plugin-builtin-engines/dist/index.js'),
+  path.join(RUNTIME, 'node_modules/@delta/plugin-builtin-services/dist/index.js'),
+  path.join(RUNTIME, 'node_modules/@delta/plugin-builtin-routes/dist/index.js'),
+  path.join(RUNTIME, 'node_modules/@delta/plugin-builtin-views/dist/index.js'),
 ];
 for (const file of required) {
   if (!fs.existsSync(file)) {

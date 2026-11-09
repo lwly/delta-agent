@@ -10,34 +10,30 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { SessionService, resolveProviderFromEnv } from '@delta/core/session';
+import { CONFIG_DIR, FILES, projectConfigDir } from '@delta/core/paths';
+import { resolveEngine } from '@delta/core/plugins';
+import { defaultModelFor } from '@delta/core/llm';
+import { ToolRegistry } from '@delta/core/tools';
+import { runHeadless } from '@delta/core/headless';
+import { PermissionState } from '@delta/core/permissions';
+import { BudgetManager } from '@delta/core/budget';
+import { HookManager } from '@delta/core/hooks';
 import {
   BUILTIN_SUITE,
-  BudgetManager,
-  CONFIG_DIR,
-  FILES,
-  projectConfigDir,
-  HookManager,
-  McpManager,
-  PermissionState,
-  SessionService,
-  ToolRegistry,
   compareBaseline,
-  defaultModelFor,
   filterCases,
   loadBaseline,
   loadEvalSuite,
-  loadMcpConfig,
   renderComparison,
   renderComparisonText,
   renderSuiteRun,
-  resolveProviderFromEnv,
   runEvalSuite,
-  runReAct,
-  runHeadless,
   saveBaseline,
   type EvalSuite,
   type SuiteRun,
-} from '@delta/core';
+} from '@delta/core/evals';
+import { McpManager, loadMcpConfig } from '@delta/core/mcp';
 import { assemblePrompt } from './prompt.js';
 import { normalizeMode, parseAllowTools, resolvePermissionMode } from './shared.js';
 
@@ -275,7 +271,7 @@ async function runSuiteForProvider(
               tasks: service.tasks,
             },
             service,
-            engine: runReAct,
+            engine: resolveEngine('react'),
           },
           task,
         );

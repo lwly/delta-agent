@@ -1,7 +1,7 @@
 /**
  * serve 运行时组装工厂（多宿主复用）。
  *
- * 从 @delta/cli 的 `delta serve` action（原 cli/src/index.ts）下移的组装编排：
+ * 从 CLI `delta serve` action（原 cli/src/index.ts）下移的组装编排；宿主入口 `@delta/host`：
  * SessionService + ToolRegistry/MCP + SkillRuntime + HookManager + SessionHub +
  * ProviderManager + createWebServer 的统一装配点。
  *
@@ -17,10 +17,8 @@ import { HookManager } from '../hooks/manager.js';
 import { McpManager, loadMcpConfig } from '../mcp/client.js';
 import { ModelRouter } from '../llm/router.js';
 import { ProviderManager } from '../llm/manager.js';
-import { defaultModelFor } from '../llm/defaults.js';
 import { SessionService, resolveProviderFromEnv } from '../session/service.js';
 import { ToolRegistry } from '../tools/registry.js';
-import { autoOnboardProject } from '../onboarding/index.js';
 import { createSkillRuntime, SessionHub } from './hub.js';
 import { readBudgetSetting } from './settings-store.js';
 import { createWebServer } from './http.js';
@@ -38,13 +36,12 @@ import { noopNotifier, type Notifier } from '../notify/types.js';
 import { RunLog } from '../logging/logger.js';
 import { userConfigDir, FILES } from '../paths.js';
 import type { CronExecutor } from '../cron/runner.js';
-import { startCronScheduler, type CronSchedulerHandle } from '../cron/scheduler.js';
+import { createPluginHost } from '../plugins/activate.js';
+import { createServiceHost } from '../plugins/services.js';
+import { loadPlugins } from '../plugins/loader.js';
+import type { RouteDef } from './routes.js';
 
-/**
- * cron 调度器进程内单例守卫：同一进程内只允许一个 serve runtime 托管调度器，
- * 防止二次 createServeRuntime 产生第二个 timer 双触发。dispose 时复位。
- */
-let cronSchedulerActive = false;
+import { registerBuiltinServices } from '../plugins/builtin-services/index.js';
 
 export interface ServeRuntimeOptions {
   /** 监听端口（缺省 7900；CLI serve 托管形态默认 7902 / --dev 形态 7900，桌面宿主传 0 随机避让） */
@@ -89,6 +86,13 @@ export interface ServeRuntimeOptions {
    * 测试 / 桌面宿主可注入隔离目录的实例；不落盘场景传 `new RunLog()`。
    */
   runLog?: RunLog;
+  /** 插件路由，转交给 createWebServer（见 ServeOptions.routes） */
+  routes?: RouteDef[];
+  /**
+   * 用户插件目录。缺省不扫描（测试与未显式开启的宿主不碰真实 ~/.delta/plugins）。
+   * CLI serve 传入用户级与项目级目录以及信任文件。
+   */
+  plugins?: { userDir?: string; projectDir?: string; trustFile: string };
 }
 
 export interface ServeRuntime {
@@ -116,6 +120,23 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   };
   const projectRoot = opts.projectRoot;
 
+  const pluginRoutes: RouteDef[] = [];
+  const services = createServiceHost();
+  const pluginHost = createPluginHost({
+    routes: pluginRoutes,
+    registerService: (service) => services.add(service),
+  });
+
+  let pluginsSnapshot: import('../plugins/loader.js').LoadedPlugin[] = [];
+  if (opts.plugins) {
+    pluginsSnapshot = await loadPlugins(opts.plugins, { host: pluginHost });
+    for (const plugin of pluginsSnapshot) {
+      if (plugin.status === 'loaded') log(`✔ plugin ${plugin.id} 已加载（${plugin.layer}）`);
+      else if (plugin.status === 'error') logError(`✘ plugin ${plugin.id} 已跳过：${plugin.error ?? '加载失败'}`);
+      else if (plugin.status === 'untrusted') log(`ℹ plugin ${plugin.id} 未信任，未加载`);
+    }
+  }
+
   const service = new SessionService(opts.dbPath);
   const registry = new ToolRegistry();
   const mcp = new McpManager();
@@ -131,26 +152,10 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
   }
 
   // 默认项目注册（仅 CLI 形态；desktop 由 UI 通过 POST /api/projects 创建）
+  let onboardingTarget: { projectRoot: string } | undefined;
   if (opts.registerProject && projectRoot) {
     const project = service.ensureProject(projectRoot);
-    // F-34 项目 onboarding：新注册项目后台自动扫描生成静态记忆草案（fire-and-forget，失败不影响服务）
-    if (project.created) {
-      void (async () => {
-        try {
-          const onboardingProvider = await resolveProviderFromEnv(undefined);
-          const r = await autoOnboardProject({
-            projectRoot,
-            provider: onboardingProvider,
-            model: process.env.DELTA_MODEL || defaultModelFor(onboardingProvider.id),
-          });
-          if (r && !r.skipped) {
-            log(`✔ onboarding 草案已生成：${r.agentMdDraftPath}（用 \`delta onboarding confirm\` 采纳）`);
-          }
-        } catch {
-          logError('⚠ onboarding 扫描失败（可稍后手动运行 `delta onboarding run`）');
-        }
-      })();
-    }
+    if (project.created) onboardingTarget = { projectRoot };
   }
 
   const skillRoot = projectRoot ?? process.cwd();
@@ -297,49 +302,22 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
       lastEventAt: (sessionId) => workerEventClock.get(sessionId) ?? null,
     },
   });
-  // 启动收敛（§18-1）：重启后 running/preflight 且进程已不在的行标 failed(runtime)
-  dispatcher.bootstrap();
-  // 60s tick（§9/§10.1）：派发泵补槽 → 看门狗 L1/L2 → 逐 Router 播报；unref 不阻止进程退出
-  const dispatchTimer = setInterval(() => {
-    void dispatcher?.tick().catch(() => undefined);
-  }, 60_000);
-  dispatchTimer.unref?.();
-
-  // ── F-22 收口（架构收口方案 T1 / D1 裁决）：serve 托管 cron 调度器 ──────────
-  // 判据：只开 `delta serve` 即自动触发定时任务（不再要求单独跑 `delta cron daemon`）。
-  // auto = 仅当宿主同时注入了 cronExecutor 时随 serve 启停一个进程内调度器；
-  // desktop 未注入 executor 时自动不启用；off / DELTA_CRON_DISABLE_AUTOTICK=1 显式关闭。
   const cronEnvDisabled = process.env.DELTA_CRON_DISABLE_AUTOTICK === '1';
   const cronMode: 'auto' | 'off' = opts.cronScheduler === 'off' || cronEnvDisabled ? 'off' : 'auto';
-  let cronScheduler: CronSchedulerHandle | undefined;
-  if (cronMode === 'auto') {
-    if (!opts.cronExecutor) {
-      log('ℹ cron 调度器未启用：宿主未注入 cronExecutor（仅提供「立即运行」以外的面板能力）');
-    } else if (cronSchedulerActive) {
-      // 进程内单例守卫：二次 createServeRuntime 不重复起 timer（防同进程双实例双触发）
-      log('ℹ cron 调度器已由本进程另一个 serve runtime 托管，跳过重复启动');
-    } else {
-      cronScheduler = startCronScheduler({
-        executor: opts.cronExecutor,
-        tickMs: 30_000,
-        homeDir: opts.cronHomeDir,
-        // T6：cron 调度行 source='cron' 且携带 projectId（项目作用域 /logs 由此可见；
-        // 此前走 log() 落 source='serve'，无会话维度的调度行在项目作用域下被过滤掉）
-        logger: (line, ctx) => {
-          runLog.append('info', 'cron', line, undefined, ctx?.projectId);
-          (opts.log ?? ((l: string) => console.log(l)))(line);
-        },
-        // T6：项目根引用（旧任务 cwd 前缀惰性回填 projectId，运行记录/日志带归属）
-        projectRoots: service.listProjects().map((p) => ({ id: p.id, root: p.root_path })),
-        // T7：内置调度的 cron 配额账本（判据 1：与 chat/worker 同一判定实现）
-        quota: quotaStore,
-      });
-      cronSchedulerActive = true;
-      log('✔ cron 调度器已随 serve 托管（tick 30s，配置 ~/.delta/cron.json；可用 --cron-scheduler off 关闭）');
-    }
-  } else {
-    log('ℹ cron 调度器已关闭（--cron-scheduler off 或 DELTA_CRON_DISABLE_AUTOTICK=1）；定时任务需由 `delta cron daemon` 触发');
-  }
+  const { cronStatus } = registerBuiltinServices(services, {
+    log,
+    logError,
+    runLog,
+    dispatcher,
+    cronMode,
+    ...(opts.cronExecutor !== undefined ? { cronExecutor: opts.cronExecutor } : {}),
+    ...(opts.cronHomeDir !== undefined ? { cronHomeDir: opts.cronHomeDir } : {}),
+    projectRoots: service.listProjects().map((p) => ({ id: p.id, root: p.root_path })),
+    quota: quotaStore,
+    notify: opts.notify ?? noopNotifier,
+    ...(onboardingTarget !== undefined ? { onboarding: onboardingTarget } : {}),
+  });
+  services.start();
 
   const providers = new ProviderManager(); // 设置中心共用同一存储（~/.delta/models.json）
   // F-47 Web 内置终端：node-pty 为 optionalDependencies——缺失/不可用时 status 端点明确降级
@@ -347,6 +325,7 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     resolveWorkRoot: (sessionId) => hub.resolveSessionWorkRoot(sessionId),
   });
   const port = opts.port ?? 7900;
+  const mergedRoutes = [...pluginRoutes, ...(opts.routes ?? [])];
   const server = createWebServer({
     service,
     hub,
@@ -356,13 +335,15 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     ...(opts.cronExecutor !== undefined ? { cronExecutor: opts.cronExecutor } : {}),
     ...(opts.authToken !== undefined ? { authToken: opts.authToken } : {}),
     ...(opts.cronHomeDir !== undefined ? { cronHomeDir: opts.cronHomeDir } : {}),
+    ...(mergedRoutes.length > 0 ? { routes: mergedRoutes } : {}),
     runLog, // F-41：/api/logs 端点 + cron 立即运行调度行落盘
     terminal, // F-47：/api/terminal/* + /ws/terminal
     backgroundTasks, // F-54：/api/sessions/:id/background-tasks
     quota: quotaStore, // T7：cron 立即运行的配额账本（与 hub/调度器共用同一实例）
     dispatcher, // F-58：6 个调度端点（缺省时端点 501）
     // F-22 收口（D3 裁决）：GET /api/status 的 cron 调度器状态数据源
-    cronStatus: () => ({ running: cronScheduler?.isRunning() ?? false, mode: cronMode }),
+    cronStatus,
+    ...(opts.plugins ? { pluginsSnapshot } : {}),
   });
 
   let disposed = false;
@@ -381,10 +362,8 @@ export async function createServeRuntime(opts: ServeRuntimeOptions = {}): Promis
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
-      // F-22 收口：先停 cron 调度器（不再扫描/触发任务），再走既有收尾
-      if (cronScheduler?.stop()) cronSchedulerActive = false;
-      cronScheduler = undefined;
-      clearInterval(dispatchTimer); // F-58：先停 60s tick，不再派发/播报
+      // 先停 cron，再停 dispatcher tick（ServiceHost.stop 按登记相反顺序）
+      services.stop();
       // 先停 accepting（server.close 立即返回、等待存量连接收尾）：全杀子进程的
       // 数百 ms 窗口内不再接受新的运行，避免新外部 run 不在全杀快照而成孤儿
       server.close();

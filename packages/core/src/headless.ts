@@ -102,7 +102,7 @@ export interface HeadlessDeps {
   /** 已构建好的运行上下文；confirm/askUser/planApproval/signal 由 runHeadless 覆盖 */
   base: RunContext;
   service: HeadlessService;
-  /** 引擎分发器（CLI 按模式传 runReAct/runPlanExecute/runMultiAgent；测试传伪造） */
+  /** 引擎分发器（CLI 经 resolveEngine；测试可传伪造） */
   engine: (ctx: RunContext, history: ChatMessage[], input: string, images?: MessageImage[]) => AsyncIterable<AgentEvent>;
   /** 外部中断信号（CLI SIGINT / SDK 调用方控制）；缺省仅内部 AbortController */
   externalSignal?: AbortSignal;

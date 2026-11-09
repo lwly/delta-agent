@@ -1,0 +1,36 @@
+{
+  "name": "@delta/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./builtins": {
+      "types": "./dist/builtins.d.ts",
+      "default": "./dist/builtins.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@delta/core": "workspace:*",
+    "@delta/plugin-builtin-engines": "workspace:*",
+    "@delta/plugin-builtin-routes": "workspace:*",
+    "@delta/plugin-builtin-services": "workspace:*",
+    "@delta/plugin-builtin-views": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

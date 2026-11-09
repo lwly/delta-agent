@@ -14,7 +14,8 @@ import { fail, type AgentTool, type ToolContext } from '../types.js';
 import { BudgetManager, DEFAULT_SESSION_BUDGET } from '../../context/budget.js';
 import { PermissionState } from '../permissions.js';
 import { RestrictedRegistry } from '../../engine/roles.js';
-import { runReAct, type RunContext } from '../../engine/react.js';
+import type { RunContext } from '../../plugins/contract.js';
+import { resolveEngine } from '../../plugins/host.js';
 import {
   buildMemberSystemPrompt,
   delegationPrefix,
@@ -218,7 +219,7 @@ export const taskTool: AgentTool = {
     let error: string | undefined;
 
     try {
-      for await (const ev of runReAct(childCtx, [], prompt)) {
+      for await (const ev of resolveEngine('react')(childCtx, [], prompt)) {
         const e = ev as AgentEvent;
         switch (e.type) {
           case 'turn_start':

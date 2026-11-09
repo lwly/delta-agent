@@ -505,6 +505,12 @@ export interface CronListResponse {
 }
 
 /** GET /api/status 响应（架构收口 T1 / D3：cron 调度器运行状态，定时任务页提示数据源） */
+/** GET /api/plugins（P6 用户插件 + 视图元数据） */
+export interface PluginsResponse {
+  plugins: Array<{ id: string; layer: string; status: string; error?: string }>;
+  views: Array<{ name: string; path: string; slot: 'workbench-child' | 'top'; module: string }>;
+}
+
 export interface StatusResponse {
   cron: {
     running: boolean;
@@ -1178,6 +1184,7 @@ export const api = {
       `/api/cron${opts?.projectId ? `?project_id=${encodeURIComponent(opts.projectId)}` : ''}`,
     ),
   status: () => request<StatusResponse>('GET', '/api/status'),
+  plugins: () => request<PluginsResponse>('GET', '/api/plugins'),
   cronGet: (id: string) => request<CronJobView>('GET', `/api/cron/${id}`),
   cronAdd: (input: CronJobInput) => request<CronJobView>('POST', '/api/cron', input),
   cronUpdate: (id: string, patch: CronJobPatch) => request<CronJobView>('PATCH', `/api/cron/${id}`, patch),

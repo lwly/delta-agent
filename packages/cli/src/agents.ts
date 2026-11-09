@@ -16,7 +16,7 @@ import {
   resolveAgentModels,
   setExternalAgentModel,
   upsertManualEntry,
-} from '@delta/core';
+} from '@delta/core/external';
 
 function fail(msg: string): never {
   console.error(`[delta] ${msg}`);

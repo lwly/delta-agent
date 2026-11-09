@@ -11,18 +11,35 @@
  * - E2E_WEB_DIST      Vue 构建产物目录（缺省 packages/web/dist）
  * - E2E_KEEP          设为 1 时退出前不删临时目录（排障用）
  */
-import { SessionService, SessionHub, createWebServer, ToolRegistry, ScriptedFakeProvider } from '../packages/core/dist/index.js';
+import {
+  SessionService,
+  SessionHub,
+  createWebServer,
+  ToolRegistry,
+  ScriptedFakeProvider,
+  createPluginHost,
+  loadPlugins,
+} from '../packages/core/dist/index.js';
 import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installE2ePluginFixture } from './e2e-plugin-fixture.mjs';
 
 const port = Number(process.env.E2E_PORT ?? 7790);
 const webDist = process.env.E2E_WEB_DIST
   ?? fileURLToPath(new URL('../packages/web/dist/', import.meta.url));
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'yz-e2e-serve-'));
+const e2eConfigHome = path.join(tmp, 'config-home');
+await fsp.mkdir(e2eConfigHome, { recursive: true });
+const { userDir: pluginUserDir, trustFile: pluginTrustFile } = await installE2ePluginFixture(e2eConfigHome);
+const pluginRoutes = [];
+const pluginsSnapshot = await loadPlugins(
+  { userDir: pluginUserDir, trustFile: pluginTrustFile },
+  { host: createPluginHost({ routes: pluginRoutes }) },
+);
 // 项目根：带 note.txt（假 Provider 的 read_file 调用目标）与 README（prompt 组装）
 const projectRoot = path.join(tmp, 'proj');
 await fsp.mkdir(projectRoot);
@@ -63,6 +80,8 @@ const server = createWebServer({
   // 防止 e2e 的安装类用例（F-52 市场面板）污染真实 ~/.delta
   skillsHomeDir: tmp,
   configHomeDir: tmp,
+  ...(pluginRoutes.length > 0 ? { routes: pluginRoutes } : {}),
+  pluginsSnapshot,
 });
 await new Promise((r) => server.listen(port, '127.0.0.1', r));
 console.log(`E2E_SERVE_READY ${port}`);

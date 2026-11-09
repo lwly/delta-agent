@@ -16,7 +16,7 @@ import {
   sanitizeBody,
   type Notifier,
   type NotifyConfig,
-} from '@delta/core';
+} from '@delta/core/notify';
 
 /** 通知标题统一前缀（与 DesktopNotifier 一致） */
 const NOTIFY_TITLE = 'delta-agent';

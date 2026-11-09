@@ -13,22 +13,11 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  APP_VERSION,
-  FILES,
-  KNOWN_AGENTS,
-  LATEST_SCHEMA_VERSION,
-  ProviderManager,
-  SessionStore,
-  checkLoginState,
-  compareVersions,
-  decryptKeyDetailed,
-  detectChannel,
-  ensureExternalAdapters,
-  externalEnvPathName,
-  loadModelsFile,
-  userConfigDir,
-} from '@delta/core';
+import { LATEST_SCHEMA_VERSION, SessionStore } from '@delta/core/session';
+import { APP_VERSION, FILES, userConfigDir } from '@delta/core/paths';
+import { ProviderManager, decryptKeyDetailed, loadModelsFile } from '@delta/core/llm';
+import { KNOWN_AGENTS, checkLoginState, ensureExternalAdapters, externalEnvPathName } from '@delta/core/external';
+import { compareVersions, detectChannel } from '@delta/core/update';
 
 /** 最低要求的 Node 主版本（与根 package.json engines / README 环境要求一致） */
 export const MIN_NODE_VERSION = '20.0.0';

@@ -84,6 +84,33 @@
 3. `packages/web/src/stores/tasks.ts` —— **Web 任务台 store**：消费 worker_tasks（§4）的视图状态。
 4. `packages/web/src/stores/bgTasks.ts` —— **后台命令 store**：消费 §6 内存后台任务的视图状态。
 
+## 12. Plugin（插件）
+
+- **是什么**：`~/.delta/plugins/<dir>` 或 `<project>/.delta/plugins/<dir>` 里的一个目录，根上有 `delta.plugin.json`（`id`，可选 `main`）。`delta serve` / `delta` 启动时调用 `loadPlugins`（传 `PluginHost` 则执行 `activate` / `default(host)`）：项目级同 id 覆盖用户级；`main` 必须落在插件目录内。
+- **不是什么**：不是 Skill / Expert（提示词包，见 §8 与 SkillLayer）；不是 MCP Server（外部进程工具）；不是内置引擎源码搬到独立包。没有 `main` 的目录只作为内容包被发现，不执行。
+- **代码位置**：加载 `packages/core/src/plugins/loader.ts:27`（`loadPlugins`）；激活 `plugins/activate.ts`（`createPluginHost` / 六槽）；信任 `plugins/loader.ts:127`（`readTrusted`）；目录名 `paths.ts`（`FILES.pluginsDir` / `FILES.pluginTrust`）。CLI `cli-plugins.ts`；serve 闭包 `server/runtime.ts`（P6）；发现端点 `GET /api/plugins`（system 组）。
+
+## 13. Contribution（贡献）
+
+- **是什么**：插件（或内置模块）向宿主登记的一种能力。当前六槽：引擎、工具、服务、路由、命令、视图。内置实现仍在原模块，启动时登记进槽；重复 id / 工具名 / 路由 method+pattern / 命令名 / 视图名直接抛错。
+- **不是什么**：不是替换宿主。会话库、`RunGateway`、`ToolRegistry.executeOne`、工作台壳与旧地址重定向仍由宿主持有。路由处理函数由调用方闭合 `service` / `hub` 后经 `ServeOptions.routes` 并入，不从贡献槽里拿数据库连接。
+- **代码位置**：子路径 `@delta/core/plugins`（`packages/core/src/plugins/index.ts`）。**P7**：`@delta/host` 聚合内置贡献 workspace 包 + `createServeRuntime`；`@delta/core/server` 收口 `SessionHub` / `routes` / 只读 API 路由；主桶仅兼容再导出。真机验收：`e2e/cli/e2e-plugins.mjs`（CLI 命令 + serve）、Web `e2e/web/plugins-api.spec.ts` + `plugin-views/bootstrap.ts`。
+  - 引擎 `packages/core/src/plugins/host.ts`（`registerEngine` / `resolveEngine`）；登记 `plugins/engines-register.ts`，内置包 `packages/plugins/builtin-engines`（P2）；hub 经 `plugins/contract` 分派
+  - 服务 `packages/core/src/plugins/services.ts`（`createServiceHost`）；内置 `plugins/builtin-services/`（P3），包 `packages/plugins/builtin-services`
+  - HTTP 路由 `packages/core/src/server/routes.ts`（`RouteDef` / `matchRoute` / `assertRouteDecls`）；内置表 `server/builtin-routes/`（P4：cron、worker-tasks、sessions、system），包 `packages/plugins/builtin-routes`
+  - CLI 命令 `packages/cli/src/commands.ts`（`registerCommand`）；内置树 `cli/builtin-commands/mount.ts`（P4），包 `packages/plugins/builtin-commands`
+  - 工具 `packages/core/src/plugins/tools.ts:20`（`registerTool`）
+  - 服务 `packages/core/src/plugins/services.ts:17`（`createServiceHost`）
+  - 路由 `packages/core/src/server/routes.ts:107`（`appendRoutes`）；缺 `auth` 仍由同文件 `assertRouteDecls` 在构造期抛错
+  - 命令 `packages/cli/src/commands.ts:14`（`registerCommand`）
+  - 视图 `packages/web/src/view-slot.ts:18`（`registerView` / `shellRoutes`）；内置页 `web/builtin-views/register.ts`（P5）；用户插件视图元数据 `core/plugins/view-meta.ts` + Web `plugin-views/bootstrap.ts`（P6）
+
+## 14. Trust（插件信任）
+
+- **是什么**：`~/.delta/plugin-trust.json` 的 `{ trusted: string[] }`，按插件 `id` 列出允许执行 `main` 的进程内插件。未列入的有 `main` 的插件状态为 `untrusted`，不 `import`。清单缺失或 JSON 损坏视为无人被信任。
+- **不是什么**：不是专家信任（`~/.delta/experts.json`，见 §8，带 version / toolsHash）；不是权限档（plan/default/yolo）；不是能力授权界面。信任只决定是否执行 `main`，工具确认与沙箱仍在 `executeOne`。
+- **代码位置**：文件名 `packages/core/src/paths.ts:81`（`FILES.pluginTrust`）；判定 `packages/core/src/plugins/loader.ts:119`（`readTrusted`），未信任 `packages/core/src/plugins/loader.ts:55`（`status: 'untrusted'`）。单个 `main` 抛错记 `status: 'error'`，其余插件继续加载。
+
 ## 维护约定
 
 - 术语新增/含义变更 → 先改本表（docs 提交），再改代码注释；两者同一迭代交付。

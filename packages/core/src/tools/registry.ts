@@ -12,15 +12,7 @@ import { AgentError } from '@delta/shared';
 import type { AgentTool, ToolContext, ToolDanger } from './types.js';
 import { resolveInSandbox } from './sandbox.js';
 import { readSnapshot } from '../session/changes.js';
-import {
-  readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
-} from './builtin/fs.js';
-import { runCommandTool, runTestsTool, taskOutputTool } from './builtin/exec.js';
-import { webFetchTool, todoWriteTool, askUserTool } from './builtin/web.js';
-import { loadSkillTool, unloadSkillTool } from './builtin/skill.js';
-import { saveMemoryTool, recallMemoryTool } from './builtin/memory.js';
-import { taskTool } from './builtin/task.js';
-import { dispatchTaskTool, taskStatusTool } from './builtin/dispatch.js';
+import { builtinTools } from '../plugins/tools.js';
 
 /** minimal structural type for compiled validators (avoids ajv CJS/ESM ctor quirks) */
 interface CompiledValidator {
@@ -59,16 +51,7 @@ export class ToolRegistry {
   }
 
   registerBuiltins(): void {
-    for (const t of [
-      readFileTool, writeFileTool, editFileTool, listDirTool, globSearchTool, grepSearchTool,
-      runCommandTool, runTestsTool, taskOutputTool, webFetchTool, todoWriteTool, askUserTool,
-      loadSkillTool, unloadSkillTool,
-      saveMemoryTool, recallMemoryTool,
-      taskTool,
-      dispatchTaskTool, taskStatusTool, // F-58 调度工具（Router 会话收窄后的全部工具面）
-    ]) {
-      this.register(t);
-    }
+    for (const t of builtinTools()) this.register(t);
   }
 
   register(tool: AgentTool): void {

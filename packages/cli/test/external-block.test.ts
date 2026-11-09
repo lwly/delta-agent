@@ -10,8 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { KNOWN_AGENTS } from '@delta/core';
-import type { DetectedAgent } from '@delta/core';
+import { KNOWN_AGENTS, type DetectedAgent } from '@delta/core/external';
 import { externalAgentBlockLines, planMark } from '../src/external-block.js';
 
 const DEF = KNOWN_AGENTS[0]!;

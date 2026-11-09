@@ -5,8 +5,7 @@
  * 红线（§16）：只展示与探测，不安装、不代用户接受任何许可条款；
  * 登录态只 existsSync（不解析内容、不复制、不上报）。
  */
-import { checkLoginState } from '@delta/core';
-import type { DetectedAgent, KnownAgentDef } from '@delta/core';
+import { checkLoginState, type DetectedAgent, type KnownAgentDef } from '@delta/core/external';
 
 /** plan 档支持标记（§10）：permissionArgs.plan 非空 = 上游有只读档 flags → ✓ */
 export function planMark(def: KnownAgentDef): '✓' | '✗' {

@@ -14,7 +14,8 @@ import {
   readExpertsConfig,
   isTrusted,
   recordTrust,
-} from '@delta/core';
+  type ExpertRecord,
+} from '@delta/core/experts';
 
 export interface ExpertCommandOptions {
   projectRoot?: string;
@@ -158,7 +159,7 @@ async function askConfirm(prompt: string): Promise<string> {
 }
 
 /** 展示首次使用信息（来源层 + 工具白名单 + 写/执行警示） */
-function printTrustInfo(name: string, opts: ExpertIoOptions): Promise<{ ok: boolean; record: import('@delta/core').ExpertRecord } | { ok: false }> {
+function printTrustInfo(name: string, opts: ExpertIoOptions): Promise<{ ok: boolean; record: ExpertRecord } | { ok: false }> {
   return (async () => {
     const store = new ExpertStore({ ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}), homeDir: opts.homeDir });
     const record = await store.get(name);

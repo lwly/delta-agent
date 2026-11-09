@@ -7,7 +7,7 @@
  *
  * enable/disable 经 core 的 updateUserNotifyEnabled：只改 enabled、写前读、tmp+rename 原子写。
  */
-import { createDesktopNotifier, loadNotifyConfig, updateUserNotifyEnabled } from '@delta/core';
+import { createDesktopNotifier, loadNotifyConfig, updateUserNotifyEnabled } from '@delta/core/notify';
 
 /** status：打印生效配置与来源（不发送通知）。 */
 export function notifyStatusCommand(): void {

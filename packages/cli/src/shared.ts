@@ -1,6 +1,7 @@
 /**
  * CLI 入口共享助手（主命令 / run 子命令共用），避免 index ↔ headless-run 循环依赖。
  */
+import type { MemoryStore } from '@delta/core/session';
 
 /** CLI --mode → 会话模式（存储值与引擎值对齐）。 */
 export function normalizeMode(mode?: string): 'react' | 'plan-execute' | 'multi-agent' {
@@ -48,7 +49,7 @@ export function normalizeGitPolicy(mode?: string): 'off' | 'suggest' | 'auto' {
 
 /** L2 记忆召回块（memory-design §7 动态段；空则隐藏）。 */
 export function renderMemoryRecallBlock(
-  memory: import('@delta/core').MemoryStore | undefined,
+  memory: MemoryStore | undefined,
   input: string,
   scopes: string[],
 ): string {

@@ -26,6 +26,9 @@ importers:
       '@delta/core':
         specifier: workspace:*
         version: link:../core
+      '@delta/host':
+        specifier: workspace:*
+        version: link:../host
       '@delta/shared':
         specifier: workspace:*
         version: link:../shared
@@ -107,6 +110,9 @@ importers:
       '@delta/core':
         specifier: workspace:*
         version: link:../core
+      '@delta/host':
+        specifier: workspace:*
+        version: link:../host
       '@delta/shared':
         specifier: workspace:*
         version: link:../shared
@@ -120,6 +126,77 @@ importers:
       electron-builder:
         specifier: ^25.1.8
         version: 25.1.8(electron-builder-squirrel-windows@25.1.8)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/host:
+    dependencies:
+      '@delta/core':
+        specifier: workspace:*
+        version: link:../core
+      '@delta/plugin-builtin-engines':
+        specifier: workspace:*
+        version: link:../plugins/builtin-engines
+      '@delta/plugin-builtin-routes':
+        specifier: workspace:*
+        version: link:../plugins/builtin-routes
+      '@delta/plugin-builtin-services':
+        specifier: workspace:*
+        version: link:../plugins/builtin-services
+      '@delta/plugin-builtin-views':
+        specifier: workspace:*
+        version: link:../plugins/builtin-views
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@22.20.5)
+
+  packages/plugins/builtin-commands:
+    dependencies:
+      '@delta/cli':
+        specifier: workspace:*
+        version: link:../../cli
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/plugins/builtin-engines:
+    dependencies:
+      '@delta/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/plugins/builtin-routes:
+    dependencies:
+      '@delta/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/plugins/builtin-services:
+    dependencies:
+      '@delta/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/plugins/builtin-views:
+    devDependencies:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

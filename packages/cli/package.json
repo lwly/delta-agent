@@ -2,6 +2,16 @@
   "name": "@delta/cli",
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./builtin-commands/mount": {
+      "types": "./dist/builtin-commands/mount.d.ts",
+      "default": "./dist/builtin-commands/mount.js"
+    }
+  },
   "bin": {
     "delta": "./dist/index.js"
   },
@@ -17,6 +27,7 @@
   },
   "dependencies": {
     "@delta/core": "workspace:*",
+    "@delta/host": "workspace:*",
     "@delta/shared": "workspace:*",
     "commander": "^12.1.0",
     "ink": "^5.1.0",

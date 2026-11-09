@@ -11,43 +11,39 @@ import type {
   ToolCall,
 } from '@delta/shared';
 import {
-  BudgetManager,
+  SessionService,
+  resolveProviderFromEnv,
+  type MemoryStore,
+  type SessionRow,
+} from '@delta/core/session';
+import { renderSummary } from '@delta/core/changes';
+import { modeSegment, type EngineMode, type RunContext } from '@delta/core/engine';
+import { ModelRouter, defaultModelFor } from '@delta/core/llm';
+import { ToolRegistry } from '@delta/core/tools';
+import { resolveEngine } from '@delta/core/plugins';
+import type { HookManager } from '@delta/core/hooks';
+import { compactDiff, diffLines, type DiffLine } from '@delta/core/diff';
+import { describeImage, ImageError, prepareImages, type PreparedImage } from '@delta/core/media';
+import { formatSearchHits } from '@delta/core/search';
+import { PermissionState, type PermissionMode } from '@delta/core/permissions';
+import { BudgetManager } from '@delta/core/budget';
+import type { SkillRuntime } from '@delta/core/skills';
+import {
   ExpertStore,
-  ModelRouter,
-  defaultModelFor,
   readExpertsConfig,
   isTrusted,
-  GitIntegration,
-  PermissionState,
-  SessionService,
-  ToolRegistry,
-  WorktreeManager,
   toTeamRuntime,
   type ExpertRecord,
-  compactDiff,
-  diffLines,
-  formatSearchHits,
-  prepareImages,
-  describeImage,
+} from '@delta/core/experts';
+import {
+  GitIntegration,
+  WorktreeManager,
   branchSwitchMessage,
   worktreeOnMessage,
   worktreeOffMessage,
-  ImageError,
-  renderSummary,
-  runReAct,
-  runPlanExecute,
-  runMultiAgent,
-  modeSegment,
   type BranchInfo,
-  type DiffLine,
-  type EngineMode,
   type GitPolicyMode,
-  type PermissionMode,
-  type PreparedImage,
-  type RunContext,
-  type SessionRow,
-  type SkillRuntime,
-} from '@delta/core';
+} from '@delta/core/git';
 import { ConfirmCard } from './confirm.js';
 import { BranchCard } from './branch-card.js';
 import { WorktreeBar } from './worktree-bar.js';
@@ -101,7 +97,7 @@ function useSpinnerFrame(active: boolean): string {
 export interface AppOptions {
   service: SessionService;
   session: SessionRow;
-  provider: Awaited<ReturnType<typeof import('@delta/core').resolveProviderFromEnv>>;
+  provider: Awaited<ReturnType<typeof resolveProviderFromEnv>>;
   /** pre-built registry（F-39 起为收窄后的视图，with MCP tools attached by the CLI entry） */
   registry?: ToolRegistry;
   /** F-39：未收窄的完整注册表（团队成员委派基座；主理人视图不含写工具，不能作成员基座） */
@@ -118,9 +114,9 @@ export interface AppOptions {
   /** M3：Skill 两阶段加载 runtime（load_skill/unload_skill 工具） */
   skillsRuntime?: SkillRuntime;
   /** F-27 Hook 系统（SessionStart/Stop/SessionEnd 生命周期 + 工具挂钩） */
-  hooks?: import('@delta/core').HookManager;
+  hooks?: HookManager;
   /** F-33 桌面通知器（缺省不通知；任务结束 / 确认卡出现时旁路触发） */
-  notify?: import('@delta/core').Notifier;
+  notify?: import('@delta/core/notify').Notifier;
   yolo: boolean;
   /** F-23 权限模式（plan/default/yolo；yolo 需与 yolo 标志双重开启，由 CLI 入口保证） */
   permissionMode?: PermissionMode;
@@ -457,13 +453,8 @@ export function App(props: AppOptions) {
       };
 
       try {
-        // M5: 按模式分发引擎（ReAct / Plan-and-Execute / Multi-Agent）
-        const engine =
-          engineMode === 'plan-execute'
-            ? runPlanExecute
-            : engineMode === 'multi-agent'
-              ? runMultiAgent
-              : runReAct;
+        // TUI 不按模型前缀切外部引擎（与改前一致）
+        const engine = resolveEngine(engineMode);
         for await (const ev of engine(ctx, history, userInput, images)) {
           const e = ev as AgentEvent;
           switch (e.type) {
@@ -1214,7 +1205,7 @@ function safeParseArgs(json: string): Record<string, unknown> {
 
 /** L2 记忆召回块（memory-design §7 动态段；空则隐藏）。 */
 function renderMemoryRecallBlock(
-  memory: import('@delta/core').MemoryStore | undefined,
+  memory: MemoryStore | undefined,
   input: string,
   scopes: string[],
 ): string {

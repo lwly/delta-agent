@@ -9,20 +9,18 @@
  * 手动检查失败**如实报错**（与启动检查的静默口径不同）；降级拒绝：远端不严格大于当前版本一律不动作。
  */
 import { spawn } from 'node:child_process';
+import { APP_VERSION, FILES, userConfigDir } from '@delta/core/paths';
+import { RunLog } from '@delta/core/logging';
 import {
-  APP_VERSION,
-  FILES,
-  RunLog,
   applyBinarySwap,
   checkForUpdate,
   detectChannel,
   downloadUpdateAsset,
   loadUpdateConfig,
   maybeCheckOnStartup,
-  userConfigDir,
   userUpdateConfigPath,
   type UpdateCheckResult,
-} from '@delta/core';
+} from '@delta/core/update';
 
 /** F-41 留档：更新事件写 serve-YYYYMMDD.log（source=update），失败静默 */
 function updateLog(): RunLog | undefined {

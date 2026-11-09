@@ -3,6 +3,20 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "exports": {
+    "./view-slot": {
+      "types": "./src/view-slot.ts",
+      "default": "./src/view-slot.ts"
+    },
+    "./builtin-views": {
+      "types": "./src/builtin-views/index.ts",
+      "default": "./src/builtin-views/index.ts"
+    },
+    "./builtin-views/constants": {
+      "types": "./src/builtin-views/constants.ts",
+      "default": "./src/builtin-views/constants.ts"
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -p tsconfig.json --noEmit && vite build",

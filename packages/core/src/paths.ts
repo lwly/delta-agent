@@ -75,6 +75,10 @@ export const FILES = {
   expertsDir: 'experts',
   /** 专家库配置（disabled[] / trusted[]，F-39 P1） */
   expertsConfig: 'experts.json',
+  /** 用户级 / 项目级插件目录名（位于配置根下） */
+  pluginsDir: 'plugins',
+  /** 进程内插件信任清单（{ trusted: string[] }） */
+  pluginTrust: 'plugin-trust.json',
   /** 评测集目录 */
   evalsDir: 'evals',
   /** F-41 运行日志目录（serve-YYYYMMDD.log / runs/） */
