@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { api, type ProjectRow, type PurgeBatchResult, type SessionRow, type TrashItem } from '../api/client';
+import { useChatStore } from './chat';
 
 /** F-53：会话列表每页条数（AC-53-2） */
 const SESSION_PAGE_SIZE = 50;
@@ -25,8 +26,9 @@ export const useWorkspaceStore = defineStore('workspace', {
     runningProjectIds: [] as string[],
   }),
   actions: {
+    /** 架构收口 T2（B2 裁决）：sessionKind='chat' → 项目徽标 session_count 只计 chat 会话 */
     async refreshProjects() {
-      this.projects = await api.listProjects();
+      this.projects = await api.listProjects({ sessionKind: 'chat' });
     },
     /** PASI-9：拉取运行中的会话 id（失败保持上次状态，不阻塞侧栏） */
     async refreshRunning() {
@@ -38,10 +40,10 @@ export const useWorkspaceStore = defineStore('workspace', {
         // 服务暂不可用时维持现状
       }
     },
-    /** F-53（AC-53-2）：首页会话（游标分页，PAGE_SIZE 条） */
+    /** F-53（AC-53-2）：首页会话（游标分页，PAGE_SIZE 条）；T2（D2 裁决）：侧栏只列 chat 会话 */
     async refreshSessions() {
       if (!this.activeProjectId) return;
-      const r = await api.listSessionsPage(this.activeProjectId, { limit: SESSION_PAGE_SIZE });
+      const r = await api.listSessionsPage(this.activeProjectId, { limit: SESSION_PAGE_SIZE, kind: 'chat' });
       this.sessions = r.sessions;
       this.sessionsHasMore = r.has_more;
       this.sessionsCursor = r.next_cursor;
@@ -54,6 +56,7 @@ export const useWorkspaceStore = defineStore('workspace', {
         const r = await api.listSessionsPage(this.activeProjectId, {
           limit: SESSION_PAGE_SIZE,
           before: this.sessionsCursor ?? undefined,
+          kind: 'chat',
         });
         this.sessions = [...this.sessions, ...r.sessions];
         this.sessionsHasMore = r.has_more;
@@ -70,6 +73,9 @@ export const useWorkspaceStore = defineStore('workspace', {
       await Promise.all([this.refreshRunning(), this.refreshSessions()]);
     },
     async selectProject(id: string) {
+      // 架构收口 T2：切项目必须清掉上一个项目绑定的当前会话（chat.close() 全量复位
+      // sessionId/sessionMeta/消息流/UI 态），否则文件面板与对话区仍绑旧项目会话
+      if (this.activeProjectId && this.activeProjectId !== id) useChatStore().close();
       this.activeProjectId = id;
       await this.refreshSessions();
       void this.refreshRunning(); // PASI-9：切项目时同步运行态

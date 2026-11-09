@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../api/client', () => ({ api: mocks }));
 
 import { useWorkspaceStore } from './workspace';
+import { useChatStore } from './chat';
 
 const P1 = { id: 'p-1', name: 'delta-agent', root_path: '/tmp/p1', session_count: 0 };
 
@@ -93,5 +94,60 @@ describe('workspace store：项目徽标 session_count 随新建/删除会话刷
     mocks.createSession.mockResolvedValue(sessionRow('s-1'));
     await ws.createSession();
     expect(ws.projects[0]?.session_count).toBe(1);
+  });
+});
+
+describe('workspace store：架构收口 T2（侧栏只列 chat + 切项目清态）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.listProjects.mockResolvedValue([P1]);
+    mocks.listSessionsPage.mockResolvedValue({ sessions: [], has_more: false, next_cursor: null });
+    mocks.runningSessions.mockResolvedValue({ ids: [], projects: [] });
+    mocks.listTrash.mockResolvedValue({ projects: [], sessions: [] });
+  });
+
+  it('refreshSessions / loadMoreSessions 请求带 kind=chat；refreshProjects 带 session_kind=chat', async () => {
+    const ws = useWorkspaceStore();
+    await ws.selectProject('p-1');
+    expect(mocks.listSessionsPage).toHaveBeenLastCalledWith('p-1', { limit: 50, kind: 'chat' });
+    await ws.refreshProjects();
+    expect(mocks.listProjects).toHaveBeenLastCalledWith({ sessionKind: 'chat' });
+
+    // 触底加载：同样带 kind=chat（游标取 store 当前值）
+    mocks.listSessionsPage.mockResolvedValue({ sessions: [], has_more: true, next_cursor: 'c|1' });
+    ws.sessionsHasMore = true;
+    ws.sessionsCursor = 'c|1';
+    await ws.loadMoreSessions();
+    expect(mocks.listSessionsPage).toHaveBeenLastCalledWith('p-1', {
+      limit: 50,
+      before: 'c|1',
+      kind: 'chat',
+    });
+  });
+
+  it('切项目清掉上一项目绑定的当前会话（chat.sessionId / sessionMeta 复位）', async () => {
+    const ws = useWorkspaceStore();
+    const chat = useChatStore();
+    await ws.selectProject('p-1');
+    // 模拟在 p-1 打开了会话
+    chat.sessionId = 's-old';
+    chat.sessionMeta = { title: '旧项目会话', mode: 'react', model: '' };
+    chat.messages = [];
+    await ws.selectProject('p-2');
+    expect(ws.activeProjectId).toBe('p-2');
+    expect(chat.sessionId).toBe('');
+    expect(chat.sessionMeta).toBeNull();
+    // 新项目会话列表照常拉取
+    expect(mocks.listSessionsPage).toHaveBeenLastCalledWith('p-2', { limit: 50, kind: 'chat' });
+  });
+
+  it('首次 selectProject（无上一个项目）不误清会话态', async () => {
+    const ws = useWorkspaceStore();
+    const chat = useChatStore();
+    chat.sessionId = 's-keep';
+    await ws.selectProject('p-1');
+    // 无上一个项目：不清（保守口径；真实场景首切时 chat 尚无会话）
+    expect(chat.sessionId).toBe('s-keep');
   });
 });

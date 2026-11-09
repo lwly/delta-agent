@@ -28,6 +28,12 @@ export interface SessionRow {
   /** F-39：绑定专家 name；NULL = 无专家 */
   expert: string | null;
   expert_type: string | null;
+  /** F-58（v7）：会话种类 'chat' | 'router' | 'worker'（架构收口 T2 列表过滤依据） */
+  kind: string;
+  /** F-58（v7）：仅 UI 标签（任务台展示） */
+  role_label: string | null;
+  /** F-58（v7）：worker 会话反查所属任务 id */
+  task_id: string | null;
 }
 
 /** F-53：会话列表分页响应（AC-53-2） */
@@ -883,7 +889,12 @@ const browseBase = (scope: BrowseScope): string =>
 
 export const api = {
   // projects
-  listProjects: () => request<ProjectRow[]>('GET', '/api/projects'),
+  // 架构收口 T2（B2 裁决）：sessionKind='chat' → session_count 只计 chat 会话（侧栏口径）
+  listProjects: (opts?: { sessionKind?: 'chat' }) =>
+    request<ProjectRow[]>(
+      'GET',
+      `/api/projects${opts?.sessionKind === 'chat' ? '?session_kind=chat' : ''}`,
+    ),
   createProject: (root: string) => request<ProjectRow>('POST', '/api/projects', { root }),
   removeProject: (id: string, confirmName: string, hard = false) =>
     request<{ ok: boolean }>('DELETE', `/api/projects/${id}`, { confirmName, hard }),
@@ -902,12 +913,19 @@ export const api = {
     ),
 
   // sessions
-  listSessions: (projectId: string) => request<SessionRow[]>('GET', `/api/projects/${projectId}/sessions`),
+  // 架构收口 T2（D2 裁决）：kind='chat' 过滤；'all'/不传 = 全量（旧口径）。
+  // 注意：日志归属（LogsView）、搜索、用量、回收站等全量消费方必须保持不带 kind。
+  listSessions: (projectId: string, opts?: { kind?: 'chat' | 'all' }) =>
+    request<SessionRow[]>(
+      'GET',
+      `/api/projects/${projectId}/sessions${opts?.kind === 'chat' ? '?kind=chat' : ''}`,
+    ),
   // F-53 会话列表游标分页（AC-53-2）
-  listSessionsPage: (projectId: string, opts?: { limit?: number; before?: string }) => {
+  listSessionsPage: (projectId: string, opts?: { limit?: number; before?: string; kind?: 'chat' | 'all' }) => {
     const q = new URLSearchParams();
     q.set('limit', String(opts?.limit ?? 50));
     if (opts?.before) q.set('before', opts.before);
+    if (opts?.kind === 'chat') q.set('kind', 'chat');
     return request<SessionPage>('GET', `/api/projects/${projectId}/sessions?${q.toString()}`);
   },
   createSession: (projectId: string, opts?: { title?: string; model?: string; mode?: string; expert?: string }) =>

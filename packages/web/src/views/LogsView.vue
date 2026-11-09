@@ -26,6 +26,9 @@ async function loadProjectSessions(): Promise<void> {
     return;
   }
   try {
+    // 架构收口 T2 红线文件：此调用必须保持不带 kind——项目日志归属需要「全部」会话 id
+    // （含 worker/router，否则 worker 会话的日志在项目作用域下静默丢失）；
+    // kind=chat 过滤只属于侧栏口径（workspace store / D2 裁决）
     const r = await api.listSessionsPage(pid, { limit: 500 });
     // 项目已切走：丢弃过期响应
     if (ws.activeProjectId === pid) projectSessionIds.value = new Set(r.sessions.map((s) => s.id));
