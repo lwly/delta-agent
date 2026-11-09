@@ -418,6 +418,18 @@ export {
   type TaskStatus,
   type TaskCheckpoint,
 } from './session/tasks.js';
+export {
+  authorizeRun,
+  buildRunPolicy,
+  spawnPermissionArgsFor,
+  type RunOrigin,
+  type RunRequest,
+  type RunPolicy,
+  type GateReason,
+  type GateStep,
+  type GateResult,
+  type RunGatewayDeps,
+} from './gateway/index.js';
 // 架构收口 T5：CanonicalRunStatus 读时归一映射 + 项目级 activity 聚合条目类型
 export {
   fromPlanTask,
