@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "delta-agent 概念地图",
+    "locale": "zh-CN",
+    "output": "project-concepts.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "interactive",
+        "label": "交互会话",
+        "focus": ["workbench", "session", "hub", "engine"],
+        "note": "项目是工作范围，会话承载历史；模式决定单次任务内部的执行策略。"
+      },
+      {
+        "id": "scheduled",
+        "label": "定时任务",
+        "focus": ["workbench", "cron", "headless", "engine"],
+        "note": "Cron 到期后启动独立 headless 运行，不是另一种会话模式。"
+      },
+      {
+        "id": "delegated",
+        "label": "委派任务",
+        "focus": ["workbench", "dispatcher", "worker", "engine", "external"],
+        "note": "Router–Worker 管多个任务；Worker 内部仍可使用内置执行策略或外部 Agent。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "workbench",
+      "type": "frontend",
+      "label": "工作台 / CLI",
+      "sublabel": "操作入口与状态呈现",
+      "pos": [40, 234],
+      "size": [190, 84]
+    },
+    {
+      "id": "session",
+      "type": "backend",
+      "label": "项目与交互会话",
+      "sublabel": "工作范围 · 历史 · 会话模式",
+      "pos": [330, 90],
+      "size": [205, 84]
+    },
+    {
+      "id": "hub",
+      "type": "backend",
+      "label": "SessionHub",
+      "sublabel": "交互会话运行时",
+      "pos": [625, 90],
+      "size": [190, 84]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "单次任务执行策略",
+      "sublabel": "ReAct · Plan · Multi-Agent",
+      "tag": "任务内部",
+      "pos": [950, 234],
+      "size": [225, 96]
+    },
+    {
+      "id": "cron",
+      "type": "backend",
+      "label": "Cron 调度器",
+      "sublabel": "按时间触发任务",
+      "pos": [330, 234],
+      "size": [205, 84]
+    },
+    {
+      "id": "headless",
+      "type": "backend",
+      "label": "Headless `delta run`",
+      "sublabel": "独立、非交互进程",
+      "pos": [625, 234],
+      "size": [210, 84]
+    },
+    {
+      "id": "dispatcher",
+      "type": "backend",
+      "label": "Router–Worker 调度",
+      "sublabel": "跨任务派发与并行",
+      "tag": "任务之间",
+      "pos": [330, 378],
+      "size": [215, 92]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Worker 会话",
+      "sublabel": "每个任务独立会话",
+      "pos": [625, 378],
+      "size": [210, 84]
+    },
+    {
+      "id": "external",
+      "type": "external",
+      "label": "外部 CLI Agent",
+      "sublabel": "可选 Worker 执行器",
+      "pos": [950, 405],
+      "size": [205, 84]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-session",
+      "from": "workbench",
+      "to": "session",
+      "label": "创建 / 选择",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "session-hub",
+      "from": "session",
+      "to": "hub",
+      "label": "发送消息",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "hub-engine",
+      "from": "hub",
+      "to": "engine",
+      "label": "按会话 mode 分流",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ui-cron",
+      "from": "workbench",
+      "to": "cron",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "cron-headless",
+      "from": "cron",
+      "to": "headless",
+      "label": "到期后 spawn",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "headless-engine",
+      "from": "headless",
+      "to": "engine",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ui-dispatch",
+      "from": "workbench",
+      "to": "dispatcher",
+      "label": "派发独立任务"
+    },
+    {
+      "id": "dispatch-worker",
+      "from": "dispatcher",
+      "to": "worker",
+      "label": "每任务建会话",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [569, 484]
+    },
+    {
+      "id": "worker-engine",
+      "from": "worker",
+      "to": "engine",
+      "label": "内置执行器",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "worker-external",
+      "from": "worker",
+      "to": "external",
+      "label": "外部执行器",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "先分清四个维度",
+      "items": [
+        "工作台是 UI；项目定范围，会话及 Worker Task 存 SQLite。",
+        "Cron 按时间触发独立 headless 进程；当前默认 ReAct，规则与历史存 ~/.delta/cron.json。",
+        "ReAct / Plan / Multi-Agent 是一次任务内部的执行策略。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "两种多智能体，不是一回事",
+      "items": [
+        "Multi-Agent：拆解并并行执行一个任务内部的 DAG。",
+        "Router–Worker：派发、并行管理多个独立任务。",
+        "Worker 是任务级会话；可使用内置引擎，也可选择外部 CLI Agent。"
+      ]
+    }
+  ]
+}
