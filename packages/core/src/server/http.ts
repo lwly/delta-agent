@@ -49,6 +49,7 @@ import { parseDispatchArgs } from '../tools/builtin/dispatch.js';
 import type { Dispatcher } from '../router/dispatcher.js';
 import type { WorkerTaskStatus } from '../router/types.js';
 // F-41 运行日志（/api/logs 尾读 + /api/logs/stream 实时推送）
+import { fromPlanTask, fromWorkerTask, fromCronRun, fromBgTask, type ActivityItem } from '../run-status.js';
 import type { LogEntry, RunLog } from '../logging/logger.js';
 // F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
 import { handleBrowseRoute, type BrowseDeps } from './browse-routes.js';
@@ -309,6 +310,59 @@ export function createWebServer(opts: ServeOptions): http.Server {
     if (e.projectId === pid) return true;
     return e.sessionId != null && service.getSession(e.sessionId)?.project_id === pid;
   };
+  // ── T5：项目级 activity 聚合（CanonicalRunStatus 读时归一；不合并 tasks/worker_tasks 表）──
+  // 端点命名红线：不可叫 /api/runs（GET /api/sessions/:id/runs 已被 F-18 回放占用）。
+  const collectActivity = (pid: string): ActivityItem[] => {
+    const items: ActivityItem[] = [];
+    // ① 委派任务（worker_tasks）：T6 归属口径直接按 project_id 查
+    for (const row of service.workerTasks.list({ projectId: pid })) {
+      items.push({
+        entity: 'worker_task',
+        id: row.id,
+        status: fromWorkerTask(row.status),
+        updated_at: new Date(row.updated_at).toISOString(),
+        ...(row.worker_session_id ? { session_id: row.worker_session_id } : {}),
+      });
+    }
+    // ② Plan 节点任务（tasks 表）：经项目全部会话（含 worker/router，T2 口径）关联
+    for (const s of service.listSessions(pid)) {
+      for (const t of service.tasks.list(s.id)) {
+        items.push({
+          entity: 'plan_task',
+          id: t.id,
+          status: fromPlanTask(t.status),
+          updated_at: new Date(t.updated_at).toISOString(),
+          session_id: s.id,
+        });
+      }
+    }
+    // ③ 定时任务（cron.json）：T6 projectId 归属；runningSince 锁在 → running；从未运行 → pending
+    const { jobs } = loadCronJobs(opts.cronHomeDir, {
+      projectRoots: service.listProjects().map((p) => ({ id: p.id, root: p.root_path })),
+    });
+    for (const j of jobs) {
+      if (j.projectId !== pid) continue;
+      items.push({
+        entity: 'cron_job',
+        id: j.id,
+        status: j.runningSince ? 'running' : fromCronRun(j.lastRun?.status),
+        updated_at: j.lastRun?.finishedAt ?? j.updatedAt,
+      });
+    }
+    // ④ 会话内后台命令（内存 Map）：按项目会话过滤（不落库，切会话/退出即消失）
+    const sessionIds = new Set(service.listSessions(pid).map((s) => s.id));
+    for (const b of opts.backgroundTasks?.list() ?? []) {
+      if (!sessionIds.has(b.session_id)) continue;
+      items.push({
+        entity: 'bg_task',
+        id: b.id,
+        status: fromBgTask(b.status),
+        updated_at: new Date(b.finished_at ?? b.started_at).toISOString(),
+        session_id: b.session_id,
+      });
+    }
+    return items;
+  };
 
   const readBody = (req: http.IncomingMessage): Promise<Record<string, unknown>> =>
     new Promise((resolve) => {
@@ -428,6 +482,40 @@ export function createWebServer(opts: ServeOptions): http.Server {
       }
 
       // ── projects ──────────────────────────────────────────────────────────
+      // 架构收口 T5：项目级 activity 聚合端点（4 类实体统一 CanonicalRunStatus；
+      // 轮询为主通道，/activity/stream 是 ≤1s 变更推送的补充通道，不删既有轮询端点）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'activity' && parts.length === 4) {
+        return json(res, 200, { items: collectActivity(parts[2]!) });
+      }
+      // SSE：连入即发全量快照，此后内部 500ms 差分，任一实体状态变化 ≤1s 内推
+      // activity_changed（payload = 全量条目，只含标识与状态，不含消息正文）
+      if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts[3] === 'activity' && parts[4] === 'stream' && parts.length === 5) {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        const pid = parts[2]!;
+        let last = JSON.stringify(collectActivity(pid));
+        res.write(`data: ${JSON.stringify({ type: 'activity_snapshot', items: JSON.parse(last) })}\n\n`);
+        const diffTimer = setInterval(() => {
+          try {
+            const next = JSON.stringify(collectActivity(pid));
+            if (next !== last) {
+              last = next;
+              res.write(`data: ${JSON.stringify({ type: 'activity_changed', items: JSON.parse(next) })}\n\n`);
+            }
+          } catch {
+            /* 聚合瞬时失败：下轮差分重试 */
+          }
+        }, 500);
+        const ping = setInterval(() => res.write(': ping\n\n'), 15_000);
+        req.on('close', () => {
+          clearInterval(diffTimer);
+          clearInterval(ping);
+        });
+        return;
+      }
       // 架构收口 T2（B2 裁决）：?session_kind=chat → session_count 只计 chat 会话；
       // 不带参数仍全量计数（旧客户端兼容，core 缺省口径不变——D2 裁决）。
       if (method === 'GET' && parts[0] === 'api' && parts[1] === 'projects' && parts.length === 2) {

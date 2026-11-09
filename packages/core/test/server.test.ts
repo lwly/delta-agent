@@ -534,3 +534,97 @@ describe('架构收口 T6：/api/logs project_id 后端过滤', () => {
     }
   });
 });
+
+describe('架构收口 T5：/api/projects/:id/activity 聚合端点', () => {
+  it('同时存在 4 类实体时返回 4 类，状态全部落在 CanonicalRunStatus 枚举', async () => {
+    // ① Plan 节点（tasks 表，queued）
+    service.tasks.createPlan(sessionId, {
+      revision: 1,
+      nodes: [{ id: 'node-1', goal: '第一步', deps: [], suggestedTools: [] }],
+    } as Parameters<typeof service.tasks.createPlan>[1]);
+    // ② 委派任务（worker_tasks，queued）
+    const wt = service.workerTasks.create({ projectId, routerSessionId: sessionId, title: 'T5 委派', goal: 'goal' });
+    // ③ 会话内后台命令（内存 Map；跑一个立即退出的命令 → done）
+    const { BackgroundTaskManager } = await import('../src/session/background-tasks.js');
+    const bgManager = new BackgroundTaskManager();
+    bgManager.start(sessionId, 'true', tmp, 'T5 测试后台命令');
+    // ④ 定时任务（cron.json，T6 cwd 惰性回填归属 + 从未运行 → pending）
+    const cronHome = await fs.mkdtemp(path.join(os.tmpdir(), 'yz-t5-cron-'));
+    const { addCronJob } = await import('../src/cron/store.js');
+    addCronJob({ name: 't5-cron', cron: '30 8 * * *', prompt: 'x', cwd: tmp, from: new Date(2020, 0, 1) }, cronHome);
+
+    const hub2 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv2 = createWebServer({ service, hub: hub2, port: 0, cronHomeDir: cronHome, backgroundTasks: bgManager });
+    await new Promise<void>((r) => srv2.listen(0, '127.0.0.1', r));
+    const addr = srv2.address();
+    const base2 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    try {
+      const r = await fetch(`${base2}/api/projects/${projectId}/activity`).then((x) => x.json() as Promise<{ items: Array<{ entity: string; id: string; status: string }> }>);
+      const entities = new Set(r.items.map((i) => i.entity));
+      for (const e of ['plan_task', 'worker_task', 'bg_task', 'cron_job']) expect(entities.has(e)).toBe(true);
+      expect(r.items.find((i) => i.entity === 'plan_task')!.status).toBe('queued');
+      expect(r.items.find((i) => i.entity === 'worker_task')!.id).toBe(wt.id);
+      expect(r.items.find((i) => i.entity === 'cron_job')!.status).toBe('pending');
+      // canonical 枚举断言
+      const allowed = new Set(['pending', 'queued', 'running', 'needs_input', 'succeeded', 'failed', 'canceled']);
+      expect(r.items.every((i) => allowed.has(i.status))).toBe(true);
+    } finally {
+      bgManager.killAll();
+      srv2.close();
+    }
+  });
+
+  it('SSE：实体状态变化后 ≤1s 收到 activity_changed；/api/sessions/:id/runs（F-18 回放）零变化', async () => {
+    // 初始：一个 queued 委派任务
+    const wt = service.workerTasks.create({ projectId, routerSessionId: sessionId, title: 'SSE 委派', goal: 'goal' });
+    const hub2 = new SessionHub({ service, registry: new ToolRegistry(), resolveProvider: async () => provider });
+    const srv2 = createWebServer({ service, hub: hub2, port: 0 });
+    await new Promise<void>((r) => srv2.listen(0, '127.0.0.1', r));
+    const addr = srv2.address();
+    const base2 = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+    try {
+      // F-18 回放端点零变化：未运行任务 → 空数组，响应形状保持（裸数组口径）
+      const replay = await fetch(`${base2}/api/sessions/${sessionId}/runs`).then((x) => x.json() as Promise<unknown>);
+      expect(Array.isArray(replay)).toBe(true);
+      expect(replay).toEqual([]);
+
+      // 连 SSE（500ms 内部差分），连入先发快照
+      const ctrl = new AbortController();
+      const events: Array<Record<string, unknown>> = [];
+      const res = await fetch(`${base2}/api/projects/${projectId}/activity/stream`, { signal: ctrl.signal });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      const readLoop = (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const line = frame.split('\n').find((l) => l.startsWith('data: '));
+            if (!line) continue;
+            events.push(JSON.parse(line.slice(6)) as Record<string, unknown>);
+          }
+        }
+      })();
+      // 等快照帧（连入即发）
+      await vi.waitFor(() => expect(events.some((e) => e.type === 'activity_snapshot')).toBe(true));
+      // 变更实体状态（queued → preflight → running，走状态机合法迁移）
+      service.workerTasks.transition(wt.id, 'preflight');
+      service.workerTasks.transition(wt.id, 'running');
+      const t0 = Date.now();
+      await vi.waitFor(() => {
+        const changed = events.find((e) => e.type === 'activity_changed') as { items?: Array<{ id: string; status: string }> } | undefined;
+        expect(changed?.items?.find((i) => i.id === wt.id)?.status).toBe('running');
+      }, { timeout: 1000 });
+      expect(Date.now() - t0).toBeLessThanOrEqual(1000);
+      ctrl.abort();
+      await readLoop.catch(() => undefined);
+    } finally {
+      srv2.close();
+    }
+  });
+});

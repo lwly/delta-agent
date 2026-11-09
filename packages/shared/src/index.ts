@@ -66,6 +66,19 @@ export interface Usage {
   costUsd?: number;
 }
 
+// ── 架构收口 T5：CanonicalRunStatus（4 套任务状态机的读时归一枚举）──────────
+// 仅新增类型，不改 AgentEvent（收口红线）。映射规则见 core/src/run-status.ts：
+//   completed|done → succeeded；failed|error|timeout|budget_exhausted|max_turns → failed；
+//   aborted|killed|canceled → canceled；needs_decision → needs_input；preflight|draft → pending。
+export type CanonicalRunStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'needs_input'
+  | 'succeeded'
+  | 'failed'
+  | 'canceled';
+
 // ── Plan DAG / Multi-Agent (M5, agent-modes-design §3-5) ──────────────────
 
 export type TaskNodeStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
