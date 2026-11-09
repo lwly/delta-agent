@@ -18,22 +18,21 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import type { CronExecutor, CronExecutorResult } from './runner.js';
 import type { CronJob } from './store.js';
+import { spawnPermissionArgsFor } from '../gateway/index.js';
 
 /** 单次运行超时（默认 30 分钟） */
 export const DEFAULT_CRON_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * 任务字段 → `delta run` 子进程参数（纯函数，executor 与单测共用）。
- * F-22b：任务级权限透传（沿用 F-23 resolvePermissionMode 语义）——
- *  - yolo → `--permission yolo --yolo` 双 flag（缺一会被降级告警）；
- *  - plan → `--permission plan`；
- *  - default / 缺省 → 不传任何 permission flag（沿用 CLI 默认）。
+ * F-22b：任务级权限透传。架构收口 T4（判据 2）：权限 flag 序列化由 RunGateway
+ * 的 spawnPermissionArgsFor **单点产出**（yolo 双 flag 缺一会被 CLI resolvePermissionMode
+ * 降级），本函数不再自行拼装。
  */
 export function buildCronSpawnArgs(job: Pick<CronJob, 'prompt' | 'maxCostUsd' | 'permission'>): string[] {
   const args = ['run', '-p', job.prompt, '--json'];
   if (job.maxCostUsd !== undefined) args.push('--max-cost', String(job.maxCostUsd));
-  if (job.permission === 'yolo') args.push('--permission', 'yolo', '--yolo');
-  else if (job.permission === 'plan') args.push('--permission', 'plan');
+  args.push(...spawnPermissionArgsFor(job.permission ?? 'default'));
   return args;
 }
 

@@ -37,6 +37,7 @@ import {
   runMultiAgent,
   runPlanExecute,
   runReAct,
+  authorizeRun,
   isExternalModel,
   modeSegment,
   createDesktopNotifier,
@@ -200,10 +201,27 @@ export async function runHeadlessCommand(opts: RunOptions): Promise<void> {
     tools: registry.definitions(),
   });
 
+  // 架构收口 T4c：运行前门禁统一走 RunGateway（纯策略编排；本路径无注入依赖 =
+  // 全部步骤放行，但权限归一与 RunPolicy 产出单点化——判据 2 的非交互一致口径）。
+  // CLI 双 flag 语义仍在 resolvePermissionMode（入口参数层），gateway 只做归一与产出。
+  const gate = await authorizeRun({
+    origin: isExternal ? 'external' : 'chat',
+    sessionId: session.id,
+    projectId: project.id,
+    model: session.model || null,
+    permissionMode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
+  });
+  if (!gate.ok || !gate.policy) {
+    console.error(`✘ 运行被门禁拒绝（${gate.reason}）：${gate.message}`);
+    process.exitCode = 1;
+    service.close();
+    return;
+  }
+
   // 权限 / 记忆召回
   const engineMode: EngineMode = normalizeMode(opts.mode);
   const perms = new PermissionState({
-    mode: resolvePermissionMode(Boolean(opts.yolo), opts.permission),
+    mode: gate.policy.permissionMode,
     allowlist: parseAllowTools(opts.allow),
   });
   const memoryBlock = renderMemoryRecallBlock(service.memory, task, [
