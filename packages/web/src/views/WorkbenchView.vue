@@ -2426,8 +2426,8 @@ watch(
 /* 消息流容器（含回到底部按钮的定位上下文） */
 .chat-area { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 0; }
-/* 消息流与 .composer 同宽：内容列最大 760 居中，左右 padding 24 */
-.chat-inner { max-width: 808px; margin: 0 auto; padding: 0 24px; }
+/* 消息流与 .composer 同宽：内容列最大 912 居中（原 760 扩宽 20%），左右 padding 24 */
+.chat-inner { max-width: 960px; margin: 0 auto; padding: 0 24px; }
 /* 会话内空态：居中一行弱化提示 */
 .chat-empty { text-align: center; color: var(--text-faint); font-size: 13px; padding: 48px 0 16px; }
 /* F-53 载入更早消息入口：居中弱化按钮，不与消息流抢视觉 */
@@ -2570,7 +2570,7 @@ watch(
 
 /* ══════════ 审批卡片 ══════════ */
 .cards-zone { padding-top: 0; }
-.cards-inner { max-width: 760px; margin: 0 auto; }
+.cards-inner { max-width: 912px; margin: 0 auto; }
 .approve-card {
   border: 1px solid var(--border); border-radius: 12px;
   padding: 12px 16px; margin-bottom: 10px; animation: fadeIn 0.15s ease-out;
@@ -2608,10 +2608,10 @@ watch(
 /* ══════════ 输入区 ══════════ */
 .composer-wrap { padding: 0 24px 10px; }
 /* F-55 外部会话降级提示条（info 条视觉：accent 软底 + 常驻，可关闭）
-   宽度与 .composer 对齐（max-width 760 居中），避免比输入框更宽显得游离在外 */
+   宽度与 .composer 对齐（max-width 912 居中），避免比输入框更宽显得游离在外 */
 .external-bar {
   display: flex; align-items: flex-start; gap: 8px;
-  max-width: 760px; margin: 0 auto 8px;
+  max-width: 912px; margin: 0 auto 8px;
   padding: 7px 8px 7px 10px;
   border: 1px solid var(--accent-border); border-radius: 8px;
   background: var(--accent-soft); font-size: 12px; color: var(--text-dim);
@@ -2642,7 +2642,7 @@ watch(
 }
 .eb-close:hover { background: var(--bg-hover); color: var(--text); }
 .composer {
-  max-width: 760px; margin: 0 auto; position: relative;
+  max-width: 912px; margin: 0 auto; position: relative;
   background: var(--bg-elevated); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 12px 14px 10px;
   transition: border-color 0.12s ease-out;
