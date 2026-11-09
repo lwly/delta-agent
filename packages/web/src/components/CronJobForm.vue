@@ -319,15 +319,15 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .day { width: 140px; }
 .custom { font-family: var(--mono); font-size: 12.5px; }
-.yolo-hint { color: #d29922; font-size: 11.5px; }
+.yolo-hint { color: var(--orange); font-size: 11.5px; }
 .yolo-confirm {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid #d29922; background: rgba(210, 153, 34, 0.08);
+  border: 1px solid var(--orange); background: rgba(210, 153, 34, 0.08);
   border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text);
 }
 .link { border: none; background: transparent; color: var(--accent); font-size: 11.5px; cursor: pointer; padding: 0; text-align: left; }
 .err { color: var(--red); font-size: 11.5px; }
-.warn { color: #d29922; font-size: 11.5px; }
+.warn { color: var(--orange); font-size: 11.5px; }
 .error { color: var(--red); font-size: 12.5px; margin: 0; }
 .more summary { color: var(--text-dim); font-size: 12px; cursor: pointer; }
 .more .field { margin-top: 8px; }
@@ -337,8 +337,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   color: var(--text-dim); font-size: 13px; padding: 7px 16px; cursor: pointer;
 }
 .btn:hover:not(:disabled) { color: var(--text); }
-.btn.primary { background: #238636; border-color: #2ea043; color: #fff; }
-.btn.primary:hover:not(:disabled) { background: #2ea043; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn.small { padding: 3px 10px; font-size: 11.5px; }
 </style>

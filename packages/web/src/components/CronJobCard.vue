@@ -146,10 +146,10 @@ function describeRun(r: CronRunRecordView): string {
 .pick { accent-color: var(--accent); }
 .name { font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .perm { font-size: 10.5px; border-radius: 4px; padding: 1px 6px; flex: none; }
-.perm.yolo { color: #d29922; border: 1px solid #d29922; }
+.perm.yolo { color: var(--orange); border: 1px solid var(--orange); }
 .perm.plan { color: var(--text-dim); border: 1px solid var(--border); }
 .grow { flex: 1; }
-.running-mark { color: #d29922; font-size: 11.5px; flex: none; }
+.running-mark { color: var(--orange); font-size: 11.5px; flex: none; }
 /* toggle 开关 */
 .switch { width: 34px; height: 19px; border-radius: 10px; border: none; background: var(--border); position: relative; cursor: pointer; flex: none; transition: background 0.15s; }
 .switch .knob { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: var(--text-faint); transition: transform 0.15s, background 0.15s; }
@@ -176,7 +176,7 @@ function describeRun(r: CronRunRecordView): string {
 .run:last-child { border-bottom: none; padding-bottom: 0; }
 .run .st { font-weight: 600; }
 .run .st.ok { color: var(--green); }
-.run .st.warn { color: #d29922; }
+.run .st.warn { color: var(--orange); }
 .run .st.bad { color: var(--red); }
 .run .meta { color: var(--text-faint); }
 .run .err { color: var(--red); }

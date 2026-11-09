@@ -64,6 +64,18 @@ const router = useRouter();
 /** 是否处于工作台子路由（定时任务 /cron、运行日志 /logs）：主区渲染 <router-view>，对话流/输入区不渲染 */
 const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/logs'));
 
+// ── 深色工作台改版（纯视觉层） ──────────────────────────────
+/** <1024px 侧栏折叠为抽屉：tabbar ☰ 按钮开合（桌面宽度该状态不影响布局） */
+const sidebarOpen = ref(false);
+/** 标签栏会话 tab 标题：当前会话 > 当前项目 > 兜底 */
+const tabTitle = computed(() => chat.sessionMeta?.title || activeProjectName.value || '工作台');
+/** 会话列表头像蓝/红渐变交替（纯展示：按会话 id 哈希决定色调，不参与任何业务） */
+function avatarTone(id: string): 'blue' | 'red' {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 2 === 0 ? 'blue' : 'red';
+}
+
 // ── 侧边栏状态 ──────────────────────────────────────────────
 const expanded = ref<Set<string>>(new Set());
 const newRoot = ref('');
@@ -1249,25 +1261,51 @@ watch(
 </script>
 
 <template>
-  <div class="app" :class="{ 'panel-open': panel.open }">
+  <div class="app" :class="{ 'panel-open': panel.open, 'sidebar-open': sidebarOpen }">
     <!-- 项目菜单打开时的点击外部关闭层 -->
     <div v-if="projectMenuFor" class="menu-overlay" @click="projectMenuFor = ''" />
-    <!-- ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ -->
+    <!-- ══════════ 最左图标栏 rail（48px；<768px 隐藏，入口下沉底部 dock） ══════════ -->
+    <nav class="rail">
+      <span class="rail__logo" title="Delta-Agent">Δ</span>
+      <button class="rail__btn" type="button" title="会话检索（⌘K）" @click="showSearch = true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      </button>
+      <router-link class="rail__btn" to="/cron" title="定时任务">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+      </router-link>
+      <router-link class="rail__btn" to="/logs" title="运行日志">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
+      </router-link>
+      <button class="rail__btn" type="button" :class="{ 'rail__btn--on': panel.open }" title="项目文件（⌘B）" @click="panel.togglePanel()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" /></svg>
+      </button>
+      <button class="rail__btn" type="button" :class="{ 'rail__btn--on': showTerminal }" :disabled="!chat.sessionId" :title="chat.sessionId ? '内置终端' : '先打开会话'" @click="toggleTerminal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="m7 9 3.5 3L7 15" /><path d="M12.5 15H17" /></svg>
+      </button>
+      <span class="rail__spacer" />
+      <button class="rail__btn" type="button" title="回收站" @click="showTrash = true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="m6 7 .9 12.1A2 2 0 0 0 8.9 21h6.2a2 2 0 0 0 2-1.9L18 7" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+      </button>
+      <router-link class="rail__btn" to="/settings" title="设置（含待确认记忆角标）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3" /><path d="M12 18.5v3" /><path d="m5.3 5.3 2.1 2.1" /><path d="m16.6 16.6 2.1 2.1" /><path d="M2.5 12h3" /><path d="M18.5 12h3" /><path d="m5.3 18.7 2.1-2.1" /><path d="m16.6 7.4 2.1-2.1" /></svg>
+        <span v-if="memoryPendingCount > 0" class="rail__badge">{{ memoryPendingCount > 99 ? '99+' : memoryPendingCount }}</span>
+      </router-link>
+    </nav>
+    <!-- <1024px 侧栏抽屉遮罩（桌面宽度恒不渲染） -->
+    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
+    <!-- ══════════ 侧边栏（顶部行 / 全局操作 / 会话列表 / 底部功能） ══════════ -->
     <aside class="sidebar">
-      <!-- 品牌区：图标 + 名称 + 版本，紧凑成组 -->
+      <!-- 顶部 40px 行：8px 绿点（本地工作区连接态）+ 名称 + 上下双箭头 -->
       <div class="brand">
-        <span class="brand-logo">Δ</span>
+        <span class="brand-dot" title="本地工作区" />
         <span class="brand-text">
           <span class="brand-name">Delta-Agent</span>
-          <span class="brand-sub">AI Coding Agent · v0.1.0</span>
         </span>
+        <svg class="brand-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9 4-4 4 4" /><path d="m8 15 4 4 4-4" /></svg>
       </div>
 
-      <!-- 全局操作区：定时任务 / 新项目 / 新对话 / 会话搜索 -->
+      <!-- 全局操作区：新项目 / 新对话 / 会话搜索（定时任务 / 日志 / 设置入口已上收至 rail） -->
       <div class="side-section">
-        <nav class="side-nav">
-          <router-link class="nav-item" to="/cron"><span class="ni-ico">⏰</span>定时任务</router-link>
-        </nav>
         <div class="sidebar-actions">
           <button class="btn-sm" @click="showNewProject = true">＋ 新项目</button>
           <button class="btn-sm primary" :disabled="!ws.activeProjectId" @click="newSession()">＋ 新对话</button>
@@ -1315,13 +1353,18 @@ watch(
               tabindex="0"
               @click="openSession(s.id)"
             >
-              <span class="session-icon">💬</span>
-              <!-- 两行条目：第一行标题，第二行模式徽标 + 相对时间预览 -->
+              <!-- 28px 渐变头像（蓝/红交替 + 白色星形，纯展示） -->
+              <span class="session-avatar" :class="`session-avatar--${avatarTone(s.id)}`">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.6 14.5 9l6.7.3-5.3 4.2 1.9 6.6L12 16.3 6.2 20.1l1.9-6.6L2.8 9.3 9.5 9z" /></svg>
+              </span>
+              <!-- 两行条目：第一行标题 + 右侧时间，第二行模式徽标 -->
               <span class="session-main">
-                <span class="session-title" :title="s.title">{{ s.title }}</span>
+                <span class="session-top">
+                  <span class="session-title" :title="s.title">{{ s.title }}</span>
+                  <span class="session-time" :title="s.updated_at">{{ relTime(s.updated_at) }}</span>
+                </span>
                 <span class="session-sub">
                   <span class="mode-tag" :class="modeCls(s.mode)">{{ modeShort(s.mode) }}</span>
-                  <span class="session-time" :title="s.updated_at">{{ relTime(s.updated_at) }}</span>
                 </span>
               </span>
               <!-- F-37：绑定 worktree 的会话轻量标识（重开自动还原绑定） -->
@@ -1347,13 +1390,8 @@ watch(
       <!-- F-58 任务台：当前项目的 Worker 任务列表（轮询在 store；interrupt 未送达计红点） -->
       <TaskBoard />
 
-      <!-- 底部功能区：设置（含待确认记忆角标）独立成组；Token 进度条；回收站 / 平台降为次级灰字 -->
+      <!-- 底部功能区：Token 进度条；回收站 / 平台降为次级灰字（设置入口在 rail，角标同步） -->
       <div class="side-section bottom-group">
-        <nav class="side-nav bottom">
-          <router-link class="nav-item" to="/settings">
-            <span class="ni-ico">⚙️</span>设置<span v-if="memoryPendingCount > 0" class="nav-badge">{{ memoryPendingCount }}</span>
-          </router-link>
-        </nav>
         <div class="sidebar-footer">
           <div class="footer-row" :title="`今日 token ${todayLabel} / ${DAILY_TOKEN_BUDGET / 10000}k（展示口径）`">
             <span class="footer-label">Token（今日）</span>
@@ -1375,6 +1413,51 @@ watch(
 
     <!-- ══════════ 主区域 ══════════ -->
     <main class="main">
+      <!-- ══════════ 标签栏 tabbar（40px；chrome 底色，子路由页共用） ══════════ -->
+      <div class="tabbar">
+        <!-- <1024px 侧栏抽屉开合（桌面宽度隐藏） -->
+        <button class="tabbar__menu" type="button" title="开合侧栏" @click="sidebarOpen = !sidebarOpen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></svg>
+        </button>
+        <!-- 会话 tab：20px 头像 + 标题；有会话时 hover 显示关闭（仅关视图，不动会话数据） -->
+        <div class="tabbar__tab tabbar__tab--active">
+          <span class="tabbar__avatar" :class="chat.sessionId ? `tabbar__avatar--${avatarTone(chat.sessionId)}` : ''">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2.6 14.5 9l6.7.3-5.3 4.2 1.9 6.6L12 16.3 6.2 20.1l1.9-6.6L2.8 9.3 9.5 9z" /></svg>
+          </span>
+          <span class="tabbar__title" :title="tabTitle">{{ tabTitle }}</span>
+          <button v-if="chat.sessionId" class="tabbar__close" type="button" title="关闭会话视图" @click.stop="chat.close(); sidebarOpen = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12" /><path d="M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <button class="tabbar__add" type="button" title="新对话" :disabled="!ws.activeProjectId" @click="newSession()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+        </button>
+        <span class="tabbar__spacer" />
+        <!-- 模型选择器胶囊：自 composer 操作行上收至标签栏（逻辑不变，仅移位） -->
+        <select v-if="chat.sessionId" class="composer-model tabbar__model" :value="selectedModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
+          <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta?.model || '默认模型' }}</option>
+          <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <!-- F-38 面板开关：分屏图标按钮，激活态 --accent（PRD F-38-1） -->
+        <button
+          class="cfg-op panel-toggle"
+          :class="{ active: panel.open }"
+          type="button"
+          :title="panel.open ? '收起项目文件面板（⌘B）' : '项目文件（⌘B）'"
+          :aria-pressed="panel.open"
+          @click="panel.togglePanel()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" /></svg>
+        </button>
+        <router-link
+          v-if="chat.sessionId"
+          class="cfg-op replay"
+          :class="{ disabled: chat.messages.length === 0 }"
+          :to="`/replay/${chat.sessionId}`"
+          :title="chat.messages.length === 0 ? '暂无可回放的会话内容' : '会话回放'"
+          @click="onReplayClick"
+        >回放</router-link>
+      </div>
       <!-- 工作台子路由（/cron 定时任务、/logs 运行日志）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
       <router-view v-if="isSubRoute" />
       <template v-else>
@@ -1412,40 +1495,17 @@ watch(
         </div>
 
       <template v-else>
-        <!-- 顶栏：层级面包屑 + 回放（右侧） -->
-        <div class="topbar">
-          <nav class="crumb" aria-label="会话位置">
-            <span class="crumb-seg crumb-brand" title="Delta-Agent">Delta-Agent</span>
-            <span class="crumb-sep" aria-hidden="true">/</span>
-            <span class="crumb-seg crumb-project" :title="activeProjectName || '未选择项目'">{{ activeProjectName || '未选择项目' }}</span>
-            <span class="crumb-sep" aria-hidden="true">/</span>
-            <span class="crumb-seg current" :title="chat.sessionMeta.title">{{ chat.sessionMeta.title }}</span>
-          </nav>
-          <router-link
-            class="cfg-op replay"
-            :class="{ disabled: chat.messages.length === 0 }"
-            :to="`/replay/${chat.sessionId}`"
-            :title="chat.messages.length === 0 ? '暂无可回放的会话内容' : '会话回放'"
-            @click="onReplayClick"
-          >▶ 回放</router-link>
-          <!-- F-38 面板开关：📁 图标按钮，激活态 --accent（PRD F-38-1） -->
-          <button
-            class="cfg-op panel-toggle"
-            :class="{ active: panel.open }"
-            type="button"
-            :title="panel.open ? '收起项目文件面板（⌘B）' : '项目文件（⌘B）'"
-            :aria-pressed="panel.open"
-            @click="panel.togglePanel()"
-          >📁</button>
-        </div>
-
-        <!-- 运行状态条（topbar 下、消息流上）：运行中/已暂停/已停止三态 + 暂停/停止/继续控制 -->
+        <!-- 运行状态条（tabbar 下、消息流上）：运行中/已暂停/已停止三态 + 暂停/停止/继续控制 -->
         <RunStatusBar @resume="resumeRun" />
 
         <!-- 消息流（含「回到底部」浮动按钮） -->
         <div class="chat-area">
           <div ref="listRef" class="chat-scroll" @scroll.passive="onChatScroll">
           <div class="chat-inner">
+            <!-- 深色极简空态：会话内无任何消息时的居中提示（13px faint） -->
+            <div v-if="visibleMessages.length === 0 && !chat.streamingText && chat.notices.length === 0" class="chat-empty">
+              描述你的第一个任务，Agent 会在项目目录内推理并执行
+            </div>
             <!-- F-53 载入更早消息（窗口折叠 + 前缀分页，AC-53-1/3） -->
             <div v-if="hiddenCount > 0 || chat.hasMoreOlder" class="load-older-row">
               <button class="btn-sm" :disabled="chat.loadingOlder" @click="loadOlderMessages">
@@ -1763,18 +1823,14 @@ watch(
               <span class="cap-left">支持 Markdown · @ 引用文件 · / 调用 Skill · 可粘贴图片</span>
               <span class="cap-right"><span class="kbd">Enter</span> 发送 · <span class="kbd">Shift+Enter</span> 换行</span>
             </div>
-            <!-- 底部操作区：左=会话 git 状态（项目 ｜ 分支 ｜ Worktree），右=模型选择 + 暂停/停止/发送 -->
+            <!-- 底部操作区：左=会话 git 状态（项目 ｜ 分支 ｜ Worktree），右=暂停/停止/发送（模型选择胶囊在标签栏） -->
             <div class="composer-actions">
               <!-- F-37 会话 git 状态：并入操作行左侧（原先独占一行页脚，竖向太占位） -->
               <GitStatusBar v-if="chat.sessionId" />
-              <select class="composer-model" :value="selectedModel" title="模型偏好（对新建对话生效）" @change="onModelChange">
-                <option v-if="modelOptions.length === 0" value="">{{ chat.sessionMeta.model || '默认模型' }}</option>
-                <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
-              <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸ 暂停</button>
-              <button v-if="chat.running" class="stop-btn" @click="chat.abort()">■ 停止</button>
-              <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" @click="submit">
-                ➤ 发送 <span class="kbd">Enter</span>
+              <button v-if="chat.running" class="stop-btn pause" title="暂停执行（发送消息可恢复）" @click="chat.pause()">⏸</button>
+              <button v-if="chat.running" class="stop-btn" title="停止执行" @click="chat.abort()">■</button>
+              <button v-else class="send-btn" :disabled="!input.trim() && pendingImages.length === 0" title="发送（Enter）" @click="submit">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5" /><path d="m5 12 7-7 7 7" /></svg>
               </button>
             </div>
             <div class="rsz bottom" title="拖动调整输入框高度" @pointerdown="startComposerResize('bottom', $event)"></div>
@@ -1795,6 +1851,22 @@ watch(
         @close="showTerminal = false"
       />
     </div>
+
+    <!-- ══════════ <768px 底部 dock（rail 隐藏后入口下沉；桌面宽度恒隐藏） ══════════ -->
+    <nav class="dock">
+      <button class="dock__btn" type="button" title="会话检索（⌘K）" @click="showSearch = true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      </button>
+      <router-link class="dock__btn" to="/cron" title="定时任务">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+      </router-link>
+      <router-link class="dock__btn" to="/logs" title="运行日志">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
+      </router-link>
+      <router-link class="dock__btn" to="/settings" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3" /><path d="M12 18.5v3" /><path d="m5.3 5.3 2.1 2.1" /><path d="m16.6 16.6 2.1 2.1" /><path d="M2.5 12h3" /><path d="M18.5 12h3" /><path d="m5.3 18.7 2.1-2.1" /><path d="m16.6 7.4 2.1-2.1" /></svg>
+      </router-link>
+    </nav>
 
     <!-- ══════════ 弹窗 ══════════ -->
     <ModalShell v-if="showNewProject" title="注册项目" icon="📁" @close="showNewProject = false">
@@ -1859,6 +1931,46 @@ watch(
 
 <style scoped>
 .app { display: flex; height: 100vh; position: relative; }
+/* ══════════ 最左图标栏 rail（48px，chrome 底色） ══════════ */
+.rail {
+  width: 48px; min-width: 48px;
+  background: var(--bg-chrome);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 4px;
+}
+.rail__logo {
+  width: 30px; height: 30px; border-radius: var(--radius-md); flex-shrink: 0;
+  background: var(--logo-purple);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 13px; color: #fff; font-family: var(--mono);
+  margin-bottom: 8px;
+}
+.rail__btn {
+  position: relative;
+  width: 36px; height: 36px; border: none; border-radius: var(--radius-md);
+  background: transparent; color: #8a8a8a; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
+}
+.rail__btn svg { width: 22px; height: 22px; }
+.rail__btn:hover:not(:disabled) { background: #1f1f1f; color: var(--text); }
+.rail__btn:active:not(:disabled) { color: var(--text); }
+.rail__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 激活项：图标提亮 + 左侧 2px 蓝色竖条（不填充背景） */
+.rail__btn--on, .rail__btn.router-link-active { color: var(--text); }
+.rail__btn--on::before, .rail__btn.router-link-active::before {
+  content: ''; position: absolute; left: -6px; top: 8px; bottom: 8px;
+  width: 2px; border-radius: 1px; background: var(--accent);
+}
+.rail__spacer { flex: 1; }
+.rail__badge {
+  position: absolute; top: 3px; right: 3px; min-width: 14px; height: 14px;
+  border-radius: var(--radius-pill); background: var(--orange); color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; padding: 0 3px;
+}
+/* <1024px 侧栏抽屉遮罩（桌面宽度恒隐藏） */
+.sidebar-backdrop { display: none; }
 /* F-47 右侧栏列容器：文件面板占满剩余高度，内置终端 300px 停靠其下。
    宽度跟随文件面板的行内 width；仅终端（面板收起）时兜底最小宽度 */
 .right-col { display: flex; flex-direction: column; height: 100%; flex: 0 0 auto; min-width: 360px; }
@@ -1867,52 +1979,22 @@ watch(
 /* F-38：面板展开时主区最小宽度 480px（PRD F-38-1）；窄屏覆盖式面板不挤压主区 */
 .app.panel-open .main { min-width: 480px; }
 
-/* ══════════ 侧边栏（五段式：品牌 / 全局操作 / 会话列表 / 底部功能） ══════════ */
+/* ══════════ 侧边栏（顶部行 / 全局操作 / 会话列表 / 底部功能） ══════════ */
 .sidebar {
-  width: 268px; min-width: 268px;
+  width: 260px; min-width: 260px;
   background: var(--bg-panel); border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
 }
-/* 品牌区：图标 + 名称 + 版本紧凑成组，与下方留 16px 间距 */
-.brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; }
-.brand-logo {
-  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
-  background: linear-gradient(135deg, #4c8dff, #2e6fe0);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 13px; color: #fff; font-family: var(--mono);
-}
-.brand-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.brand-name { font-weight: 600; font-size: 14px; line-height: 1.2; }
-.brand-sub { font-size: 10.5px; color: var(--text-faint); line-height: 1.2; }
+/* 顶部 40px 行：8px 绿点 + 名称 + 上下双箭头 */
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 12px; min-height: 40px; }
+.brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.brand-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.brand-name { font-weight: 600; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-caret { width: 14px; height: 14px; color: var(--text-faint); flex-shrink: 0; }
 
 /* 段落容器：12px 间距 + 1px 细分隔线区分各段 */
 .side-section { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .side-section.bottom-group { border-bottom: none; border-top: 1px solid var(--border); }
-
-/* ══════════ 侧栏导航项（图标+文字整行项） ══════════ */
-.side-nav { display: flex; flex-direction: column; gap: 2px; }
-.nav-item {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 7px 10px; border: none; border-radius: 8px;
-  background: transparent; color: var(--text-dim); font-size: 13px;
-  cursor: pointer; text-align: left; text-decoration: none;
-  transition: background 0.12s, color 0.12s;
-}
-.nav-item:hover { background: var(--bg-hover); color: var(--text); }
-.nav-item:active { background: var(--bg-active); }
-.nav-item .ni-ico { width: 20px; flex: none; text-align: center; font-size: 14px; }
-.nav-select {
-  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-  color: inherit; font-size: 13px; cursor: pointer; font-family: inherit;
-}
-.nav-select option { background: var(--bg-elevated); color: var(--text); }
-.nav-badge {
-  margin-left: auto; background: var(--orange); color: #fff; font-size: 9px;
-  border-radius: 8px; padding: 1px 6px; font-weight: 700;
-}
-.nav-item.disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
-/* 底部导航区：设置入口（分隔线由 bottom-group 的 border-top 提供） */
-.side-nav.bottom { padding: 0; }
 
 /* 全局操作按钮：主按钮实心强调色 / 次按钮描边中性（三档统一） */
 .sidebar-actions { display: flex; gap: 8px; }
@@ -1929,10 +2011,12 @@ watch(
 .btn-sm.primary:active:not(:disabled) { background: var(--accent-press); }
 .btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* 搜索框：高 32、bg-elevated、圆角 8、无边框（点击打开检索弹窗） */
 .sidebar-search { padding: 0; }
 .sidebar-search input {
-  width: 100%; padding: 6px 10px; font-size: 12px; cursor: pointer;
-  color: var(--text-dim); background: var(--bg-elevated); border-color: var(--border);
+  width: 100%; height: 32px; padding: 0 10px; font-size: 12px; cursor: pointer;
+  color: var(--text-dim); background: var(--bg-elevated);
+  border: none; border-radius: var(--radius-md);
 }
 
 /* 会话列表区：小节标题（10px 大写风格、faint 色、字距加宽） */
@@ -1950,17 +2034,13 @@ watch(
 }
 .project-header:hover { background: var(--bg-hover); }
 .project-header:active { background: var(--bg-active); }
-.project-header.active { background: var(--accent-soft); }
+.project-header.active { background: var(--bg-active); box-shadow: inset 2px 0 0 var(--accent); }
 .project-caret { font-size: 10px; color: var(--text-faint); transition: transform 0.15s; width: 10px; }
 .project-caret.open { transform: rotate(90deg); }
 .project-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-/* 项目点运行中动效：绿色涟漪扩散（与项目下任一会话的运行态联动，数据源 runningProjectIds） */
-.project-dot.running { animation: project-dot-pulse 1.6s ease-out infinite; }
-@keyframes project-dot-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.55); }
-  70% { box-shadow: 0 0 0 7px rgba(63, 185, 80, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
-}
+/* 项目点运行中动效：仅 opacity 呼吸（禁止阴影涟漪 / 缩放） */
+.project-dot.running { animation: dot-breathe 1.6s ease-in-out infinite; }
+@keyframes dot-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .project-name { font-weight: 600; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 会话计数徽章：浅色中性（bg-elevated + text-dim） */
 .project-count {
@@ -1980,8 +2060,8 @@ watch(
 .project-menu {
   position: absolute; top: calc(100% + 4px); right: 6px; z-index: 41;
   min-width: 168px; padding: 5px;
-  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 9px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
   display: flex; flex-direction: column;
 }
 .project-menu .menu-item {
@@ -1995,23 +2075,32 @@ watch(
 .project-menu .menu-item .mi { width: 16px; text-align: center; flex: none; }
 .project-menu .menu-item.danger:hover { background: var(--red-soft); color: var(--red); }
 
-.session-list { margin: 2px 0 4px 18px; border-left: 1px solid var(--border); padding-left: 8px; }
+.session-list { margin: 2px 0 4px 10px; border-left: 1px solid var(--border); padding-left: 6px; }
+/* 列表项：高 52、padding 10、圆角 8；hover #202020、选中 #262626 + 左 2px 蓝条 */
 .session-item {
   position: relative;
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
-  color: var(--text-dim); font-size: 12.5px; transition: background 0.15s, color 0.15s; margin: 1px 0;
+  display: flex; align-items: center; gap: 10px;
+  height: 52px; padding: 6px 10px; border-radius: var(--radius-md); cursor: pointer;
+  color: var(--text-dim); font-size: 12.5px;
+  transition: background 0.12s ease-out, color 0.12s ease-out; margin: 1px 0;
 }
 .session-item:hover { background: var(--bg-hover); color: var(--text); }
 .session-item:active { background: var(--bg-active); }
-/* 选中态：accent-soft 背景 + 左侧 2px 强调色指示条 */
-.session-item.active { background: var(--accent-soft); color: var(--text); font-weight: 500; box-shadow: inset 2px 0 0 var(--accent); }
-.session-icon { font-size: 11px; opacity: 0.7; width: 14px; text-align: center; }
-/* 两行条目主体：上行标题、下行模式徽标 + 相对时间预览 */
-.session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.session-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.session-sub { display: flex; align-items: center; gap: 6px; }
-.session-time { font-size: 10px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
+.session-item.active { background: var(--bg-active); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+/* 28×28 渐变头像 + 白色星形 */
+.session-avatar {
+  width: 28px; height: 28px; border-radius: var(--radius-md); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.session-avatar svg { width: 14px; height: 14px; }
+.session-avatar--blue { background: var(--avatar-blue); }
+.session-avatar--red { background: var(--avatar-red); }
+/* 两行条目主体：上行标题 + 右侧时间，下行模式徽标 */
+.session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.session-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-time { font-size: 11px; color: var(--text-faint); white-space: nowrap; flex: none; }
 .session-empty { color: var(--text-faint); font-size: 11.5px; padding: 4px 8px; }
 .item-del {
   opacity: 0; width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
@@ -2035,9 +2124,8 @@ watch(
 }
 .mode-tag.running::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--green); animation: run-pulse 1.2s ease-in-out infinite;
+  background: var(--green); animation: dot-breathe 1.2s ease-in-out infinite;
 }
-@keyframes run-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(0.75); } }
 @keyframes tag-breathe { 0%, 100% { background: var(--green-soft); } 50% { background: var(--bg-hover); } }
 .mode-tag.paused { color: var(--orange); background: var(--orange-soft); }
 /* F-37：会话行 worktree 绑定标识 */
@@ -2066,20 +2154,19 @@ watch(
 /* ══════════ 主区域 ══════════ */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
-/* 空态 hero：图标 / 产品名 / 价值主张 / 行动按钮 / 三特性卡，共用同一套变量与卡片规范 */
+/* 空态 hero：极简居中（图标 / 产品名 / 一行提示 / 安静的行动按钮），共用同一套变量 */
 .hero {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 24px; overflow-y: auto;
 }
 .hero-logo {
-  width: 64px; height: 64px; border-radius: 16px;
-  background: linear-gradient(135deg, #4c8dff, #2e6fe0);
+  width: 56px; height: 56px; border-radius: 14px;
+  background: var(--logo-purple);
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 26px; color: #fff; font-family: var(--mono);
-  box-shadow: 0 8px 24px rgba(46, 111, 224, 0.25);
+  font-weight: 700; font-size: 24px; color: #fff; font-family: var(--mono);
 }
-.hero h1 { font-size: 21px; font-weight: 600; letter-spacing: 0.01em; }
-.hero-tagline { color: var(--text-dim); font-size: 13.5px; }
+.hero h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
+.hero-tagline { color: var(--text-faint); font-size: 13px; }
 .hero-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .hero-btn {
   padding: 10px 24px; border-radius: 8px;
@@ -2104,40 +2191,71 @@ watch(
 .f-title { font-size: 13px; font-weight: 600; color: var(--text); }
 .f-desc { font-size: 11.5px; line-height: 1.6; color: var(--text-dim); }
 
-/* 顶栏：与侧栏同色阶，底部 1px 分隔 */
-.topbar {
-  min-height: 52px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px; background: var(--bg-panel);
+/* ══════════ 标签栏 tabbar（40px，chrome 底色） ══════════ */
+.tabbar {
+  height: 40px; min-height: 40px;
+  background: var(--bg-chrome); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 12px 0 8px;
 }
-/* 层级面包屑：段间 / 用 faint 色；最后一段为主文本（600），前两段 dim + hover 提亮下划线 */
-.crumb { display: flex; align-items: center; min-width: 0; flex: 1; font-size: 13px; overflow: hidden; }
-.crumb-seg {
-  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  color: var(--text-dim); transition: color 0.12s;
+.tabbar__menu { display: none; }
+.tabbar__tab {
+  display: flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 6px 0 4px; border-radius: var(--radius-sm);
+  max-width: 280px; min-width: 0;
 }
-.crumb-seg.crumb-brand { flex: none; }
-.crumb-seg.crumb-project, .crumb-seg.current { flex: 0 1 auto; }
-.crumb-seg.current { color: var(--text); font-weight: 600; }
-.crumb-seg:not(.current) { cursor: pointer; }
-.crumb-seg:not(.current):hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
-.crumb-sep { flex: none; color: var(--text-faint); margin: 0 7px; font-size: 12px; }
+.tabbar__tab--active { background: var(--bg-active); }
+.tabbar__avatar {
+  width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: var(--bg-elevated-2);
+}
+.tabbar__avatar svg { width: 10px; height: 10px; }
+.tabbar__avatar--blue { background: var(--avatar-blue); }
+.tabbar__avatar--red { background: var(--avatar-red); }
+.tabbar__title { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tabbar__close {
+  display: none; width: 16px; height: 16px; flex-shrink: 0;
+  border: none; border-radius: 4px; background: transparent; color: var(--text-faint);
+  cursor: pointer; padding: 0;
+  align-items: center; justify-content: center;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
+}
+.tabbar__close svg { width: 10px; height: 10px; }
+.tabbar__tab:hover .tabbar__close { display: inline-flex; }
+.tabbar__close:hover { background: var(--bg-elevated-2); color: var(--text); }
+.tabbar__add {
+  width: 24px; height: 24px; flex-shrink: 0;
+  border: none; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-faint); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
+}
+.tabbar__add svg { width: 14px; height: 14px; }
+.tabbar__add:hover:not(:disabled) { background: var(--bg-elevated-2); color: var(--text); }
+.tabbar__add:disabled { opacity: 0.4; cursor: not-allowed; }
+.tabbar__spacer { flex: 1; }
+/* 标签栏模型胶囊：复用 .composer-model 规格高 28 */
+.tabbar__model { margin-right: 4px; }
+/* 标签栏右侧操作钮：图标化（分屏 / 回放） */
 .cfg-op {
-  padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+  height: 28px; padding: 0 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
   background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: pointer;
-  transition: all 0.12s; text-decoration: none; white-space: nowrap;
+  transition: all 0.12s ease-out; text-decoration: none; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
 }
-.cfg-op:hover { background: var(--bg-hover); color: var(--text); }
+.cfg-op svg { width: 14px; height: 14px; }
+.cfg-op:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--border-strong); }
 .cfg-op:active { background: var(--bg-active); }
-/* 回放固定在顶栏最右：▶ 图标 + 文案；空会话禁用态（faint 色 + not-allowed） */
-.cfg-op.replay { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+/* 回放固定在标签栏最右；空会话禁用态（faint 色 + not-allowed） */
+.cfg-op.replay { flex: none; }
 .cfg-op.replay.disabled,
 .cfg-op.replay.disabled:hover { color: var(--text-faint); cursor: not-allowed; background: var(--bg-elevated); border-color: var(--border); }
 /* F-38 面板开关：28×28 图标按钮；激活态 --accent（PRD §5.6 顶栏开关） */
 .cfg-op.panel-toggle {
   width: 28px; height: 28px; min-width: 28px;
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0; font-size: 13px; line-height: 1;
+  justify-content: center; padding: 0;
 }
 .cfg-op.panel-toggle.active {
   color: var(--accent);
@@ -2148,37 +2266,35 @@ watch(
 /* 消息流容器（含回到底部按钮的定位上下文） */
 .chat-area { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-scroll { flex: 1; overflow-y: auto; padding: 22px 0; }
-/* 消息流与 .composer 同宽：composer 上限 1080，这里含左右各 24px 内边距，
-   故上限取 1080 + 48 = 1128（border-box），内容区正好 1080，左右边缘与输入框卡片对齐 */
-.chat-inner { max-width: 1128px; margin: 0 auto; padding: 0 24px; }
+/* 消息流与 .composer 同宽：内容列最大 760 居中，左右 padding 24 */
+.chat-inner { max-width: 808px; margin: 0 auto; padding: 0 24px; }
+/* 会话内空态：居中一行弱化提示 */
+.chat-empty { text-align: center; color: var(--text-faint); font-size: 13px; padding: 48px 0 16px; }
 /* F-53 载入更早消息入口：居中弱化按钮，不与消息流抢视觉 */
 .load-older-row { display: flex; justify-content: center; padding: 6px 0 10px; }
 .jump-btn {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
-  padding: 7px 16px; border-radius: 999px; border: 1px solid var(--border-strong);
+  padding: 7px 16px; border-radius: var(--radius-pill); border: 1px solid var(--border-strong);
   background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-pop);
   transition: background 0.15s, color 0.15s, border-color 0.15s;
-  animation: fadeIn 0.2s ease;
+  animation: fadeIn 0.15s ease-out;
 }
 .jump-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent-border); }
-.msg { margin-bottom: 18px; animation: fadeIn 0.25s ease; }
-.msg-user { display: flex; gap: 12px; }
-.msg-user .bubble { background: var(--accent-soft); border-color: var(--accent-border); }
+.msg { margin-bottom: 18px; animation: fadeIn 0.15s ease-out; }
+/* 用户消息：右对齐，bg-elevated 气泡（圆角 10，无尾巴无阴影） */
+.msg-user { display: flex; gap: 12px; justify-content: flex-end; }
 .msg-ai { display: flex; gap: 12px; }
 .ai-col { flex: 1; min-width: 0; }
-.avatar {
-  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
-}
-.avatar.user { background: var(--bg-hover); color: var(--text-dim); }
-.avatar.ai { background: linear-gradient(135deg, #4c8dff, #2e6fe0); color: #fff; font-size: 11px; font-family: var(--mono); }
-.bubble {
-  background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 12px; padding: 12px 16px; line-height: 1.65;
-}
-/* 用户气泡撑满整行：右缘与事件卡 / 输入框对齐（原先 max-width 75% 在宽列下明显短一截） */
-.msg-user .bubble { flex: 1; min-width: 0; }
+/* 深色极简改版：头像不再展示（DOM 保留供结构兼容） */
+.avatar { display: none; }
+/* 用户气泡：右对齐、最大宽 70% */
+.msg-user .ai-col { flex: 0 1 auto; max-width: 70%; display: flex; flex-direction: column; align-items: flex-end; }
+.msg-user .msg-meta { flex-direction: row-reverse; }
+.msg-user .bubble { background: var(--bg-elevated); border: none; border-radius: var(--radius-lg); padding: 8px 12px; min-width: 0; }
+/* 助手消息：左对齐、无气泡、纯文本 */
+.msg-ai .bubble { background: transparent; border: none; border-radius: 0; padding: 0; }
+.bubble { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 16px; line-height: 1.6; }
 .msg-text { line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 .md :deep(p) { margin: 6px 0; }
 .md :deep(pre) {
@@ -2285,7 +2401,7 @@ watch(
   display: flex; align-items: flex-start; gap: 10px;
   margin: 12px 0 12px 42px; padding: 9px 14px;
   border-radius: 10px; font-size: 12.5px; color: var(--text-dim);
-  border: 1px dashed var(--border); animation: fadeIn 0.25s ease;
+  border: 1px dashed var(--border); animation: fadeIn 0.15s ease-out;
   white-space: pre-wrap; word-break: break-word;
 }
 .event-ico { font-size: 13px; }
@@ -2294,10 +2410,10 @@ watch(
 
 /* ══════════ 审批卡片 ══════════ */
 .cards-zone { padding-top: 0; }
-.cards-inner { max-width: 1080px; margin: 0 auto; }
+.cards-inner { max-width: 760px; margin: 0 auto; }
 .approve-card {
   border: 1px solid var(--border); border-radius: 12px;
-  padding: 12px 16px; margin-bottom: 10px; animation: fadeIn 0.25s ease;
+  padding: 12px 16px; margin-bottom: 10px; animation: fadeIn 0.15s ease-out;
 }
 .approve-card.confirm { border-color: rgba(248, 81, 73, 0.45); background: var(--red-soft); }
 .approve-card.plan { border-color: rgba(210, 153, 34, 0.35); background: var(--orange-soft); }
@@ -2332,10 +2448,10 @@ watch(
 /* ══════════ 输入区 ══════════ */
 .composer-wrap { padding: 0 24px 10px; }
 /* F-55 外部会话降级提示条（info 条视觉：accent 软底 + 常驻，可关闭）
-   宽度与 .composer 对齐（max-width 1080 居中），避免比输入框更宽显得游离在外 */
+   宽度与 .composer 对齐（max-width 760 居中），避免比输入框更宽显得游离在外 */
 .external-bar {
   display: flex; align-items: flex-start; gap: 8px;
-  max-width: 1080px; margin: 0 auto 8px;
+  max-width: 760px; margin: 0 auto 8px;
   padding: 7px 8px 7px 10px;
   border: 1px solid var(--accent-border); border-radius: 8px;
   background: var(--accent-soft); font-size: 12px; color: var(--text-dim);
@@ -2366,20 +2482,19 @@ watch(
 }
 .eb-close:hover { background: var(--bg-hover); color: var(--text); }
 .composer {
-  max-width: 1080px; margin: 0 auto; position: relative;
+  max-width: 760px; margin: 0 auto; position: relative;
   background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 12px; padding: 12px 14px 10px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  border-radius: var(--radius-lg); padding: 12px 14px 10px;
+  transition: border-color 0.12s ease-out;
 }
-/* 聚焦：accent 描边 + subtle 外发光 */
+/* 聚焦：只把边框提到 border-strong，不加外发光 */
 .composer:focus-within {
-  border-color: rgba(76, 141, 255, 0.4);
-  box-shadow: 0 0 0 3px rgba(76, 141, 255, 0.08);
+  border-color: var(--border-strong);
 }
 .ac-panel {
   position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px);
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); overflow: hidden; z-index: 30;
+  box-shadow: var(--shadow-pop); overflow: hidden; z-index: 30;
   max-height: 300px; overflow-y: auto;
 }
 .ac-item {
@@ -2394,7 +2509,7 @@ watch(
 .ac-tip { padding: 4px 10px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 10.5px; }
 .composer textarea {
   width: 100%; background: transparent; border: none; outline: none;
-  color: var(--text); font-size: 14px; resize: none; height: 44px; line-height: 1.5;
+  color: var(--text); font-size: 13px; resize: none; height: 44px; line-height: 1.5;
   padding: 0; border-radius: 0;
   transition: height 0.12s;
 }
@@ -2434,24 +2549,16 @@ watch(
 .tool-chip:active { background: var(--bg-active); color: var(--text); }
 /* 运行中轻量降级：整体 opacity（按钮仍可点，保留紧急停止入口）+ 顶部细提示行 */
 .composer.degraded { opacity: 0.75; }
-/* 运行中提示行动效：呼吸圆点 + 流光扫过（用户反馈：静态文字看不出"活着"） */
+/* 运行中提示行动效：呼吸圆点（仅 opacity，禁止流光 / 缩放） */
 .composer-hint {
   font-size: 11px; color: var(--orange); background: var(--orange-soft);
-  border-radius: 6px; padding: 4px 9px; margin-bottom: 8px;
+  border-radius: var(--radius-sm); padding: 4px 9px; margin-bottom: 8px;
   display: flex; align-items: center; gap: 6px;
-  position: relative; overflow: hidden;
 }
 .composer-hint::before {
   content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--orange); animation: hint-breathe 1.2s ease-in-out infinite;
+  background: var(--orange); animation: dot-breathe 1.2s ease-in-out infinite;
 }
-.composer-hint::after {
-  content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-  animation: hint-sweep 2.4s ease-in-out infinite;
-}
-@keyframes hint-breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(0.7); } }
-@keyframes hint-sweep { 0% { left: -60%; } 55%, 100% { left: 120%; } }
 /* 工具栏 chip 禁用态（运行中置灰，title 已提示「停止后可继续」） */
 .tool-chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .tool-chip:disabled:hover { background: transparent; color: var(--text-faint); }
@@ -2493,41 +2600,51 @@ watch(
   .composer-actions { flex-wrap: wrap; row-gap: 8px; }
   .composer-actions :deep(.git-bar) { flex: 1 0 100%; }
 }
+/* 发送：28px 圆形按钮；有内容时 bg #e8e8e8 + 黑色图标，无内容时 elevated-2 + 灰图标 */
 .send-btn {
-  padding: 7px 20px; border: none; border-radius: 8px;
-  background: var(--accent); flex: none;
-  color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
-  display: flex; align-items: center; gap: 7px; transition: background 0.15s;
+  width: 28px; height: 28px; padding: 0; border: none; border-radius: var(--radius-pill);
+  background: var(--bg-elevated-2); flex: none;
+  color: var(--text-faint); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
 }
-.send-btn:hover:not(:disabled) { background: var(--accent-strong); }
-.send-btn:active:not(:disabled) { background: var(--accent-press); }
-.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-/* 输入框右下角模型选择：独立 pill 控件（28px 高、自定义 ▾ caret、bg-elevated + border） */
+.send-btn svg { width: 14px; height: 14px; }
+.send-btn:hover:not(:disabled) { background: var(--bg-active); color: var(--text-dim); }
+.send-btn:disabled { cursor: not-allowed; }
+/* 有内容（启用）态：亮底黑图标 */
+.send-btn:not(:disabled) { background: #e8e8e8; color: #111; }
+/* 模型选择器胶囊：28px 高、左侧小方块图标、文字可截断、右 ▾ caret、bg-elevated + border-subtle */
 .composer-model {
   appearance: none; -webkit-appearance: none;
-  margin-left: auto; flex: none; max-width: 220px; height: 28px;
-  padding: 0 24px 0 10px;
+  flex: none; max-width: 220px; height: 28px;
+  padding: 0 24px 0 26px;
   color: var(--text-dim); font-size: 12px; font-family: var(--mono);
-  background: var(--bg-elevated)
-    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236b7280'/%3E%3C/svg%3E")
-    no-repeat right 8px center;
-  border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
+  text-overflow: ellipsis;
+  background-color: var(--bg-elevated);
+  background-image:
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236b6b6b'/%3E%3C/svg%3E"),
+    linear-gradient(#e8e8e8, #e8e8e8);
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 8px center, left 10px center;
+  background-size: 8px 5px, 8px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
+  transition: border-color 0.12s ease-out, color 0.12s ease-out, background-color 0.12s ease-out;
 }
-.composer-model:hover { background-color: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
+.composer-model:hover { background-color: var(--bg-elevated-2); border-color: var(--border-strong); color: var(--text); }
 .composer-model:focus-visible { outline: none; border-color: var(--accent-border); }
 .composer-model option { background: var(--bg-elevated); color: var(--text); }
-/* 停止：实心危险红 + #fff 字（与状态条控制按钮同规范）；暂停：中性描边 */
+/* 停止 / 暂停：28px 圆形小钮（停止实心危险红；暂停中性描边圆钮） */
 .stop-btn {
-  padding: 7px 20px; border: 1px solid var(--red); flex: none;
-  border-radius: 8px; background: var(--red); color: #fff;
-  font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 7px;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  width: 28px; height: 28px; padding: 0; border: 1px solid var(--red); flex: none;
+  border-radius: var(--radius-pill); background: var(--red); color: #fff;
+  font-size: 10px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
 }
-.stop-btn:hover { background: rgba(248, 81, 73, 0.85); }
-.stop-btn:active { background: rgba(248, 81, 73, 0.7); }
+.stop-btn:hover { background: rgba(232, 69, 60, 0.85); }
+.stop-btn:active { background: rgba(232, 69, 60, 0.7); }
 .stop-btn.pause { border-color: var(--border-strong); background: var(--bg-elevated); color: var(--text-dim); }
-.stop-btn.pause:hover { background: var(--bg-hover); color: var(--text); border-color: var(--text-faint); }
+.stop-btn.pause:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--text-faint); }
 .stop-btn.pause:active { background: var(--bg-active); }
 .kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; color: var(--text-faint); }
 /* 发送按钮内的快捷键块：蓝底上用纯白，避免暗色块看起来像渲染异常 */
@@ -2557,4 +2674,61 @@ watch(
 .path-row .btn { flex: 0 0 auto; white-space: nowrap; }
 .error { color: var(--red); font-size: 12.5px; margin-bottom: 8px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ══════════ 底部 dock（<768px；rail 隐藏后入口下沉） ══════════ */
+.dock { display: none; }
+
+/* ══════════ 响应式：<1024px 侧栏抽屉；<768px 隐藏 rail 改底部 dock ══════════ */
+@media (max-width: 1023px) {
+  .tabbar__menu {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; flex-shrink: 0; margin-right: 2px;
+    border: none; border-radius: var(--radius-sm); background: transparent;
+    color: var(--text-dim); cursor: pointer;
+    transition: background 0.12s ease-out, color 0.12s ease-out;
+  }
+  .tabbar__menu svg { width: 16px; height: 16px; }
+  .tabbar__menu:hover { background: var(--bg-elevated-2); color: var(--text); }
+  /* 侧栏改为固定抽屉，脱离文档流，主区占满 */
+  .sidebar {
+    position: fixed; left: 48px; top: 0; bottom: 0; z-index: 50;
+    transform: translateX(-110%);
+    transition: transform 0.15s ease-out;
+  }
+  .app.sidebar-open .sidebar { transform: none; }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 45; background: rgba(0, 0, 0, 0.45); }
+}
+@media (max-width: 767px) {
+  /* 隐藏图标栏，入口下沉底部 dock */
+  .rail { display: none; }
+  .sidebar { left: 0; width: 260px; }
+  .dock {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    height: 48px; background: var(--bg-chrome); border-top: 1px solid var(--border);
+    align-items: center; justify-content: space-around; padding: 0 8px;
+  }
+  .dock__btn {
+    width: 36px; height: 36px; border: none; border-radius: var(--radius-md);
+    background: transparent; color: #8a8a8a; cursor: pointer; text-decoration: none;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s ease-out, color 0.12s ease-out;
+  }
+  .dock__btn svg { width: 22px; height: 22px; }
+  .dock__btn:hover, .dock__btn.router-link-active { color: var(--text); }
+  .dock__btn.router-link-active { position: relative; }
+  .dock__btn.router-link-active::before {
+    content: ''; position: absolute; top: 2px; left: 7px; right: 7px; height: 2px;
+    border-radius: 1px; background: var(--accent);
+  }
+  /* 主区与右侧栏给底部 dock 让位 */
+  .app { height: calc(100vh - 48px); }
+  .right-col { display: none; }
+  /* 消息列收窄边距 */
+  .chat-inner { padding: 0 12px; }
+  .composer-wrap { padding: 0 12px 10px; }
+  .msg-user .ai-col { max-width: 85%; }
+  /* 模型胶囊在窄屏可伸缩截断 */
+  .tabbar__model { max-width: 140px; min-width: 0; }
+  .tabbar__tab { max-width: 200px; }
+}
 </style>

@@ -1,42 +1,60 @@
-/* 全局主题：单色强调色系（#4C8DFF）+ 三级文本层级 + 4px 间距栅格（仅用 4/8/12/16/24） */
+/* 全局主题：深色 / 极简 / 桌面级 AI Agent 工作台
+   近黑中性色板 + 三级文本层级 + 4px 间距栅格（仅用 4/8/12/16/24）
+   强调色仅蓝（激活态/头像）与红（头像/危险），紫仅用于 Logo */
 :root {
-  /* ── 背景四级 ── */
-  --bg: #0f1115;            /* 全局背景 */
-  --bg-panel: #131619;      /* 侧边栏 / 面板 */
-  --bg-elevated: #1a1d23;   /* 卡片 / 条目 */
-  --bg-hover: #22262e;      /* hover */
-  --bg-active: #2a2f3a;     /* 选中 / active */
+  /* ── 背景层级 ── */
+  --bg-chrome: #0d0d0d;     /* 顶部标签栏 + 最左侧图标栏 */
+  --bg: #1a1a1a;            /* 侧栏与主内容区底色 */
+  --bg-panel: #1a1a1a;      /* 侧边栏 / 面板（与底色同层，靠细边框分区） */
+  --bg-elevated: #212121;   /* 搜索框 / 输入框 / 用户气泡 */
+  --bg-elevated-2: #292929; /* 圆形小按钮 / hover 提升一档 */
+  --bg-hover: #202020;      /* 列表项 hover */
+  --bg-active: #262626;     /* 选中 / active */
 
   /* ── 边框 ── */
-  --border: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
 
   /* ── 三级文本 ── */
-  --text: #e6e8eb;          /* 主文本（14px/600 标题、13px/400 正文） */
-  --text-dim: #9aa0a6;      /* 次级文本（11-12px） */
-  --text-faint: #6b7280;    /* 弱化信息 */
+  --text: #e8e8e8;          /* 主文本（13px/600 标题、13px/400 正文） */
+  --text-dim: #9a9a9a;      /* 次级文本（11-12px） */
+  --text-faint: #6b6b6b;    /* 弱化信息 */
 
-  /* ── 唯一强调色 ── */
-  --accent: #4c8dff;
-  --accent-strong: #2e6fe0; /* hover 加深一档 */
-  --accent-press: #2a63c7;  /* active 再加深一档 */
-  --accent-soft: rgba(76, 141, 255, 0.14);
-  --accent-border: rgba(76, 141, 255, 0.4);
+  /* ── 强调色 ── */
+  --accent: #3b8ee8;        /* 主强调：激活态、蓝色头像 */
+  --accent-strong: #2f74bd; /* hover 加深一档 */
+  --accent-press: #2a68a9;  /* active 再加深一档 */
+  --accent-soft: rgba(59, 142, 232, 0.14);
+  --accent-border: rgba(59, 142, 232, 0.4);
+
+  /* ── 头像 / Logo 渐变（inline CSS，不新增图片资源） ── */
+  --avatar-blue: linear-gradient(135deg, #3b8ee8, #2f74bd);
+  --avatar-red: linear-gradient(135deg, #e8453c, #c2352d);
+  --logo-purple: linear-gradient(135deg, #d0a8f0, #a678d8);
 
   /* ── 语义状态色（仅用于运行中 / 暂停 / 危险操作，不作装饰） ── */
   --green: #3fb950;
   --green-soft: rgba(63, 185, 80, 0.12);
   --orange: #d29922;
   --orange-soft: rgba(210, 153, 34, 0.12);
-  --red: #f85149;
-  --red-soft: rgba(248, 81, 73, 0.12);
+  --red: #e8453c;
+  --red-soft: rgba(232, 69, 60, 0.12);
 
-  /* 兼容保留：设置页记忆类型徽标仍引用 */
-  --purple: #bc8cff;
-  --purple-soft: rgba(188, 140, 255, 0.12);
+  /* 兼容保留：设置页记忆类型徽标仍引用（紫仅此处与 Logo 使用） */
+  --purple: #d0a8f0;
+  --purple-soft: rgba(208, 168, 240, 0.12);
+
+  /* ── 圆角：小控件 6 / 输入框与卡片 8 / 气泡 10 / 圆形 999 ── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* ── 阴影：仅浮层最小分离感，禁止发光 / 彩色阴影 ── */
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4);
 
   --mono: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --sans: -apple-system, 'PingFang SC', 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --sans: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,18 +63,18 @@ body {
   font-family: var(--sans);
   background: var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   overflow: hidden;
 }
 
-/* 滚动条：6px 半透明，hover 加深 */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+/* 滚动条：8px，轨道透明，thumb 12% → hover 20% */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-/* 通用键盘焦点态：2px 强调色 outline + offset（可点击元素三态之一） */
+/* 通用键盘焦点态：2px 强调色 outline + offset（Tab 焦点始终可见） */
 :where(button, a, [role='button'], [tabindex]):focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -70,23 +88,23 @@ input, textarea, select, button { font-family: inherit; }
 input, textarea, select {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 11px;
   color: var(--text);
   font-size: 13px;
   outline: none;
 }
-input:focus, textarea:focus, select:focus { border-color: var(--accent-border); }
-input::placeholder, textarea::placeholder { color: var(--text-faint); }
+input:focus, textarea:focus, select:focus { border-color: var(--border-strong); }
+input::placeholder, textarea::placeholder { color: #7a7a7a; }
 
 /* 通用按钮三档：主（实心强调色）/ 次（描边中性）/ 危险（红字描边） */
 .btn {
-  padding: 7px 14px; border-radius: 8px;
+  padding: 7px 14px; border-radius: var(--radius-md);
   border: 1px solid var(--border); background: var(--bg-elevated);
   color: var(--text); font-size: 12.5px; cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
 }
-.btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-strong); }
+.btn:hover:not(:disabled) { background: var(--bg-elevated-2); border-color: var(--border-strong); }
 .btn:active:not(:disabled) { background: var(--bg-active); }
 .btn.primary {
   background: var(--accent); border-color: transparent; color: #fff; font-weight: 600;
@@ -95,7 +113,7 @@ input::placeholder, textarea::placeholder { color: var(--text-faint); }
 .btn.primary:active:not(:disabled) { background: var(--accent-press); }
 .btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.danger { color: var(--red); }
-.btn.danger:hover:not(:disabled) { border-color: rgba(248, 81, 73, 0.5); background: var(--red-soft); }
+.btn.danger:hover:not(:disabled) { border-color: rgba(232, 69, 60, 0.5); background: var(--red-soft); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 会话模式徽标（react / plan / multi 三态：语义色仅作状态区分，不装饰） */
@@ -115,4 +133,5 @@ input::placeholder, textarea::placeholder { color: var(--text-faint); }
 .mem-kind.pitfall { background: var(--red-soft); color: var(--red); }
 .mem-kind.workflow { background: var(--orange-soft); color: var(--orange); }
 
-@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* 动效：仅 opacity 淡入，禁止位移 / 缩放 / 弹跳 */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
