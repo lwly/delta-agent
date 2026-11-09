@@ -1,5 +1,4 @@
 import type * as http from 'node:http';
-import type { ChatMessage } from '@delta/shared';
 import type { SessionHub } from '../hub.js';
 import type { SessionService } from '../../session/service.js';
 import type { CronExecutor } from '../../cron/runner.js';
@@ -50,7 +49,6 @@ export interface BuiltinHttpRouteContext {
   hub: SessionHub;
   json: JsonWriter;
   err: ErrWriter;
-  summarizeToolContent: (item: { seq: number; message: ChatMessage }) => { seq: number; message: ChatMessage };
   /** F-39：按项目根缓存专家库（createWebServer 注入；缺省不能建带 expert 的会话） */
   expertStoreFor?: (projectRoot: string | undefined) => ExpertStore;
   /** F-39 import/create 后清空专家库缓存 */
@@ -59,7 +57,7 @@ export interface BuiltinHttpRouteContext {
   browseDeps?: BrowseDeps;
 }
 
-/** P4 已声明式登记的内置 HTTP 路由组（其余仍走 http.ts if/else）。 */
+/** P4 已声明式登记的内置 HTTP 路由组。 */
 export const BUILTIN_HTTP_ROUTE_GROUPS = [
   'cron',
   'worker-tasks',

@@ -97,7 +97,7 @@
 - **代码位置**：子路径 `@delta/core/plugins`（`packages/core/src/plugins/index.ts`）。**P7**：`@delta/host` 聚合内置贡献 workspace 包 + `createServeRuntime`；`@delta/core/server` 收口 `SessionHub` / `routes` / 只读 API 路由；主桶仅兼容再导出。真机验收：`e2e/cli/e2e-plugins.mjs`（CLI 命令 + serve）、Web `e2e/web/plugins-api.spec.ts` + `plugin-views/bootstrap.ts`。
   - 引擎 `packages/core/src/plugins/host.ts`（`registerEngine` / `resolveEngine`）；登记 `plugins/engines-register.ts`，内置包 `packages/plugins/builtin-engines`（P2）；hub 经 `plugins/contract` 分派
   - 服务 `packages/core/src/plugins/services.ts`（`createServiceHost`）；内置 `plugins/builtin-services/`（P3），包 `packages/plugins/builtin-services`
-  - HTTP 路由 `packages/core/src/server/routes.ts`（`RouteDef` / `matchRoute` / `assertRouteDecls`）；内置表 `server/builtin-routes/`（P4：cron、worker-tasks、sessions、system），包 `packages/plugins/builtin-routes`
+  - HTTP 路由 `packages/core/src/server/routes.ts`（`RouteDef` / `matchRoute` / `assertRouteDecls`）；内置表 `server/builtin-routes/`（P4：cron、worker-tasks、sessions、system），包 `packages/plugins/builtin-routes`；装配 `server/http.ts`（`createWebServer`）；静态托管 `server/static-host.ts`
   - CLI 命令 `packages/cli/src/commands.ts`（`registerCommand`）；内置树 `cli/builtin-commands/mount.ts`（P4），包 `packages/plugins/builtin-commands`
   - 工具 `packages/core/src/plugins/tools.ts:20`（`registerTool`）
   - 服务 `packages/core/src/plugins/services.ts:17`（`createServiceHost`）

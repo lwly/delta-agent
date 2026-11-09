@@ -1,26 +1,21 @@
 /**
  * delta 本地 Web 服务（technical-design §8/§10）
  * - 纯本地部署：仅监听回环地址；默认端口按形态错开——打包/托管 127.0.0.1:7902，本地开发后端（--dev）7900
- * - REST API：projects / sessions / messages / trash / search / abort / confirm / answer
+ * - REST API：声明式路由表（builtin-routes + 插件 routes）
  * - SSE：GET /api/sessions/:id/events 推送 HubEvent
  * - 静态托管：Vue 构建产物目录（webDistDir），SPA fallback 到 index.html
  */
 import * as http from 'node:http';
-import * as fs from 'node:fs';
 import * as os from 'node:os';
-import * as path from 'node:path';
-import type { ChatMessage } from '@delta/shared';
 import type { SessionHub } from './hub.js';
 import type { SessionService } from '../session/service.js';
 import { WebSocketServer } from 'ws';
 import type { TerminalManager } from './terminal.js';
 import type { CronExecutor } from '../cron/runner.js';
 import type { Dispatcher } from '../router/dispatcher.js';
-// F-41 运行日志（/api/logs 尾读 + /api/logs/stream 实时推送）
 import { appendRoutes, assertRouteDecls, matchRoute, type RouteDef } from './routes.js';
 import { appendBuiltinHttpRoutes } from './builtin-routes/register.js';
 import type { RunLog } from '../logging/logger.js';
-// F-38 文件浏览器 + 变更面板：只读路由（分发见下方 `parts[3] === 'browse'` 分支）
 import type { BrowseDeps } from './browse-routes.js';
 import { ExpertStore } from '../experts/store.js';
 import {
@@ -30,6 +25,7 @@ import {
   setExternalAgentModel,
   resolveAgentModels,
 } from '../external/detect.js';
+import { tryServeStatic } from './static-host.js';
 
 export interface ServeOptions {
   service: SessionService;
@@ -120,38 +116,6 @@ function tokenMatches(expected: string, got: string): boolean {
   return diff === 0;
 }
 
-/**
- * F-53 消息分页摘要化（AC-53-4）：tool 消息超大输出不随页整体传输，
- * 只下发头部 + 截断标记（contentTruncated/contentLength），全文由客户端按需拉取。
- */
-const TOOL_RESULT_INLINE_LIMIT = 4000;
-const TOOL_RESULT_INLINE_HEAD = 1200;
-
-function summarizeToolContent(item: { seq: number; message: ChatMessage }): { seq: number; message: ChatMessage } {
-  const m = item.message;
-  if (m.role !== 'tool' || m.content.length <= TOOL_RESULT_INLINE_LIMIT) return item;
-  return {
-    seq: item.seq,
-    message: {
-      ...m,
-      content: `${m.content.slice(0, TOOL_RESULT_INLINE_HEAD)}\n…[已摘要化：完整输出共 ${m.content.length} 字符，工具卡内可加载全文]`,
-      contentTruncated: true,
-      contentLength: m.content.length,
-    },
-  };
-}
-
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-};
-
 export function createWebServer(opts: ServeOptions): http.Server {
   const service = opts.service;
   const hub = opts.hub;
@@ -193,8 +157,6 @@ export function createWebServer(opts: ServeOptions): http.Server {
     return store;
   };
 
-
-  // P4：内置声明式路由（cron / worker-tasks / sessions / system）
   const routeTable: RouteDef[] = [];
   appendBuiltinHttpRoutes(routeTable, {
     opts,
@@ -202,7 +164,6 @@ export function createWebServer(opts: ServeOptions): http.Server {
     hub,
     json,
     err,
-    summarizeToolContent,
     expertStoreFor,
     browseDeps,
     resetExpertStores: () => expertStores.clear(),
@@ -212,7 +173,8 @@ export function createWebServer(opts: ServeOptions): http.Server {
   // 启动断言（判据 2）：漏声明 auth 的路由在 createWebServer 构造期直接抛错
   assertRouteDecls(routeTable, 'http.ts route table');
 
-  const server = http.createServer(async (req, res) => {    const url = new URL(req.url ?? '/', `http://localhost`);
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', `http://localhost`);
     const parts = url.pathname.split('/').filter(Boolean);
     const method = req.method ?? 'GET';
 
@@ -228,9 +190,6 @@ export function createWebServer(opts: ServeOptions): http.Server {
     }
 
     try {
-      // ── 架构收口 T8：RouteTable 分发（cron / worker-tasks / sessions 三组试点）──
-      // 命中声明式路由 → handler 直接写响应并返回；未命中 → 落入下方既有 if/else 链
-      // （渐进迁移；/ws/terminal 的 upgrade 独立路径与本表无关，不受影响）。
       const matchedRoute = matchRoute(routeTable, method, parts);
       if (matchedRoute) {
         await matchedRoute.def.handler({
@@ -243,35 +202,15 @@ export function createWebServer(opts: ServeOptions): http.Server {
         return;
       }
 
-      // ── 静态资源（Vue 构建产物，SPA fallback；F-53：优先回预压缩 .gz，AC-53-5）──
-      if (opts.webDistDir && (method === 'GET' || method === 'HEAD') && !parts[0]?.startsWith('api')) {
-        const rel = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-        const file = path.resolve(opts.webDistDir, rel);
-        if (file.startsWith(path.resolve(opts.webDistDir)) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-          const type = MIME[path.extname(file)] ?? 'application/octet-stream';
-          const acceptGzip = String(req.headers['accept-encoding'] ?? '').includes('gzip');
-          const gzFile = `${file}.gz`;
-          if (acceptGzip && fs.existsSync(gzFile) && fs.statSync(gzFile).isFile()) {
-            res.writeHead(200, { 'content-type': type, 'content-encoding': 'gzip', vary: 'Accept-Encoding' });
-            fs.createReadStream(gzFile).pipe(res);
-            return;
-          }
-          res.writeHead(200, { 'content-type': type, vary: 'Accept-Encoding' });
-          fs.createReadStream(file).pipe(res);
-          return;
-        }
-        const index = path.join(opts.webDistDir, 'index.html');
-        if (fs.existsSync(index)) {
-          const indexGz = `${index}.gz`;
-          if (String(req.headers['accept-encoding'] ?? '').includes('gzip') && fs.existsSync(indexGz)) {
-            res.writeHead(200, { 'content-type': MIME['.html']!, 'content-encoding': 'gzip', vary: 'Accept-Encoding' });
-            fs.createReadStream(indexGz).pipe(res);
-            return;
-          }
-          res.writeHead(200, { 'content-type': MIME['.html']! });
-          fs.createReadStream(index).pipe(res);
-          return;
-        }
+      if (tryServeStatic({
+        webDistDir: opts.webDistDir,
+        method,
+        pathname: url.pathname,
+        parts,
+        acceptEncoding: String(req.headers['accept-encoding'] ?? ''),
+        res,
+      })) {
+        return;
       }
 
       if (parts[0] === 'api') return err(res, 404, 'not found');

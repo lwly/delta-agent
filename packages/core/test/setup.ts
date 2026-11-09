@@ -1,3 +1,7 @@
+/** WorkBuddy 等注入的 NODE_OPTIONS shim 会导致 vitest SIGSEGV（见 design-f31 §9） */
+delete process.env.NODE_OPTIONS;
+
+import '../src/plugins/builtins.js';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

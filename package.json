@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "build:deps": "pnpm --filter @delta/shared run build && pnpm --filter @delta/core run build && pnpm --filter @delta/plugin-builtin-engines run build && pnpm --filter @delta/plugin-builtin-services run build && pnpm --filter @delta/plugin-builtin-routes run build && pnpm --filter @delta/plugin-builtin-commands run build && pnpm --filter @delta/plugin-builtin-views run build && pnpm --filter @delta/host run build && pnpm --filter @delta/cli run build",
-    "test": "node scripts/verify-node.mjs && pnpm -r run test",
+    "test": "node scripts/run-unit-tests.mjs",
     "typecheck": "pnpm run build:deps && pnpm -r run typecheck",
     "smoke": "node scripts/smoke.mjs",
     "smoke:web": "pnpm --filter @delta/web build && node scripts/smoke-web.mjs",

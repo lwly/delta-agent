@@ -28,13 +28,25 @@ function canLoad() {
 }
 
 if (!canLoad()) {
-  process.stderr.write(`[ensure-sqlite-native] 为 Node ${process.version} 重建 better-sqlite3 …\n`);
+  process.stderr.write(`[ensure-sqlite-native] 为 Node ${process.version} 准备 better-sqlite3 原生绑定 …\n`);
   const sqliteDir = path.dirname(req.resolve('better-sqlite3/package.json'));
-  execFileSync('npm', ['run', 'build-release', '--prefix', sqliteDir], {
-    cwd: root,
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  });
+  process.stderr.write('[ensure-sqlite-native] 尝试 prebuild-install（免编译）…\n');
+  try {
+    execFileSync('npx', ['--yes', 'prebuild-install'], {
+      cwd: sqliteDir,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+    });
+  } catch {
+    process.stderr.write('[ensure-sqlite-native] prebuild-install 未成功，回退 node-gyp build-release …\n');
+  }
+  if (!canLoad()) {
+    execFileSync('npm', ['run', 'build-release', '--prefix', sqliteDir], {
+      cwd: root,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+    });
+  }
   if (!canLoad()) {
     console.error(`✘ better-sqlite3 仍无法加载（当前 ${process.version}）。请：nvm install 20 && nvm use（见 .nvmrc）`);
     process.exit(1);
