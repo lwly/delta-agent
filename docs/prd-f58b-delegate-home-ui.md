@@ -36,7 +36,7 @@
   - 提交 = `createWorkerTask(pid, { title, goal, executor, permission_mode: 'default', dispatch: true })`；title 由 goal 首行截断（24 字 + …）收敛。
   - 接手 toast：底部居中「{助手} 接手了"{标题}"」+ 打开按钮（开详情面板）+ 关闭钮；8s 自动消失。
   - 首页下方按三组渲染当前项目任务卡（状态点呼吸动画区分运行中；点击打开详情面板）；无项目时提示「先在左侧注册一个项目」。
-- **前端-状态分组**（TaskBoard 改版 + tasks store）：`groups` getter 输出 `needYou(needs_decision) / active(queued|preflight|running) / finished(done|failed|canceled)` 三组；侧栏任务台与首页共用同一映射，空组不渲染。
+- **前端-状态分组**（TaskBoard 改版 + tasks store）：`groups` getter 输出 `needYou(needs_decision) / active(queued|preflight|running) / finished(done|failed|canceled)` 三组；任务台入口 = tabbar 最右侧按钮唤出的右侧抽屉（closable，含 interrupt 红点角标），与首页共用同一分组映射，空组不渲染。
 - **前端-任务详情右滑面板**（新增 TaskDetailPanel，`openTaskId` 驱动）：
   - 头部：任务标题 + 状态 chip（随 2s 轮询刷新）+ 关闭钮；结论行：`result_summary`（失败红色）。
   - 步骤摘要折叠条：「N 个步骤 · X 秒」（N = 工具调用卡计数，X = started_at → finished_at / now 现算秒）+ 派单原文 / 验收条件折叠展示；运行中默认展开并显示「正在思考思路…」。
@@ -47,7 +47,7 @@
 
 ## 5. 交互要点说明
 
-### 5.1 状态分组映射（唯一口径，侧栏与首页共用）
+### 5.1 状态分组映射（唯一口径，任务台抽屉与首页共用）
 
 | 分组 | 状态 | 说明 |
 |---|---|---|
@@ -71,7 +71,7 @@
 
 1. 打开工作台（无会话态）显示轻首页：slogan、派任务输入卡、助手选择器（默认内置助手）三要素可见（e2e workbench-load）。
 2. 首页输入「做一个ppt」+ Enter：`worker_tasks` 落一行（title = 首行 24 字截断，executor = 选中值，dispatch 立即派发），toast 出现且「打开」能开详情面板。
-3. 任务行在「需要你 / 处理中 / 已完成」三组中按 §5.1 映射正确归组，侧栏任务台与首页一致。
+3. 任务行在「需要你 / 处理中 / 已完成」三组中按 §5.1 映射正确归组，任务台抽屉与首页一致。
 4. 点开 done 任务详情：历史消息与工具卡完整（调用/结果按 callId 配对，含失败态），「N 个步骤 · X 秒」与任务时长一致。
 5. 点开运行中任务详情：状态 chip = running、显示「正在思考思路…」、工具卡实时到达；输入框禁用。
 6. 会话空闲时在面板发消息：user 消息入列并触发新一轮 run；运行中尝试发送被禁用兜底，409 时本地回滚并提示。

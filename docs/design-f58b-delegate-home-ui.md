@@ -22,8 +22,8 @@ F-58 已确立「Worker = 独立会话」（design-f58 §5.1）：每个任务�
 
 ```
 packages/web/src/
-├── views/WorkbenchView.vue        # 空态 hero 重写为轻首页；挂载 TaskDetailPanel + 接手 toast
-├── components/TaskBoard.vue       # 单列表 → 三组分组渲染；行点击 openTaskPanel
+├── views/WorkbenchView.vue        # 空态 hero 重写为轻首页；任务台入口移至 tabbar 最右侧（按钮 + 右侧抽屉）；挂载 TaskDetailPanel + 接手 toast
+├── components/TaskBoard.vue       # 单列表 → 三组分组渲染（抽屉内嵌 closable 形态）；行点击 openTaskPanel
 ├── components/TaskDetailPanel.vue # 新增：Worker 会话轻量视图（右滑面板）
 └── stores/tasks.ts                # +groups getter / +openTaskId、openTaskPanel / +dispatch action
 e2e/web/workbench-load.spec.ts     # 首屏断言对齐轻首页三要素
@@ -33,7 +33,7 @@ e2e/web/workbench-load.spec.ts     # 首屏断言对齐轻首页三要素
 
 ## 2. tasks store 增量（stores/tasks.ts）
 
-### 2.1 分组 getter（唯一口径，侧栏与首页共用）
+### 2.1 分组 getter（唯一口径，任务台抽屉与首页共用）
 
 ```ts
 groups: (s): TaskGroups => ({
@@ -118,7 +118,7 @@ dispatch(projectId, { goal, executor?, permissionMode? }) → Promise<WorkerTask
 ### 4.2 与既有动线的关系
 
 - 轻首页只出现在「无打开会话」空态（沿用原 hero 条件 `!chat.sessionId || !chat.sessionMeta`）；打开任一会话即回到完整工作台。
-- 侧栏任务台（TaskBoard）与首页分组列表共用 `groups` getter，两条入口打开同一个 TaskDetailPanel。
+- 任务台（tabbar 最右侧入口 → 右侧抽屉，TaskBoard closable 形态）与首页分组列表共用 `groups` getter，两条入口打开同一个 TaskDetailPanel。
 - 委派任务**不**自动打开 Router 会话：dispatch 后用户停留在轻首页看任务进展（目标形态），Router 播报仍走主会话（F-58 §10）。合并动线列为 P2 候选（prd-f58b Q3）。
 
 ## 5. 测试增量
@@ -135,4 +135,4 @@ dispatch(projectId, { goal, executor?, permissionMode? }) → Promise<WorkerTask
 
 1. 全量 `pnpm typecheck` / `pnpm --filter @delta/web test`（115 通过）/ web e2e（10 passed, 2 skipped）/ `pnpm smoke:web` 通过。
 2. 详情面板对 done / running / queued 三态任务的渲染行为（历史完整 / 实时流 / 排队占位）手工验收路径见 prd-f58b §6.4-6.6。
-3. 已知限制：面板不处理审批卡（confirm / plan）——外部 Worker 的 needs_decision 仍走侧栏任务台裁决弹窗；「等待中」独立分组待 prd-f58b Q1 决策。
+3. 已知限制：面板不处理审批卡（confirm / plan）——外部 Worker 的 needs_decision 仍走任务台抽屉裁决弹窗；「等待中」独立分组待 prd-f58b Q1 决策。
