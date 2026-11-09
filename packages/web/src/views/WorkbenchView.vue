@@ -1355,12 +1355,6 @@ watch(
       <router-link class="rail__btn" to="/logs" title="运行日志">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
       </router-link>
-      <button class="rail__btn" type="button" :class="{ 'rail__btn--on': panel.open }" title="项目文件（⌘B）" @click="panel.togglePanel()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M12 4.5v15" /></svg>
-      </button>
-      <button class="rail__btn" type="button" :class="{ 'rail__btn--on': showTerminal }" :disabled="!chat.sessionId" :title="chat.sessionId ? '内置终端' : '先打开会话'" @click="toggleTerminal">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="m7 9 3.5 3L7 15" /><path d="M12.5 15H17" /></svg>
-      </button>
       <span class="rail__spacer" />
       <button class="rail__btn" type="button" title="回收站" @click="showTrash = true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="m6 7 .9 12.1A2 2 0 0 0 8.9 21h6.2a2 2 0 0 0 2-1.9L18 7" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
