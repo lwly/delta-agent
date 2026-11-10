@@ -3,14 +3,15 @@
  *
  * 架构：main 进程进程内托管 core 的 serve 运行时（createServeRuntime），
  * BrowserWindow 加载本地 server（127.0.0.1 随机端口），API 走 authToken 鉴权。
- * 不 spawn 子进程、不依赖 @delta/cli（react/ink 零引入）。
+ * 主进程不拉 Ink TUI；cron 到期任务以 ELECTRON_RUN_AS_NODE 子进程跑 @delta/cli run。
  *
  * 安全基线：contextIsolation + sandbox 开启、nodeIntegration 关闭；
  * server 仅监听回环地址，/api/* 强制 token（静态资源豁免，无敏感数据）。
  *
- * v1 范围：cron「立即运行」不可用（cronExecutor 缺省 → POST 返回 400）；
+ * cron：注入 spawn 执行器并托管调度器（ELECTRON_RUN_AS_NODE + @delta/cli）；
  * 签名/公证挂起（发布前补齐）；自动更新二期。
  */
+import { createDesktopCronExecutor } from './cron-desktop.js';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -73,9 +74,14 @@ async function bootstrap(): Promise<void> {
       authToken,
       webDistDir: resolveWebDistDir(),
       registerProject: false, // 桌面端无 cwd 概念：项目由 UI 创建（POST /api/projects）
-      // 桌面 v1 不注入 cronExecutor，调度器由 CLI serve 托管：显式 off 固化该语义，
-      // 防止将来注入 executor 后内置调度悄然启用（架构收口方案 T1 / D1 裁决）
-      cronScheduler: 'off',
+      ...((): { cronExecutor?: ReturnType<typeof createDesktopCronExecutor>; cronScheduler: 'auto' | 'off' } => {
+        const cronExecutor = createDesktopCronExecutor();
+        if (!cronExecutor) {
+          console.warn('ℹ cron：未找到 @delta/cli 入口，定时任务不会自动触发（请先 pnpm build @delta/cli 后重打安装包）');
+          return { cronScheduler: 'off' };
+        }
+        return { cronExecutor, cronScheduler: 'auto' };
+      })(),
       notify: notifier,
       log: (line) => console.log(line),
       logError: (line) => console.error(line),

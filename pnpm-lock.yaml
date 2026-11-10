@@ -107,6 +107,9 @@ importers:
 
   packages/desktop:
     dependencies:
+      '@delta/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@delta/core':
         specifier: workspace:*
         version: link:../core

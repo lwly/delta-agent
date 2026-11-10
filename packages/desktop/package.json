@@ -15,6 +15,7 @@
     "dist": "pnpm rebuild:native && electron-builder --config electron-builder.yml"
   },
   "dependencies": {
+    "@delta/cli": "workspace:*",
     "@delta/core": "workspace:*",
     "@delta/host": "workspace:*",
     "@delta/shared": "workspace:*"

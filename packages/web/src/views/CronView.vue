@@ -267,7 +267,13 @@ onBeforeUnmount(() => {
     <!-- 调度器未运行提示（F-22 收口 T1 / D3）：任务仍可手动「立即运行」，只是不会自动触发 -->
     <p v-if="!schedulerRunning" class="warn">
       ⚠ 调度器未运行（mode={{ schedulerMode }}）：定时任务不会自动触发。
-      请在宿主机保持 <code>delta serve</code> 运行（内置调度），或自行运行 <code>delta cron daemon</code>。
+      <template v-if="schedulerMode === 'off'">
+        CLI 形态请保持 <code>delta serve</code> 运行（内置调度），或另开终端运行 <code>delta cron daemon</code>。
+        桌面安装包需使用内置调度的近期版本（随应用驻留托盘即可，无需单独起 serve）。
+      </template>
+      <template v-else>
+        当前 serve 处于 auto 模式但未注入 cron 执行器；请升级宿主或使用 CLI <code>delta serve</code>。
+      </template>
     </p>
 
     <div class="tabs">
