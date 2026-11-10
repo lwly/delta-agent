@@ -8,6 +8,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { useTasksStore } from '../stores/tasks';
 import type { FailureKind, WorkerTaskStatus, WorkerTaskView } from '../api/client';
+import { WORKER_TASK_STATUS_LABEL } from '../utils/workerTaskLabels';
 import TaskDecisionDialog from './TaskDecisionDialog.vue';
 
 const tasks = useTasksStore();
@@ -53,17 +54,6 @@ function dotCls(status: WorkerTaskStatus): string {
       return 'dot-idle';
   }
 }
-
-const STATUS_LABEL: Record<WorkerTaskStatus, string> = {
-  draft: '草稿',
-  queued: '排队中',
-  preflight: '预检中',
-  running: '运行中',
-  needs_decision: '待裁决',
-  done: '已完成',
-  failed: '失败',
-  canceled: '已取消',
-};
 
 const FAILURE_LABEL: Record<FailureKind, string> = {
   preflight: '预检失败',
@@ -130,7 +120,7 @@ function open(t: WorkerTaskView) {
               <span v-if="t.watchdog_flag === 'suspect'" class="tb-suspect" title="看门狗 L3 粗筛标记：疑似越界，只标记不纠偏（§9.1）">存疑</span>
             </span>
             <span class="tb-sub">
-              <span class="tb-status">{{ STATUS_LABEL[t.status] }}</span>
+              <span class="tb-status">{{ WORKER_TASK_STATUS_LABEL[t.status] }}</span>
               <span v-if="t.status === 'running' || t.status === 'preflight'" class="tb-elapsed">已运行 {{ elapsedMin(t) }} 分钟</span>
               <span v-else-if="t.status === 'failed'" class="tb-failure" :title="t.result_summary ?? undefined">
                 {{ FAILURE_LABEL[t.failure_kind ?? 'runtime'] }}

@@ -16,6 +16,7 @@ import { api } from '../api/client';
 import { useTasksStore } from '../stores/tasks';
 import ToolCallCard from './ToolCallCard.vue';
 import { useSessionTranscript } from '../composables/useSessionTranscript';
+import { WORKER_TASK_STATUS_LABEL, workerTaskCanCancel } from '../utils/workerTaskLabels';
 
 const tasks = useTasksStore();
 
@@ -39,6 +40,14 @@ const pendingDecisions = tr.pendingDecisions;
 const input = ref('');
 const sending = ref(false);
 const sendError = ref('');
+const canceling = ref(false);
+
+const statusLabel = computed(() => {
+  const s = task.value?.status;
+  return s ? WORKER_TASK_STATUS_LABEL[s] : '';
+});
+
+const canCancel = computed(() => (task.value ? workerTaskCanCancel(task.value.status) : false));
 
 /** 继续发消息可用性：会话运行中不可插入指令（hub 单槽 409，§2.2） */
 const canSend = computed(() => !!task.value?.worker_session_id && !running.value && !sending.value);
@@ -83,6 +92,17 @@ async function send() {
   }
 }
 
+async function cancelTask() {
+  const id = task.value?.id;
+  if (!id || canceling.value) return;
+  canceling.value = true;
+  try {
+    await tasks.cancel(id);
+  } finally {
+    canceling.value = false;
+  }
+}
+
 onUnmounted(() => tr.dispose());
 </script>
 
@@ -92,7 +112,7 @@ onUnmounted(() => tr.dispose());
     <!-- 头部：标题 + 状态 chip + 关闭 -->
     <header class="tdp-head">
       <span class="tdp-title" :title="task.title">{{ task.title }}</span>
-      <span class="tdp-status" :class="`tdp-status--${task.status}`">{{ task.status }}</span>
+      <span class="tdp-status" :class="`tdp-status--${task.status}`">{{ statusLabel }}</span>
       <button class="tdp-close" type="button" title="关闭面板" @click="tasks.openTaskPanel(null)">×</button>
     </header>
 
@@ -120,7 +140,14 @@ onUnmounted(() => tr.dispose());
 
     <!-- 尚未创建执行会话（draft/queued/preflight 阶段） -->
     <div v-if="!task.worker_session_id" class="tdp-empty">
-      任务{{ task.status === 'queued' ? '排队中' : '准备中' }}，执行会话尚未创建…
+      <p>任务{{ statusLabel }}，执行会话尚未创建…</p>
+      <button
+        v-if="canCancel"
+        class="tdp-stop"
+        type="button"
+        :disabled="canceling"
+        @click="cancelTask"
+      >{{ canceling ? '停止中…' : '停止' }}</button>
     </div>
     <div v-else-if="loading" class="tdp-empty">加载会话记录…</div>
     <div v-else-if="loadFailed" class="tdp-empty">会话记录加载失败（该任务可能由外部 agent 执行）</div>
@@ -148,8 +175,13 @@ onUnmounted(() => tr.dispose());
       <div v-if="!msgs.length && !toolCards.length && !streamingText && running" class="tdp-empty">正在思考思路…</div>
     </div>
 
-    <!-- 底部续发消息 -->
+    <!-- 底部续发消息 / 运行中停止 -->
     <footer class="tdp-composer" :title="running ? '任务执行中，输入暂不可用（会话单槽）' : ''">
+      <div v-if="canCancel && task.worker_session_id" class="tdp-cancel-row">
+        <button class="tdp-stop" type="button" :disabled="canceling" @click="cancelTask">
+          {{ canceling ? '停止中…' : '停止任务' }}
+        </button>
+      </div>
       <div v-if="sendError" class="tdp-send-error">{{ sendError }}</div>
       <div class="tdp-input-row">
         <input
@@ -217,7 +249,8 @@ onUnmounted(() => tr.dispose());
   background: var(--bg-hover);
   color: var(--text-dim);
 }
-.tdp-status--running, .tdp-status--preflight { background: var(--green-soft, var(--bg-hover)); color: var(--green); }
+.tdp-status--queued, .tdp-status--preflight { background: var(--accent-soft, var(--bg-hover)); color: var(--accent); }
+.tdp-status--running { background: var(--green-soft, var(--bg-hover)); color: var(--green); }
 .tdp-status--needs_decision { background: var(--orange-soft); color: var(--orange); }
 .tdp-status--done { background: var(--bg-hover); color: var(--green); }
 .tdp-status--failed { background: var(--red-soft, var(--bg-hover)); color: var(--red); }
@@ -290,7 +323,30 @@ onUnmounted(() => tr.dispose());
 }
 .tdp-msg--user .tdp-bubble { background: var(--accent-soft); }
 .tdp-bubble.streaming { color: var(--text-dim); }
-.tdp-empty { padding: 20px 14px; font-size: 12px; color: var(--text-faint); text-align: center; }
+.tdp-empty {
+  padding: 20px 14px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.tdp-empty p { margin: 0; }
+.tdp-stop {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  color: var(--red);
+  font-size: 12px;
+  cursor: pointer;
+}
+.tdp-stop:hover:not(:disabled) { background: var(--red-soft, rgba(248, 81, 73, 0.12)); }
+.tdp-stop:disabled { opacity: 0.5; cursor: not-allowed; }
+.tdp-cancel-row { padding-bottom: 8px; }
 .tdp-composer { border-top: 1px solid var(--border); padding: 10px 14px; }
 .tdp-send-error { font-size: 11px; color: var(--red); padding-bottom: 6px; }
 .tdp-input-row { display: flex; gap: 8px; }
