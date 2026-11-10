@@ -51,7 +51,6 @@ watch(
 );
 
 const isWorkbench = computed(() => route.path === '/' || route.path === '');
-const isProjects = computed(() => route.path.startsWith('/projects'));
 const isTasks = computed(() => route.path.startsWith('/tasks'));
 const isSettings = computed(() => route.path.startsWith('/settings'));
 </script>
@@ -67,14 +66,6 @@ const isSettings = computed(() => route.path.startsWith('/settings'));
         :class="{ 'rail__btn--on': isWorkbench }"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.36-4.1-1L3 20l1.1-5.2A8.5 8.5 0 1 1 21 11.5Z" /></svg>
-      </router-link>
-      <router-link
-        class="rail__btn"
-        to="/projects"
-        title="项目管理"
-        :class="{ 'rail__btn--on': isProjects }"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M4 7l1.5 13h13L20 7" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
       </router-link>
       <router-link
         class="rail__btn"
@@ -119,9 +110,6 @@ const isSettings = computed(() => route.path.startsWith('/settings'));
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.36-4.1-1L3 20l1.1-5.2A8.5 8.5 0 1 1 21 11.5Z" /></svg>
       </button>
-      <router-link class="dock__btn" to="/projects" title="项目管理">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16" /><path d="M4 7l1.5 13h13L20 7" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
-      </router-link>
       <router-link class="dock__btn" to="/tasks" title="委派任务">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 8v8l8 5 8-5V8Z" /><path d="m4 8 8 5 8-5" /><path d="M12 13v8" /></svg>
       </router-link>
