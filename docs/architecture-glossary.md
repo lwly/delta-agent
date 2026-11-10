@@ -111,7 +111,16 @@
 - **不是什么**：不是专家信任（`~/.delta/experts.json`，见 §8，带 version / toolsHash）；不是权限档（plan/default/yolo）；不是能力授权界面。信任只决定是否执行 `main`，工具确认与沙箱仍在 `executeOne`。
 - **代码位置**：文件名 `packages/core/src/paths.ts:81`（`FILES.pluginTrust`）；判定 `packages/core/src/plugins/loader.ts:119`（`readTrusted`），未信任 `packages/core/src/plugins/loader.ts:55`（`status: 'untrusted'`）。单个 `main` 抛错记 `status: 'error'`，其余插件继续加载。
 
+## 15. BuiltinTool（内置工具，现行数量）
+
+- **是什么**：在 `ToolRegistry.registerBuiltins()` 中登记、由 `packages/core/src/plugins/tools.ts` 启动时 `registerTool` 的 **19** 个 `AgentTool`（`BUILTIN_TOOL_COUNT` 与 `TOOL_CAPABILITY` 键数一致，单测 `experts-policy.test.ts` 断言）。
+- **不是什么**：不含 MCP 动态工具（`mcp__*` 由 `McpManager.registerInto` 单独登记）；`run_command` 的 `run_in_background` 是参数能力，**不是**第 20 个内置工具名。
+- **现行名称（按登记顺序）**：`read_file` · `write_file` · `edit_file` · `list_dir` · `glob_search` · `grep_search` · `run_command` · `run_tests` · `task_output` · `web_fetch` · `todo_write` · `ask_user` · `load_skill` · `unload_skill` · `save_memory` · `recall_memory` · `task` · `dispatch_task` · `task_status`。
+- **里程碑扩展示意（历史文档常引用的数字）**：MVP 11 → +Skills 13 → +记忆 15 → +`task` 16 → +F-54 `task_output` 17 → +F-58 `dispatch_task`/`task_status` **19**。`docs/PRD.md` §3.3 表仍描述 MVP 11 项，读总览时以本条目为准。
+- **代码位置**：常量 `packages/core/src/experts/policy.ts:14`（`BUILTIN_TOOL_COUNT`）；登记 `packages/core/src/plugins/tools.ts:30-38`；能力档 `packages/core/src/tools/permissions.ts`（`TOOL_CAPABILITY`）；专家详情分母 API `packages/core/src/server/experts-routes.ts`（`total: BUILTIN_TOOL_COUNT`）。
+
 ## 维护约定
 
 - 术语新增/含义变更 → 先改本表（docs 提交），再改代码注释；两者同一迭代交付。
+- 新增/删除内置工具时：同步改 `BUILTIN_TOOL_COUNT`、单测、`README.md` 与 PRD F-06 里程碑注记，并更新 §15 名称列表。
 - 模块顶部锚点注释格式：「本模块的 Task 指的是 X（见 glossary §N），不是 Y」。

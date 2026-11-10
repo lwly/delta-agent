@@ -2,6 +2,8 @@
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 状态：待评审
 > 产品名称：delta-agent —— AI 编程命令行工具（AI Coding Agent）
+>
+> **漂移回写（2026-11-10）**：内置工具现行 **19** 个，权威清单见 `docs/architecture-glossary.md` §15。下文 §1.5 / §3.1 / §3.3 中「11 个」等为 **MVP 历史基线**；需求池 F-06 行的里程碑注记已追平至现行数量。总览特性以 `README.md` 为准。
 
 ---
 
@@ -37,7 +39,7 @@ delta-agent 是一个基于 TypeScript 开发的 AI Coding Agent，以 CLI 为�
 ### 1.5 核心价值主张
 
 - **三种执行模式**按需切换：快问快答用 ReAct，复杂任务用 Plan-and-Execute，大型工程用 Multi-Agent。
-- **工具生态开放**：内置 11 个核心工具 + MCP 动态扩展 + Skills 技能包。
+- **工具生态开放**：内置 19 个核心工具（见 glossary §15）+ MCP 动态扩展 + Skills 技能包。
 - **长对话不失控**：预算管理 + 自动上下文压缩。
 - **CLI + Web 双形态**：终端里干活，浏览器里管理项目与会话。
 
@@ -81,7 +83,7 @@ delta-agent
 │   ├── B1 多 Provider 适配（SSE 流式）
 │   └── B2 ToolCall 分片累积解析
 ├── C. 工具体系
-│   ├── C1 11 个内置核心工具
+│   ├── C1 内置核心工具（MVP 11 → 现行 19，见 glossary §15）
 │   ├── C2 MCP 动态扩展
 │   └── C3 多工具并行执行
 ├── D. 提示词体系
@@ -107,7 +109,7 @@ delta-agent
 | F-04 | SSE 多模型接入层 | Provider 抽象 + **4 家实现**（Anthropic / OpenAI 兼容 / DeepSeek / Qwen），随 M2 全量交付；统一 SSE 事件模型；断流重连 |
 | F-04a | 大模型配置管理 | Provider 配置增删改查：名称、类型（anthropic / openai-compatible / deepseek / qwen…）、Base URL、API Key、默认模型、参数（temperature / max_tokens / top_p）；Key 经系统钥匙串或本地加密文件存储、界面不回显；保存前连通性测试；支持配置启停与排序（决定下拉列表顺序）；CLI `agent models` 与 Web 设置页双入口 |
 | F-05 | ToolCall 分片累积解析 | 流式 delta 中 tool_call 分片按 index 累积拼接，结束时统一校验 JSON；兼容不同厂商分片格式差异 |
-| F-06 | 11 个内置核心工具 | 见 §3.3 工具清单；M3 已扩展至 13 个（+load_skill / unload_skill）；✅ 记忆里程碑再加 save_memory / recall_memory 至 15 个（2026-10-22 交付）；✅ F-26 子代理工具再加 task 至 16 个（2026-10-22 交付） |
+| F-06 | 内置核心工具 | 见 §3.3 MVP 清单与 glossary §15；✅ 里程碑：13（+Skills）→ 15（+记忆）→ 16（+`task`）→ 17（+`task_output` F-54）→ **19**（+`dispatch_task`/`task_status` F-58，以 `BUILTIN_TOOL_COUNT` 为准） |
 | F-06a | 三层记忆系统 | L1 短期（会话消息列表）；L2 长期动态记忆（SQLite：SHA256 去重 → 配额检查 → FIFO+importance 淘汰的写入管线；词汇覆盖率 72%+重要性 12%+置信度 8%+时间衰减 6%+访问频率 2% 的召回评分）；L3 长期静态记忆（MEMORY.md/.delta/agent.md，团队共享、git 版本追踪）；工具再扩展 +2（save_memory / recall_memory，至 15 个）；自动提炼默认开启（可关闭），候选进"待确认"队列防记忆污染；Web 提供记忆管理面板（查看/编辑/停用/待确认）。详见 docs/memory-design.md |
 | F-07 | MCP 动态扩展 | stdio + SSE 两种 MCP transport；`agent mcp add/list/remove`；MCP 工具与内置工具统一注册 |
 | F-08 | 多工具并行执行 | 模型单轮返回多个 tool_call 时并行执行（Promise.allSettled），结果按序回填 |
@@ -157,7 +159,9 @@ delta-agent
 
 > 注：F-23~F-26 虽列 P2，但其中权限模式（F-23）与文件变更管理（F-24）对日常使用影响较大，若评审认为必要可提前至 P1。
 
-### 3.3 内置 11 个核心工具清单
+### 3.3 内置 11 个核心工具清单（MVP 基线）
+
+> **现行 19 个工具**（含 `load_skill`/`unload_skill`、`save_memory`/`recall_memory`、`task`、`task_output`、`dispatch_task`、`task_status` 等）以 `docs/architecture-glossary.md` §15 与 `packages/core/src/plugins/tools.ts` 为准；下表保留 v1.0 原始 11 项便于对照需求编号 F-06。
 
 | # | 工具名 | 职责 | 关键参数 |
 |---|--------|------|----------|

@@ -1,31 +1,38 @@
 # delta-agent 技术方案设计
 
 > 版本：v1.0 ｜ 日期：2026-10-21 ｜ 对应 PRD：v1.0
+>
+> **架构漂移回写（2026-11-10）**：§1 仓库布局、内置工具数以现行代码为准；权威清单见 `docs/architecture-glossary.md` §15（当前 **19** 个内置工具）。下文保留 v1.0 原文处仅作历史参照。
 
 ---
 
 ## 1. 总体架构
 
-### 1.1 Monorepo 结构（pnpm workspace + turborepo）
+### 1.1 Monorepo 结构（pnpm workspace）
 
 ```
 delta-agent/
-├── apps/
-│   └── web/                    # Vue 3 Web 控制台
 ├── packages/
-│   ├── core/                   # Agent 核心（与运行环境无关）
-│   │   ├── src/engine/         # ReAct 主循环 / Plan / Multi-Agent
+│   ├── cli/                    # @delta/cli — CLI 入口，命令名 `delta`（commander + Ink TUI）
+│   ├── core/                   # @delta/core — Agent 核心（引擎 / LLM / 工具 / MCP / 会话）
+│   │   ├── src/engine/         # ReAct / Plan-and-Execute / Multi-Agent
 │   │   ├── src/llm/            # 多模型接入层（SSE / ToolCall 解析）
-│   │   ├── src/tools/          # 11 个内置工具
+│   │   ├── src/tools/          # 内置工具实现；登记见 src/plugins/tools.ts（§15）
 │   │   ├── src/mcp/            # MCP 客户端与工具桥接
 │   │   ├── src/prompts/        # 7 层提示词组装
 │   │   ├── src/context/        # 预算管理 + 上下文压缩
 │   │   ├── src/skills/         # Skills 系统
 │   │   └── src/session/        # 会话/项目模型 + 持久化
-│   ├── cli/                    # CLI 入口，命令名 `delta`（commander + ink TUI）
-│   └── shared/                 # 共享类型 / 协议定义（core ↔ web）
-├── pnpm-workspace.yaml
-└── turbo.json
+│   ├── shared/                 # @delta/shared — 跨包类型 / 协议
+│   ├── host/                   # @delta/host — serve 运行时聚合（core + 内置插件）
+│   ├── web/                    # @delta/web — Vue 3 Web 控制台（HTTP/SSE 访问 host）
+│   ├── desktop/                # Electron 桌面壳
+│   └── plugins/                # @delta/plugin-builtin-* — 内置贡献分包
+├── e2e/                        # CLI + Web E2E
+├── docs/
+├── scripts/
+├── prototype/
+└── pnpm-workspace.yaml         # 无 turborepo；构建见根 package.json scripts
 ```
 
 ### 1.2 技术选型
@@ -45,10 +52,10 @@ delta-agent/
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  apps/web (Vue3)          │  packages/cli (终端)      │
+│  packages/web (Vue3)      │  packages/cli (终端)      │
 │  项目/会话管理 · 对话可视化    │  REPL · 命令 · TUI        │
 └──────────────┬──────────────┴────────────┬────────────┘
-               │   SessionService (HTTP/SSE)│
+               │      packages/host (HTTP/SSE serve)   │
 ┌──────────────▼────────────────────────────▼──────────┐
 │                  packages/core                        │
 │  ┌───────────── Agent Engine ──────────────┐          │
@@ -62,7 +69,7 @@ delta-agent/
 │        │                                              │
 │  ┌─────▼───────────┐  ┌──────────┐  ┌───────────┐     │
 │  │ ToolRegistry     │  │ Prompt    │  │ Session    │     │
-│  │ 11内置+MCP+并行   │  │ Assembler │  │ Store(SQLite)│   │
+│  │ 19内置+MCP+并行   │  │ Assembler │  │ Store(SQLite)│   │
 │  └─────────────────┘  │ (7层/3级)  │  └───────────┘     │
 │                       └──────────┘                     │
 └──────────────────────────────────────────────────────┘
@@ -228,7 +235,7 @@ interface AgentTool {
 }
 
 class ToolRegistry {
-  registerBuiltins();               // 11 个内置
+  registerBuiltins();               // 19 个内置（见 glossary §15）
   async attachMcp(server: McpServerConfig);   // MCP 工具桥接为 AgentTool
   async executeAll(calls: ToolCall[]): Promise<ToolResult[]>;
   // 并行执行：Promise.allSettled，read 类并发无限制，

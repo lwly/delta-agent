@@ -162,7 +162,7 @@ interface MemoryService {
 }
 ```
 
-内置工具由 11 个扩展至 **13 个**：新增 `save_memory`、`recall_memory`（均标记 `safe`，免确认）。
+记忆里程碑时内置工具由 11 个扩展至 **15 个**（+`save_memory`、`recall_memory`，均 `safe`）。**现行总数 19**（含 Skills / task / F-54 / F-58 等），见 `docs/architecture-glossary.md` §15。
 
 ## 10. 里程碑归属
 

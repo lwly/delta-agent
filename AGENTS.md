@@ -38,7 +38,7 @@ delta-agent/
 2. `docs/prd-f*.md` + `docs/design-f*.md` —— 单功能成对文档（先 PRD 定范围，再 design 定实现）
 3. `docs/architecture-glossary.md` —— 术语表；`docs/architecture-consolidation-plan.md` —— 架构收口规格
 
-已知文档漂移：`docs/technical-design.md` §1.1 仍写 `apps/web` + turborepo，实际为 `packages/web` + 纯 pnpm workspace；README 仓库结构未列 `host/`、`plugins/`。以实际代码为准。
+文档与代码冲突时以代码为准；**现行口径**（仓库布局、内置工具数等）以 `docs/architecture-glossary.md` 为准，`docs/technical-design.md` / `docs/PRD.md` v1.0 正文部分段落保留历史基线并带头注回写。
 
 ## 2. 模块边界
 

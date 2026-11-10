@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // F-39 专家详情内容（只读信息卡 + 1 个主按钮；不 import ModalShell，可被将来 Drawer 直接复用）。
-// 安全口径：不展示包绝对路径与任何凭据；工具白名单透明展示（限制 N/16）。
+// 安全口径：不展示包绝对路径与任何凭据；工具白名单透明展示（限制 N/total，分母来自 API tool_stats.total）。
 import { computed, onMounted, ref } from 'vue';
 import { useExpertsStore } from '../stores/experts';
 

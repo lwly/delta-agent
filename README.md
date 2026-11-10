@@ -1,6 +1,6 @@
 # delta-agent
 
-delta-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核心入口**、Vue Web 控制台为可视化前端。内置 **ReAct / Plan-and-Execute / Multi-Agent** 三种引擎，并可将任务委派给本机已安装的 **外部 CLI/ACP Agent**（Claude Code、CodeBuddy、Codex、Cursor 等）。工具层支持 **16 个内置 Function + MCP + Skills + 专家库**，通过 MCP 与插件体系扩展能力，在终端与浏览器中完成编码、调试、重构与多任务编排。
+delta-agent 是一个基于 TypeScript 的 AI Coding Agent，以 **CLI 为核心入口**、Vue Web 控制台为可视化前端。内置 **ReAct / Plan-and-Execute / Multi-Agent** 三种引擎，并可将任务委派给本机已安装的 **外部 CLI/ACP Agent**（Claude Code、CodeBuddy、Codex、Cursor 等）。工具层支持 **19 个内置 Function + MCP + Skills + 专家库**，通过 MCP 与插件体系扩展能力，在终端与浏览器中完成编码、调试、重构与多任务编排。
 
 ## 为什么叫 delta
 
@@ -14,7 +14,7 @@ delta-agent 的寓意即在于此：**它就是驱动代码变化的那股力量
 - **Router / Worker 委派（F-58）**：项目级 **Router 会话**派发用户级委派任务，每任务对应独立 **Worker 会话**；Web 工作台支持任务台、轻首页与进度订阅。
 - **三种执行模式（内置）**：`--mode react | plan-execute | multi-agent` —— 快问快答用 ReAct，复杂任务用 Plan-and-Execute，大型工程用 Multi-Agent 子代理协作。
 - **模型无关接入层**：Anthropic / OpenAI / DeepSeek / Qwen 及任意 OpenAI 兼容网关；API Key 本地加密；流式 SSE + **模型路由**（`delta models routing`）。
-- **工具生态**：16 个内置工具（含 `task` 子代理、`run_in_background` / `task_output` 等）+ **MCP**（stdio/SSE）+ **Skills** 三层（builtin / user / project）+ **专家库 / 专家团**（F-39，`delta expert`）。
+- **工具生态**：19 个内置工具（含 `task` 子代理、`task_output`、F-58 `dispatch_task` / `task_status`；`run_command` 另支持 `run_in_background`）+ **MCP**（stdio/SSE）+ **Skills** 三层（builtin / user / project）+ **专家库 / 专家团**（F-39，`delta expert`）。
 - **长对话不失控**：Token 预算 + 自动上下文压缩 + 三层记忆（会话内 / L2 SQLite / L3 静态 MEMORY.md）。
 - **权限与 Git**：`plan`（只读）/ `default`（写需确认）/ `yolo`（双重确认）三档；`off | suggest | auto` 三档 git 策略。
 - **沙箱执行**：macOS Seatbelt 为主，Docker 可选（`delta sandbox`）。
@@ -28,7 +28,7 @@ delta-agent 的寓意即在于此：**它就是驱动代码变化的那股力量
 
 ![Web 控制台工作台](docs/screenshots/workbench-chat.png)
 
-**设置 → 功能**——系统集成的全部 Function（内置 16 个 + MCP 动态接入），含执行前确认标识：
+**设置 → 功能**——系统集成的全部 Function（内置 19 个 + MCP 动态接入），含执行前确认标识：
 
 ![设置·功能面板](docs/screenshots/settings-tools.png)
 

@@ -430,7 +430,7 @@ graph TD
 - [ ] **P0** `delta serve` 单独运行时定时任务自动触发；关闭开关后不触发；双实例不双跑
 - [ ] **P0** 侧栏只列 chat 会话；worker/router 会话仍可从任务台打开；日志归属不回归
 - [ ] **P0** 切换项目后当前会话与文件面板作用域复位
-- [ ] **P0** 术语表落地，F-49 / CronModal / 通知双路三处文档漂移已回写
+- [x] **P0** 术语表落地，F-49 / CronModal / 通知双路三处文档漂移已回写（2026-11-10 增 §15 内置工具数 + technical-design / PRD / README 回写）
 - [ ] **P1** 4 类 origin 的运行前门禁走同一 `RunGateway`，拒绝时零 LLM 调用、零子进程
 - [ ] **P1** 4 套状态机全部映射到 `CanonicalRunStatus`；项目级 activity SSE 生效且断线降级可用
 - [ ] **P1** cron / 日志后端按 `project_id` 过滤；项目作用域下 cron 调度行可见
