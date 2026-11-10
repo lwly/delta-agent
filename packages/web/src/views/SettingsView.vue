@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// 设置页：记忆 / 模型配置 / 用量 三大块从侧边栏弹窗迁移而来
+// 设置页：记忆 / 模型配置 / 运行日志 等；用量已迁至工作台 rail /usage。
 // 左侧为设置导航（复用工作台 .nav-item 视觉风格），右侧为内容面板；
 // 当前 tab 记在路由 query（/settings?tab=memory），刷新后保持。
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import MemoryPanel from '../components/settings/MemoryPanel.vue';
 import ProvidersPanel from '../components/settings/ProvidersPanel.vue';
-import UsagePanel from '../components/settings/UsagePanel.vue';
+import LogsPanel from '../components/settings/LogsPanel.vue';
 import SkillsPanel from '../components/settings/SkillsPanel.vue';
 import MarketPanel from '../components/settings/MarketPanel.vue';
 import McpPanel from '../components/settings/McpPanel.vue';
@@ -29,7 +29,7 @@ const SECTIONS = [
   { key: 'external', ico: '🤖', label: '外部 Agent' },
   { key: 'tools', ico: '🛠️', label: '功能' },
   { key: 'experts', ico: '🧑‍💼', label: '专家' },
-  { key: 'usage', ico: '📊', label: '用量' },
+  { key: 'logs', ico: '📜', label: '运行日志' },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]['key'];
@@ -42,12 +42,21 @@ const activeTab = computed<SectionKey>(() => {
   return 'memory';
 });
 
+// 旧书签 ?tab=usage → 工作台 /usage
+watch(
+  () => route.query.tab,
+  (t) => {
+    if (t === 'usage') void router.replace('/usage');
+  },
+  { immediate: true },
+);
+
 /** 切换分区：写回路由 query（replace 避免设置页内部切换堆积历史记录） */
 function switchTab(key: SectionKey) {
   void router.replace({ path: '/settings', query: { tab: key } });
 }
 
-// activeTab 为 computed，直接依赖 route.query.tab，路由变化（含 /memory /usage 重定向）自动生效
+// activeTab 为 computed，直接依赖 route.query.tab，路由变化（含 /memory /logs 重定向）自动生效
 </script>
 
 <template>
@@ -81,7 +90,7 @@ function switchTab(key: SectionKey) {
         <ExternalAgentsPanel v-else-if="activeTab === 'external'" />
         <ToolsPanel v-else-if="activeTab === 'tools'" />
         <ExpertsPanel v-else-if="activeTab === 'experts'" />
-        <UsagePanel v-else-if="activeTab === 'usage'" />
+        <LogsPanel v-else-if="activeTab === 'logs'" />
       </main>
     </div>
   </div>

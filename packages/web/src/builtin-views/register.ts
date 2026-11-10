@@ -10,10 +10,10 @@ registerView({
   component: () => import('../views/CronView.vue'),
 });
 registerView({
-  name: 'logs',
-  path: 'logs',
+  name: 'usage',
+  path: 'usage',
   slot: 'workbench-child',
-  component: () => import('../views/LogsView.vue'),
+  component: () => import('../views/UsageView.vue'),
 });
 registerView({
   name: 'settings',

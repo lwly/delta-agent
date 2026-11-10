@@ -1,22 +1,16 @@
 <script setup lang="ts">
-// F-41 运行日志页（路由 /logs）：进入拉取尾部（GET /api/logs）+ SSE 实时追加（/api/logs/stream）。
-// 级别过滤 / 文本过滤 / 自动滚动开关 / 复制；SSE 断线由 EventSource 自动重连（不补拉，
-// 窗口期日志靠重新进入页面时的 tail 兜底）。数据源为 serve 内存环形缓冲（最近 1000 条）。
-// T6：项目作用域改走后端 `?project_id=`（含 cron 调度行等无会话条目）；切项目/切作用域
-// 重拉尾部并重连 SSE 换订阅口径。前端 cwd/sessionId 集合过滤已下线（scope.ts 标 legacy）。
+// 设置页·运行日志面板（F-41）：尾读 + SSE 实时追加；级别/文本过滤与 CronView 同 T6 作用域口径。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, type LogEntryView } from '../api/client';
-import { subscribeLogs } from '../api/sse';
-import { useWorkspaceStore } from '../stores/workspace';
+import { api, type LogEntryView } from '../../api/client';
+import { subscribeLogs } from '../../api/sse';
+import { useWorkspaceStore } from '../../stores/workspace';
 
 type LevelFilter = 'all' | 'debug' | 'info' | 'warn' | 'error';
 
-// ── 项目作用域（T6 后端化）：仅当「跟随项目」且选中项目时，请求带 ?project_id= ──
 const ws = useWorkspaceStore();
 const projectScoped = ref(true);
 const activeProjectName = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.name ?? '');
 const activeRoot = computed(() => ws.projects.find((p) => p.id === ws.activeProjectId)?.root_path ?? '');
-/** 作用域口径：D4 同 cron 页——无项目上下文时不传 = 全量 */
 const scopedProjectId = computed(() => (projectScoped.value ? ws.activeProjectId || undefined : undefined));
 
 const entries = ref<LogEntryView[]>([]);
@@ -24,12 +18,11 @@ const error = ref('');
 const levelFilter = ref<LevelFilter>('all');
 const textFilter = ref('');
 const autoScroll = ref(true);
-const paused = ref(false); // 暂停实时追加（流仍连着，暂停期间丢弃新条目）
+const paused = ref(false);
 
 let unsub: (() => void) | undefined;
 const listEl = ref<HTMLElement | null>(null);
 
-/** 后端已按作用域过滤，此处即全集（级别计数与所见一致） */
 const scopedEntries = computed(() => entries.value);
 
 const filtered = computed(() => {
@@ -54,7 +47,6 @@ const counts = computed(() => ({
 
 async function load(): Promise<void> {
   try {
-    // T6：作用域由后端 ?project_id= 过滤（projectId 直属或会话归属，含 worker/router 会话）
     const r = await api.logsTail(500, scopedProjectId.value ? { projectId: scopedProjectId.value } : undefined);
     entries.value = r.items;
     error.value = '';
@@ -67,12 +59,10 @@ async function load(): Promise<void> {
 function onEntry(e: LogEntryView): void {
   if (paused.value) return;
   entries.value.push(e);
-  // 与服务端环形缓冲同口径：只保留最近 1000 条，防长开页面内存膨胀
   if (entries.value.length > 1000) entries.value.splice(0, entries.value.length - 1000);
   scrollToBottom();
 }
 
-/** 按当前作用域口径（重）连 SSE：连入即补发过滤后的尾部，此后逐条推送 */
 function connectStream(): void {
   unsub?.();
   unsub = subscribeLogs(onEntry, scopedProjectId.value ? { projectId: scopedProjectId.value } : undefined);
@@ -86,7 +76,6 @@ function scrollToBottom(): void {
   });
 }
 
-// 用户手动上滚时自动关掉自动滚动（简单启发：离开底部 40px 以上）
 function onScroll(): void {
   if (!autoScroll.value) return;
   const el = listEl.value;
@@ -101,7 +90,7 @@ function copyAll(): void {
 }
 
 function fmtTs(ts: string): string {
-  return ts.slice(11, 23); // HH:mm:ss.mmm（ISO 去日期段）
+  return ts.slice(11, 23);
 }
 
 function sessionIdShort(id: string): string {
@@ -117,7 +106,6 @@ onBeforeUnmount(() => {
   unsub?.();
 });
 
-// T6：切项目 / 切作用域 → 重拉尾部并重连 SSE 换过滤口径
 watch(
   [() => ws.activeProjectId, projectScoped] as const,
   () => {
@@ -126,29 +114,24 @@ watch(
   },
 );
 
-// 过滤条件变化时回到底部
 watch([levelFilter, textFilter], () => scrollToBottom());
 </script>
 
 <template>
-  <div class="page">
-    <div class="head">
-      <h2>运行日志</h2>
-      <div class="head-actions">
-        <router-link class="btn-sm" to="/">← 工作台</router-link>
-        <!-- F-59 项目作用域开关：跟随左侧选中的项目（会话归属过滤） -->
-        <button
-          v-if="activeRoot"
-          class="btn-sm scope"
-          :class="{ active: projectScoped }"
-          :title="projectScoped ? `只显示 ${activeProjectName} 的日志（会话与定时任务，服务端过滤）` : '显示全部日志，点击回到当前项目'"
-          @click="projectScoped = !projectScoped"
-        >{{ projectScoped ? `📁 ${activeProjectName}` : '全部日志' }}</button>
-        <label class="chk"><input v-model="autoScroll" type="checkbox" /> 自动滚动</label>
-        <button class="btn-sm" @click="paused = !paused">{{ paused ? '▶ 恢复' : '⏸ 暂停' }}</button>
-        <button class="btn-sm" @click="load()">刷新</button>
-        <button class="btn-sm" @click="copyAll()">复制</button>
-      </div>
+  <div class="logs-panel">
+    <p class="sub">serve 内存环形缓冲（最近 1000 条）+ SSE 实时追加；落盘见 <code>~/.delta/logs/</code></p>
+    <div class="toolbar">
+      <button
+        v-if="activeRoot"
+        class="btn-sm scope"
+        :class="{ active: projectScoped }"
+        :title="projectScoped ? `只显示 ${activeProjectName} 的日志（会话与定时任务，服务端过滤）` : '显示全部日志，点击回到当前项目'"
+        @click="projectScoped = !projectScoped"
+      >{{ projectScoped ? `📁 ${activeProjectName}` : '全部日志' }}</button>
+      <label class="chk"><input v-model="autoScroll" type="checkbox" /> 自动滚动</label>
+      <button class="btn-sm" type="button" @click="paused = !paused">{{ paused ? '▶ 恢复' : '⏸ 暂停' }}</button>
+      <button class="btn-sm" type="button" @click="load()">刷新</button>
+      <button class="btn-sm" type="button" @click="copyAll()">复制</button>
     </div>
 
     <p v-if="error" class="error">✘ {{ error }}</p>
@@ -160,6 +143,7 @@ watch([levelFilter, textFilter], () => scrollToBottom());
           :key="key"
           class="chip"
           :class="{ active: levelFilter === key }"
+          type="button"
           @click="levelFilter = key as LevelFilter"
         >{{ label }}</button>
       </div>
@@ -189,28 +173,21 @@ watch([levelFilter, textFilter], () => scrollToBottom());
 </template>
 
 <style scoped>
-/* 页面骨架：与 CronView 同规范（工作台子路由、撑满主区内部滚动、13px/600 标题） */
-.page { color: var(--text); padding: 16px 24px 24px; max-width: 1100px; margin: 0 auto; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
-.head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-h2 { margin: 0; font-size: 13px; font-weight: 600; }
-.head-actions { display: flex; align-items: center; gap: 8px; }
-/* 头部小按钮：28px 高静默钮（此前无样式，浏览器默认外观） */
+.logs-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.sub { margin: 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn-sm {
   height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-elevated); color: var(--text-dim); font-size: 12px; cursor: pointer;
   transition: background 0.12s ease-out, color 0.12s ease-out, border-color 0.12s ease-out;
 }
 .btn-sm:hover { background: var(--bg-elevated-2); color: var(--text); border-color: var(--border-strong); }
-a.btn-sm { text-decoration: none; }
-/* 作用域开关：激活态提亮（与 chip.active 同口径）；关闭态为普通 btn-sm */
 .btn-sm.scope { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btn-sm.scope:not(:disabled) { color: var(--text-dim); }
 .btn-sm.scope.active { background: var(--bg-active); color: var(--text); border-color: var(--border-strong); }
 .chk { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
 
-.filters { display: flex; align-items: center; gap: 12px; margin: 10px 0 12px; flex-wrap: wrap; }
-.levels { display: flex; gap: 6px; }
-/* 级别筛选 chip：bg-elevated 药丸，激活 bg-active（不填充强调色底） */
+.filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.levels { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
   border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-dim);
   border-radius: var(--radius-sm); padding: 4px 12px; font-size: 12px; cursor: pointer;
@@ -226,11 +203,11 @@ a.btn-sm { text-decoration: none; }
 .text-filter:focus { border-color: var(--border-strong); }
 
 .log-list {
-  flex: 1; overflow-y: auto;
+  min-height: 420px; max-height: min(70vh, 720px); overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border); border-radius: var(--radius-md);
   padding: 8px 0; font-family: var(--mono); font-size: 12px;
-  line-height: 1.7; min-height: 0;
+  line-height: 1.7;
 }
 .log-line { display: flex; gap: 8px; padding: 0 12px; align-items: baseline; }
 .log-line:hover { background: var(--bg-hover); }
@@ -246,5 +223,5 @@ a.btn-sm { text-decoration: none; }
 .l-sid { color: var(--text-faint); flex: none; }
 .l-msg { white-space: pre-wrap; word-break: break-all; color: var(--text); }
 .empty { color: var(--text-faint); padding: 16px 12px; font-size: 13px; }
-.error { color: var(--red); }
+.error { color: var(--red); margin: 0; }
 </style>

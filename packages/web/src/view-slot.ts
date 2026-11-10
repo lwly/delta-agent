@@ -48,7 +48,7 @@ export function shellRoutes(): RouteRecordRaw[] {
     { path: '/chat/:sessionId', redirect: '/' },
     ...settings,
     { path: '/memory', redirect: { path: '/settings', query: { tab: 'memory' } } },
-    { path: '/usage', redirect: { path: '/settings', query: { tab: 'usage' } } },
+    { path: '/logs', redirect: { path: '/settings', query: { tab: 'logs' } } },
     ...rest,
   ];
 }

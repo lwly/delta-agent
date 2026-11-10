@@ -74,8 +74,8 @@ onUnmounted(() => tasksStore.watch(null));
 const route = useRoute();
 const router = useRouter();
 
-/** 是否处于工作台子路由（定时任务 /cron、运行日志 /logs）：主区渲染 <router-view>，对话流/输入区不渲染 */
-const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/logs'));
+/** 是否处于工作台子路由（定时任务 /cron、用量 /usage）：主区渲染 <router-view>，对话流/输入区不渲染 */
+const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/usage'));
 
 // ── 深色工作台改版（纯视觉层） ──────────────────────────────
 /** <1024px 侧栏折叠为抽屉：tabbar ☰ 按钮开合（桌面宽度该状态不影响布局） */
@@ -508,7 +508,7 @@ async function openSession(id: string) {
   error.value = '';
   try {
     await chat.open(id);
-    // 子路由（定时任务 /cron、运行日志 /logs）下点会话/新建对话：切回工作台主区，否则 router-view 仍占主区
+    // 子路由（定时任务 /cron、用量 /usage）下点会话/新建对话：切回工作台主区，否则 router-view 仍占主区
     if (isSubRoute.value) void router.push('/');
   } catch (e) {
     error.value = (e as Error).message;
@@ -1270,7 +1270,7 @@ watch(
     <!-- ══════════ 最左图标栏 rail（48px；<768px 隐藏，入口下沉底部 dock） ══════════ -->
     <nav class="rail">
       <span class="rail__logo" title="Delta-Agent">Δ</span>
-      <!-- 工作台入口：子路由（/cron /logs）常驻后唯一的全局返回口；用 button 而非 router-link，避免父路由 `/` 在子路由下误亮 router-link-active -->
+      <!-- 工作台入口：子路由（/cron /usage）常驻后唯一的全局返回口；用 button 而非 router-link，避免父路由 `/` 在子路由下误亮 router-link-active -->
       <button
         class="rail__btn"
         type="button"
@@ -1280,14 +1280,11 @@ watch(
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.36-4.1-1L3 20l1.1-5.2A8.5 8.5 0 1 1 21 11.5Z" /></svg>
       </button>
-      <button class="rail__btn" type="button" title="会话检索（⌘K）" @click="showSearch = true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      </button>
       <router-link class="rail__btn" to="/cron" title="定时任务">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
       </router-link>
-      <router-link class="rail__btn" to="/logs" title="运行日志">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
+      <router-link class="rail__btn" to="/usage" title="用量">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V10" /><path d="M12 20V4" /><path d="M18 20v-6" /></svg>
       </router-link>
       <span class="rail__spacer" />
       <button class="rail__btn" type="button" title="回收站" @click="showTrash = true">
@@ -1311,7 +1308,7 @@ watch(
         <svg class="brand-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9 4-4 4 4" /><path d="m8 15 4 4 4-4" /></svg>
       </div>
 
-      <!-- 全局操作区：新项目 / 新对话 / 会话搜索（定时任务 / 日志 / 设置入口已上收至 rail） -->
+      <!-- 全局操作区：新项目 / 新对话 / 会话搜索（定时任务 / 用量 / 设置入口已上收至 rail） -->
       <div class="side-section">
         <div class="sidebar-actions">
           <button class="btn-sm" @click="showNewProject = true">＋ 新项目</button>
@@ -1408,8 +1405,6 @@ watch(
             <span class="footer-val link" tabindex="0" title="回收站" @click="showTrash = true">🗑 回收站 · {{ ws.trash.length }} 项</span>
             <span class="footer-sep">·</span>
             <span :title="'平台信息：' + platform">{{ platform }}</span>
-            <!-- F-41 运行日志：角落图标入口（/logs 子路由；serve 内存环形缓冲 + SSE 实时） -->
-            <router-link class="footer-icon" to="/logs" title="运行日志">📜</router-link>
           </div>
         </div>
       </div>
@@ -1474,7 +1469,7 @@ watch(
           <span v-if="tasksStore.interruptCount > 0" class="taskboard-badge">{{ tasksStore.interruptCount > 99 ? '99+' : tasksStore.interruptCount }}</span>
         </button>
       </div>
-      <!-- 工作台子路由（/cron 定时任务、/logs 运行日志）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
+      <!-- 工作台子路由（/cron 定时任务、/usage 用量）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
       <router-view v-if="isSubRoute" />
       <template v-else>
         <!-- 轻首页（委派式工作台）：居中 slogan + 输入即派任务 + 状态分组任务列表 -->
@@ -1894,14 +1889,11 @@ watch(
 
     <!-- ══════════ <768px 底部 dock（rail 隐藏后入口下沉；桌面宽度恒隐藏） ══════════ -->
     <nav class="dock">
-      <button class="dock__btn" type="button" title="会话检索（⌘K）" @click="showSearch = true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-      </button>
       <router-link class="dock__btn" to="/cron" title="定时任务">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
       </router-link>
-      <router-link class="dock__btn" to="/logs" title="运行日志">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h10" /></svg>
+      <router-link class="dock__btn" to="/usage" title="用量">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20V10" /><path d="M12 20V4" /><path d="M18 20v-6" /></svg>
       </router-link>
       <router-link class="dock__btn" to="/settings" title="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2" /><path d="M12 2.5v3" /><path d="M12 18.5v3" /><path d="m5.3 5.3 2.1 2.1" /><path d="m16.6 16.6 2.1 2.1" /><path d="M2.5 12h3" /><path d="M18.5 12h3" /><path d="m5.3 18.7 2.1-2.1" /><path d="m16.6 7.4 2.1-2.1" /></svg>
