@@ -115,6 +115,8 @@ export class BackgroundTaskManager {
   kill(sessionId: string, id: string): boolean {
     const task = this.tasks.get(id);
     if (!task || task.sessionId !== sessionId || task.status !== 'running') return false;
+    // 已发起终止、子进程尚未 close：重复 kill 应 404，避免 DELETE 幂等误报 200
+    if (task.killedByUser) return false;
     task.killedByUser = true;
     try {
       task.child?.kill('SIGKILL');
