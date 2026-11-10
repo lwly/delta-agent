@@ -22,6 +22,7 @@ import {
   type ToolCallInfo,
 } from '../composables/useSessionTranscript';
 // F-39：ExpertDetail 在根级渲染（见模板尾部）
+import SessionSidebar from '../components/SessionSidebar.vue';
 import GitStatusBar from '../components/GitStatusBar.vue';
 import ToolCallCard from '../components/ToolCallCard.vue';
 import ExpertPanel from '../components/ExpertPanel.vue';
@@ -71,6 +72,9 @@ const router = useRouter();
 
 /** 是否处于工作台子路由（定时任务 /cron、用量 /usage）：主区渲染 <router-view>，对话流/输入区不渲染 */
 const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/usage'));
+
+/** <1024px：侧栏抽屉（桌面常显左侧 260px） */
+const sidebarOpen = ref(false);
 
 /** 标签栏会话 tab 标题：当前会话 > 当前项目 > 兜底 */
 const tabTitle = computed(() => chat.sessionMeta?.title || activeProjectName.value || '工作台');
@@ -204,7 +208,7 @@ async function refreshProviders() {
 /** F-39：返回新会话 id（null = 失败；失败方只写 error 不推提示，调用方据返回值决定是否推成功提示） */
 async function newSession(mode?: string, expert?: string): Promise<string | null> {
   if (!ws.activeProjectId) {
-    error.value = '请先在「项目管理」注册并选择项目';
+    error.value = '请先注册并选择一个项目（左侧侧栏）';
     return null;
   }
   try {
@@ -338,6 +342,7 @@ async function openSession(id: string) {
     }
     await chat.open(id);
     await router.replace({ path: '/', query: { ...route.query, session: id } });
+    sidebarOpen.value = false;
   } catch (e) {
     error.value = (e as Error).message;
   }
@@ -960,11 +965,17 @@ watch(
 </script>
 
 <template>
-  <div class="workbench" :class="{ 'panel-open': panel.open }">
-    <!-- ══════════ 主区域 ══════════ -->
-    <main class="main">
+  <div class="workbench" :class="{ 'panel-open': panel.open, 'sidebar-open': sidebarOpen }">
+    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
+    <div class="workbench-body">
+      <SessionSidebar class="workbench-sidebar" />
+      <!-- ══════════ 主区域 ══════════ -->
+      <main class="main">
       <!-- ══════════ 标签栏 tabbar（40px；chrome 底色，子路由页共用） ══════════ -->
       <div class="tabbar">
+        <button class="tabbar__menu" type="button" title="开合侧栏" @click="sidebarOpen = !sidebarOpen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></svg>
+        </button>
         <!-- 会话 tab：20px 头像 + 标题；有会话时 hover 显示关闭（仅关视图，不动会话数据） -->
         <div class="tabbar__tab tabbar__tab--active">
           <span class="tabbar__avatar" :class="chat.sessionId ? `tabbar__avatar--${avatarTone(chat.sessionId)}` : ''">
@@ -1019,14 +1030,10 @@ watch(
       <!-- 工作台子路由（/cron 定时任务、/usage 用量）：主区整块交给子路由视图（侧栏常驻），对话流 / 输入区不渲染 -->
       <router-view v-if="isSubRoute" />
       <template v-else>
-        <!-- 无打开会话：引导至项目管理 / 委派任务 -->
+        <!-- 无打开会话：左侧选项目/会话，或委派任务 -->
         <div v-if="!chat.sessionId" class="hero empty-start">
           <h2 class="empty-title">工作台</h2>
-          <p class="home-sub">在「项目管理」打开或新建对话，或在「委派任务」派发后台任务。</p>
-          <div class="empty-links">
-            <router-link class="empty-link" to="/projects">项目管理</router-link>
-            <router-link class="empty-link" to="/tasks">委派任务</router-link>
-          </div>
+          <p class="home-sub">在左侧选择或新建对话；后台委派可走 <router-link to="/tasks">委派任务</router-link>。</p>
           <p v-if="error" class="error">✘ {{ error }}</p>
         </div>
 
@@ -1374,7 +1381,8 @@ watch(
         </div>
       </template>
       </template>
-    </main>
+      </main>
+    </div>
 
     <!-- ══════════ F-38 右侧栏（第三栏）：文件面板在上，F-47 内置终端停靠其下 ══════════
          终端开启但面板收起时列容器仍渲染（只显示终端）；随会话切换重建——key 携带 sessionId -->
@@ -1414,7 +1422,11 @@ watch(
 </template>
 
 <style scoped>
-.workbench { display: flex; flex: 1; min-height: 0; height: 100%; width: 100%; position: relative; }
+.workbench { display: flex; flex-direction: row; flex: 1; min-height: 0; height: 100%; width: 100%; position: relative; }
+.workbench-body { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.workbench-sidebar { flex: 0 0 auto; min-height: 0; height: 100%; }
+.sidebar-backdrop { display: none; }
+
 /* F-47 右侧栏列容器：文件面板占满剩余高度，内置终端 300px 停靠其下。
    宽度跟随文件面板的行内 width；仅终端（面板收起）时兜底最小宽度 */
 .right-col { display: flex; flex-direction: column; height: 100%; flex: 0 0 auto; min-width: 360px; }
@@ -1451,6 +1463,8 @@ watch(
 }
 .empty-link:hover { background: var(--bg-hover); border-color: var(--border-strong); }
 .home-sub { color: var(--text-faint); font-size: 12.5px; text-align: center; }
+.home-sub :deep(a) { color: var(--accent); text-decoration: none; }
+.home-sub :deep(a:hover) { text-decoration: underline; }
 /* 任务台入口（tabbar 最右侧）：按钮 + interrupt 红点角标（样式对齐 rail__badge 口径） */
 .taskboard-toggle { position: relative; }
 .taskboard-badge {
@@ -1481,7 +1495,16 @@ watch(
   display: flex; align-items: center; gap: 6px;
   padding: 0 12px 0 8px;
 }
-.tabbar__menu { display: none; }
+.tabbar__menu {
+  display: none;
+  align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0; margin-right: 2px;
+  border: none; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-dim); cursor: pointer;
+  transition: background 0.12s ease-out, color 0.12s ease-out;
+}
+.tabbar__menu svg { width: 16px; height: 16px; }
+.tabbar__menu:hover { background: var(--bg-elevated-2); color: var(--text); }
 .tabbar__tab {
   display: flex; align-items: center; gap: 6px;
   height: 28px; padding: 0 6px 0 4px; border-radius: var(--radius-sm);
@@ -1958,6 +1981,14 @@ watch(
 .error { color: var(--red); font-size: 12.5px; margin-bottom: 8px; }
 .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
 
+@media (max-width: 1023px) {
+  .tabbar__menu { display: inline-flex; }
+  .workbench.sidebar-open :deep(.sidebar) { transform: none; }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    background: rgba(0, 0, 0, 0.45);
+  }
+}
 @media (max-width: 767px) {
   .workbench { min-height: 0; }
   .right-col { display: none; }

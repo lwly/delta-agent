@@ -22,7 +22,7 @@ export async function ensureProjectAndSession(request: APIRequestContext, title 
 
 /** 打开会话：先点项目头（设置 activeProject + 展开会话列表），再点会话项 */
 export async function openSession(page: Page, sessionTitle: string) {
-  await page.goto('/#/projects');
+  await page.goto('/#/');
   await page.locator('.project-header').first().click();
   const item = page.locator('.session-item', { hasText: sessionTitle }).first();
   await item.waitFor({ state: 'visible' });
