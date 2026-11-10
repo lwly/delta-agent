@@ -448,10 +448,7 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
         (typeof toolCall.title === 'string' && toolCall.title) ||
         (typeof toolCall.kind === 'string' && toolCall.kind) ||
         'tool',
-      argsJson:
-        toolCall.rawInput !== undefined && toolCall.rawInput !== null
-          ? JSON.stringify(toolCall.rawInput)
-          : '',
+      argsJson: toolArgsJsonFromRecord(toolCall),
       options: options.map((o) => o.optionId ?? ''),
       // ACP toolCall.kind 原样带出（read/edit/…），供映射引擎做 plan 档只读判定；缺失不填
       ...(typeof toolCall.kind === 'string' && toolCall.kind ? { toolKind: toolCall.kind } : {}),
@@ -471,22 +468,24 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
       case 'tool_call':
         push({
           type: 'tool_use',
-          id: typeof update.toolCallId === 'string' ? update.toolCallId : '',
-          name:
-            (typeof update.title === 'string' && update.title) ||
-            (typeof update.kind === 'string' && update.kind) ||
-            'tool',
-          argsJson: update.rawInput !== undefined && update.rawInput !== null ? JSON.stringify(update.rawInput) : '',
+          id: toolCallIdOf(update),
+          name: toolDisplayName(update),
+          argsJson: toolArgsJsonFromUpdate(update),
         });
         break;
       case 'tool_call_update': {
         // 仅 completed/failed 产出 tool_result；in_progress/pending 等中间态忽略
         if (update.status === 'completed' || update.status === 'failed') {
+          const content =
+            outputToText(update.output) ||
+            outputToText(update.rawOutput) ||
+            outputToText(update.content) ||
+            (typeof update.error === 'string' && update.error !== '' ? update.error : '');
           push({
             type: 'tool_result',
-            id: typeof update.toolCallId === 'string' ? update.toolCallId : '',
+            id: toolCallIdOf(update),
             ok: update.status === 'completed',
-            content: outputToText(update.output),
+            content,
           });
         }
         break;
@@ -509,6 +508,62 @@ export class AcpExternalAdapter implements ExternalAgentAdapter {
   }
 }
 
+function nestedRecord(update: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const v = update[key];
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function toolCallIdOf(update: Record<string, unknown>): string {
+  if (typeof update.toolCallId === 'string' && update.toolCallId !== '') return update.toolCallId;
+  const tc = nestedRecord(update, 'toolCall');
+  const nested = tc?.toolCallId;
+  return typeof nested === 'string' ? nested : '';
+}
+
+function toolDisplayName(update: Record<string, unknown>): string {
+  const tc = nestedRecord(update, 'toolCall');
+  return (
+    (typeof update.title === 'string' && update.title) ||
+    (typeof tc?.title === 'string' && tc.title) ||
+    (typeof update.kind === 'string' && update.kind) ||
+    (typeof tc?.kind === 'string' && tc.kind) ||
+    'tool'
+  );
+}
+
+/** codebuddy 等实现有时不带 rawInput；宽容拾取 input/arguments 并回落 title/kind 摘要 */
+function extractToolInput(record: Record<string, unknown>): unknown | undefined {
+  for (const key of ['rawInput', 'input', 'arguments', 'args'] as const) {
+    const v = record[key];
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
+}
+
+function toolArgsJsonFromRecord(record: Record<string, unknown>): string {
+  const input = extractToolInput(record);
+  if (input !== undefined) return JSON.stringify(input);
+  const summary: Record<string, unknown> = {};
+  for (const key of ['title', 'kind', 'toolCallId', 'locations', 'status'] as const) {
+    const v = record[key];
+    if (v !== undefined && v !== null) summary[key] = v;
+  }
+  return Object.keys(summary).length > 0 ? JSON.stringify(summary) : '{}';
+}
+
+function toolArgsJsonFromUpdate(update: Record<string, unknown>): string {
+  const direct = extractToolInput(update);
+  if (direct !== undefined) return JSON.stringify(direct);
+  const tc = nestedRecord(update, 'toolCall');
+  if (tc) {
+    const nested = extractToolInput(tc);
+    if (nested !== undefined) return JSON.stringify(nested);
+    const merged = toolArgsJsonFromRecord(tc);
+    if (merged !== '{}') return merged;
+  }
+  return toolArgsJsonFromRecord(update);
+}
+
 /** content 块 → 文本：{type:'text',text} 取 text，其他类型序列化占位（宽容） */
 function contentBlockToText(content: unknown): string {
   if (content === null || content === undefined) return '';
@@ -522,13 +577,28 @@ function contentBlockToText(content: unknown): string {
 /** tool_call_update 的 output → 文本：content 块数组逐个取 text / 序列化占位，其余形状宽容序列化 */
 function outputToText(output: unknown): string {
   if (output === null || output === undefined) return '';
-  const content = (output as Record<string, unknown>).content;
-  if (Array.isArray(content)) {
-    return content
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output)) {
+    return output
       .map((block) => contentBlockToText(block))
       .filter((s) => s !== '')
       .join('\n');
   }
-  if (typeof output === 'string') return output;
+  if (typeof output === 'object') {
+    const rec = output as Record<string, unknown>;
+    const content = rec.content;
+    if (Array.isArray(content)) {
+      return content
+        .map((block) => contentBlockToText(block))
+        .filter((s) => s !== '')
+        .join('\n');
+    }
+    if (typeof content === 'string' && content !== '') return content;
+    if (typeof rec.diff === 'string' && rec.diff !== '') return rec.diff;
+    for (const key of ['text', 'stdout', 'stderr', 'value', 'message', 'error'] as const) {
+      const v = rec[key];
+      if (typeof v === 'string' && v !== '') return v;
+    }
+  }
   return JSON.stringify(output);
 }

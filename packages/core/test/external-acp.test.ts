@@ -98,6 +98,32 @@ describe('AcpExternalAdapter（F-55 Tier A：JSON-RPC over stdio）', () => {
     expect(events[events.length - 1]).toEqual({ type: 'done', exitCode: 0 });
   });
 
+  it('tool_call 缺 rawInput 时回落 title/kind 摘要；tool_call_update 可从顶层 content 取结果', async () => {
+    const adapter = new AcpExternalAdapter(makeSpec());
+    const events = await runScenario(adapter, {
+      steps: [
+        update('tool_call', { toolCallId: 't0', title: 'Read README', kind: 'read' }),
+        update('tool_call_update', {
+          toolCallId: 't0',
+          status: 'completed',
+          content: { type: 'text', text: 'from-top-level-content' },
+        }),
+      ],
+    });
+    expect(events).toContainEqual({
+      type: 'tool_use',
+      id: 't0',
+      name: 'Read README',
+      argsJson: '{"title":"Read README","kind":"read","toolCallId":"t0"}',
+    });
+    expect(events).toContainEqual({
+      type: 'tool_result',
+      id: 't0',
+      ok: true,
+      content: 'from-top-level-content',
+    });
+  });
+
   it('tool_call + tool_call_update(completed/failed) → tool_use + tool_result；in_progress/pending 忽略', async () => {
     const adapter = new AcpExternalAdapter(makeSpec());
     const events = await runScenario(adapter, {

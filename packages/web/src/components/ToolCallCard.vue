@@ -128,6 +128,16 @@ const cmdSummary = computed(() => {
     return `${base}${path}`;
   }
   if (props.name === 'web_fetch') return String(args.url ?? '');
+  // 外部 agent（ACP）常用 title/kind 作摘要；无 delta 内置字段时勿只显示 {}
+  if (Object.keys(args).length === 0 && props.name && props.name !== 'tool') {
+    return props.name;
+  }
+  const title = typeof args.title === 'string' ? args.title : '';
+  const kind = typeof args.kind === 'string' ? args.kind : '';
+  if (title || kind) {
+    const parts = [title, kind].filter(Boolean);
+    return parts.join(' · ');
+  }
   // 兜底：单行截断的完整参数
   let pretty = '';
   try {
