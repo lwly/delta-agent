@@ -17,7 +17,7 @@ import UsagePanel from '../components/settings/UsagePanel.vue';
 .page {
   color: var(--text);
   padding: 16px 24px 24px;
-  max-width: 1100px;
+  max-width: 1320px;
   margin: 0 auto;
   flex: 1;
   min-height: 0;

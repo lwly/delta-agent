@@ -335,7 +335,7 @@ onBeforeUnmount(() => {
    用 flex:1 + min-height:0 撑满主区并内部滚动（.main 高度由 .app 100vh 约束），避免双滚动条；
    sticky 批量栏相对本滚动容器贴底。头部「← 工作台」返回链接保留（rail 亦有工作台入口，双保险）。
    视觉规范：与深色极简工作台一致（13px/600 标题、elevated 卡片、6px 控件圆角、无 emoji 标题） */
-.page { color: var(--text); padding: 16px 24px 40px; max-width: 900px; margin: 0 auto; flex: 1; min-height: 0; overflow-y: auto; }
+.page { color: var(--text); padding: 16px 24px 40px; max-width: 1080px; margin: 0 auto; flex: 1; min-height: 0; overflow-y: auto; }
 .head { display: flex; align-items: center; gap: 12px; }
 /* 返回工作台链接：对齐 .btn 规格，弱化为普通跳转（不做强调色） */
 a.btn { text-decoration: none; }

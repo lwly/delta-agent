@@ -172,7 +172,7 @@ function openDelegated() {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 12px; padding: 24px; overflow-y: auto;
 }
-.hero-home { gap: 10px; max-width: 560px; margin: 0 auto; width: 100%; }
+.hero-home { gap: 10px; max-width: 672px; margin: 0 auto; width: 100%; }
 .home-slogan {
   font-size: 26px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.5;
   text-align: center; color: var(--text);

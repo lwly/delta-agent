@@ -23,6 +23,7 @@ import {
 } from '../composables/useSessionTranscript';
 // F-39：ExpertDetail 在根级渲染（见模板尾部）
 import SessionSidebar from '../components/SessionSidebar.vue';
+import { isWorkbenchSubRoute } from '../utils/workbenchLayout';
 import GitStatusBar from '../components/GitStatusBar.vue';
 import ToolCallCard from '../components/ToolCallCard.vue';
 import ExpertPanel from '../components/ExpertPanel.vue';
@@ -71,7 +72,7 @@ const route = useRoute();
 const router = useRouter();
 
 /** 是否处于工作台子路由（定时任务 /cron、用量 /usage）：主区渲染 <router-view>，对话流/输入区不渲染 */
-const isSubRoute = computed(() => route.path.startsWith('/cron') || route.path.startsWith('/usage'));
+const isSubRoute = computed(() => isWorkbenchSubRoute(route.path));
 
 /** <1024px：侧栏抽屉（桌面常显左侧 260px） */
 const sidebarOpen = ref(false);
@@ -966,14 +967,14 @@ watch(
 
 <template>
   <div class="workbench" :class="{ 'panel-open': panel.open, 'sidebar-open': sidebarOpen }">
-    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false" />
+    <div v-if="sidebarOpen && !isSubRoute" class="sidebar-backdrop" @click="sidebarOpen = false" />
     <div class="workbench-body">
-      <SessionSidebar class="workbench-sidebar" />
+      <SessionSidebar v-if="!isSubRoute" class="workbench-sidebar" />
       <!-- ══════════ 主区域 ══════════ -->
       <main class="main">
       <!-- ══════════ 标签栏 tabbar（40px；chrome 底色，子路由页共用） ══════════ -->
       <div class="tabbar">
-        <button class="tabbar__menu" type="button" title="开合侧栏" @click="sidebarOpen = !sidebarOpen">
+        <button v-if="!isSubRoute" class="tabbar__menu" type="button" title="开合侧栏" @click="sidebarOpen = !sidebarOpen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" /></svg>
         </button>
         <!-- 会话 tab：20px 头像 + 标题；有会话时 hover 显示关闭（仅关视图，不动会话数据） -->
