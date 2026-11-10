@@ -63,8 +63,11 @@ onUnmounted(() => bgTasks.watch(null));
 // F-58 任务台：随项目切换启停轮询（离开工作台即停，防孤儿定时器）
 const tasksStore = useTasksStore();
 watch(
-  () => ws.activeProjectId,
-  (id) => tasksStore.watch(id || null),
+  () => [ws.ready, ws.activeProjectId] as const,
+  ([ready, id]) => {
+    if (!ready) return;
+    tasksStore.watch(id || null);
+  },
   { immediate: true },
 );
 onUnmounted(() => tasksStore.watch(null));

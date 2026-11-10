@@ -4,6 +4,24 @@ import { useChatStore } from './chat';
 
 /** F-53：会话列表每页条数（AC-53-2） */
 const SESSION_PAGE_SIZE = 50;
+/** 上次选中项目（委派页 / 工作台进页恢复历史任务上下文） */
+const ACTIVE_PROJECT_KEY = 'yz.activeProjectId';
+
+function readPersistedProjectId(): string {
+  try {
+    return localStorage.getItem(ACTIVE_PROJECT_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function persistActiveProjectId(id: string): void {
+  try {
+    if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id);
+  } catch {
+    /* 隐私模式等：不写不抛 */
+  }
+}
 
 /** 项目 + 会话 + 回收站：M4-4 管理页的数据中枢 */
 export const useWorkspaceStore = defineStore('workspace', {
@@ -34,7 +52,10 @@ export const useWorkspaceStore = defineStore('workspace', {
       await this.refreshProjects();
       await this.refreshTrash();
       if (this.projects.length > 0 && !this.activeProjectId) {
-        await this.selectProject(this.projects[0]!.id);
+        const saved = readPersistedProjectId();
+        const pick =
+          saved && this.projects.some((p) => p.id === saved) ? saved : this.projects[0]!.id;
+        await this.selectProject(pick);
       }
       this.ready = true;
     },
@@ -89,6 +110,7 @@ export const useWorkspaceStore = defineStore('workspace', {
       // sessionId/sessionMeta/消息流/UI 态），否则文件面板与对话区仍绑旧项目会话
       if (this.activeProjectId && this.activeProjectId !== id) useChatStore().close();
       this.activeProjectId = id;
+      persistActiveProjectId(id);
       await this.refreshSessions();
       void this.refreshRunning(); // PASI-9：切项目时同步运行态
     },

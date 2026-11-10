@@ -14,9 +14,13 @@ const homeExecutor = ref('');
 const delegating = ref(false);
 const externalAgents = ref<ExternalAgentInfo[]>([]);
 
+/** 等 workspace 就绪后再订阅任务列表，避免进页时 immediate 用空 projectId 清掉轮询 */
 watch(
-  () => ws.activeProjectId,
-  (id) => tasksStore.watch(id || null),
+  () => [ws.ready, ws.activeProjectId] as const,
+  ([ready, id]) => {
+    if (!ready) return;
+    tasksStore.watch(id || null);
+  },
   { immediate: true },
 );
 onUnmounted(() => tasksStore.watch(null));
@@ -24,6 +28,7 @@ onUnmounted(() => tasksStore.watch(null));
 onMounted(async () => {
   try {
     await ws.ensureReady();
+    if (ws.activeProjectId) tasksStore.watch(ws.activeProjectId);
   } catch (e) {
     error.value = (e as Error).message;
   }
@@ -43,6 +48,8 @@ const homeTaskGroups = computed(() =>
     { key: 'finished', label: '已完成', items: tasksStore.groups.finished },
   ].filter((g) => g.items.length > 0),
 );
+
+const hasTaskHistory = computed(() => homeTaskGroups.value.length > 0);
 
 const HOME_STATUS_LABEL: Record<string, string> = {
   draft: '草稿', queued: '排队中', preflight: '准备中', running: '处理中',
@@ -100,7 +107,7 @@ function openDelegated() {
 <template>
   <div class="tasks-page">
     <p v-if="error" class="error">✘ {{ error }}</p>
-    <div class="hero hero-home">
+    <div class="hero hero-home" :class="{ 'hero-home--with-tasks': hasTaskHistory }">
       <h1 class="home-slogan">
         把工作交出去。<br />
         回来就能看到<span class="home-slogan-accent">答案</span>。
@@ -150,6 +157,7 @@ function openDelegated() {
             <span v-else class="home-task-status">{{ taskStatusShort(t.status) }}</span>
           </button>
         </div>
+        <p v-if="!homeTaskGroups.length" class="home-sub home-tasks-empty">暂无委派记录，在上方输入即可派新任务</p>
       </template>
       <p v-else class="home-sub">请先在「项目管理」注册一个项目，就可以委派任务了。</p>
     </div>
@@ -176,6 +184,13 @@ function openDelegated() {
   gap: 12px; padding: 24px; overflow-y: auto;
 }
 .hero-home { gap: 10px; max-width: 672px; margin: 0 auto; width: 100%; }
+.hero-home--with-tasks {
+  flex: none;
+  justify-content: flex-start;
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+.home-tasks-empty { margin-top: 4px; }
 .home-slogan {
   font-size: 26px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.5;
   text-align: center; color: var(--text);
