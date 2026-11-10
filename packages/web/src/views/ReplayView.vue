@@ -201,7 +201,7 @@ onMounted(loadRuns);
 
 <style scoped>
 /* 深色极简主题：与工作台一致（13px/600 标题、elevated 卡片、6px 控件圆角） */
-.page { color: var(--text); padding: 16px 24px 24px; max-width: 1100px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
+.page { color: var(--text); padding: 16px 24px 24px; max-width: 1100px; margin: 0 auto; height: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .head { display: flex; align-items: baseline; gap: 12px; }
 h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .muted { color: var(--text-faint); font-size: 12px; }

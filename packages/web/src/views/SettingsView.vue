@@ -97,7 +97,7 @@ function switchTab(key: SectionKey) {
 </template>
 
 <style scoped>
-.settings { display: flex; flex-direction: column; height: 100vh; }
+.settings { display: flex; flex-direction: column; height: 100%; flex: 1; min-height: 0; }
 
 /* 顶栏：chrome 底色与工作台标签栏同层 */
 .head {

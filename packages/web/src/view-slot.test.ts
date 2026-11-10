@@ -11,7 +11,7 @@ describe('view slot', () => {
   it('内置页面路径与改前一致', () => {
     expect(viewsBySlot('workbench-child').map((v) => v.path)).toEqual(['cron', 'usage']);
     const paths = shellRoutes().map((r) => r.path);
-    expect(paths).toEqual(['/', '/projects', '/chat/:sessionId', '/settings', '/memory', '/logs', '/replay/:sessionId']);
+    expect(paths).toEqual(['/', '/chat/:sessionId', '/settings', '/memory', '/logs', '/replay/:sessionId', '/projects', '/tasks']);
     const workbench = shellRoutes()[0]!;
     expect(workbench.children?.map((c) => c.path)).toEqual(['cron', 'usage']);
   });

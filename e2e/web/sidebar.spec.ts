@@ -4,7 +4,7 @@ import { ensureProjectAndSession } from './helpers';
 
 test('侧栏展示项目与会话', async ({ page, request }) => {
   const { projectName, sessionId } = await ensureProjectAndSession(request, '侧栏可见会话');
-  await page.goto('/#/');
+  await page.goto('/#/projects');
   await expect(page.locator('.project-name', { hasText: projectName }).first()).toBeVisible();
   // 项目组默认折叠（仅 active 项目展开）——点开项目头
   await page.locator('.project-header', { hasText: projectName }).first().click();

@@ -44,8 +44,10 @@ export function shellRoutes(): RouteRecordRaw[] {
       component: () => import('./views/WorkbenchView.vue'),
       children: viewsBySlot('workbench-child').map(toRecord),
     },
-    { path: '/projects', redirect: '/' },
-    { path: '/chat/:sessionId', redirect: '/' },
+    {
+      path: '/chat/:sessionId',
+      redirect: (to) => ({ path: '/', query: { session: String(to.params.sessionId) } }),
+    },
     ...settings,
     { path: '/memory', redirect: { path: '/settings', query: { tab: 'memory' } } },
     { path: '/logs', redirect: { path: '/settings', query: { tab: 'logs' } } },

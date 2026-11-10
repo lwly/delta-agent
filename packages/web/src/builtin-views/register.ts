@@ -27,3 +27,15 @@ registerView({
   slot: 'top',
   component: () => import('../views/ReplayView.vue'),
 });
+registerView({
+  name: 'projects',
+  path: '/projects',
+  slot: 'top',
+  component: () => import('../views/ProjectsView.vue'),
+});
+registerView({
+  name: 'tasks',
+  path: '/tasks',
+  slot: 'top',
+  component: () => import('../views/TasksView.vue'),
+});

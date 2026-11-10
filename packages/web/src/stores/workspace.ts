@@ -24,8 +24,20 @@ export const useWorkspaceStore = defineStore('workspace', {
     runningIds: [] as string[],
     /** 有会话运行中的项目 id（侧栏项目点运行中动效；旧服务端无此字段时为空） */
     runningProjectIds: [] as string[],
+    /** 首屏 bootstrap 是否已执行（全局一次：项目列表 + 默认选中 + 回收站） */
+    ready: false,
   }),
   actions: {
+    /** AppShell 首访调用；项目管理页可再次调用（幂等）。保证直达 / 也有 activeProjectId。 */
+    async ensureReady() {
+      if (this.ready) return;
+      await this.refreshProjects();
+      await this.refreshTrash();
+      if (this.projects.length > 0 && !this.activeProjectId) {
+        await this.selectProject(this.projects[0]!.id);
+      }
+      this.ready = true;
+    },
     /** 架构收口 T2（B2 裁决）：sessionKind='chat' → 项目徽标 session_count 只计 chat 会话 */
     async refreshProjects() {
       this.projects = await api.listProjects({ sessionKind: 'chat' });

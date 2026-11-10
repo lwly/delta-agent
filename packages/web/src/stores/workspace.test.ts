@@ -142,6 +142,18 @@ describe('workspace store：架构收口 T2（侧栏只列 chat + 切项目清�
     expect(mocks.listSessionsPage).toHaveBeenLastCalledWith('p-2', { limit: 50, kind: 'chat' });
   });
 
+  it('ensureReady：拉项目/回收站并选中首个项目（幂等）', async () => {
+    const ws = useWorkspaceStore();
+    expect(ws.ready).toBe(false);
+    await ws.ensureReady();
+    expect(ws.ready).toBe(true);
+    expect(ws.activeProjectId).toBe('p-1');
+    expect(mocks.listTrash).toHaveBeenCalled();
+    const calls = mocks.listProjects.mock.calls.length;
+    await ws.ensureReady();
+    expect(mocks.listProjects.mock.calls.length).toBe(calls);
+  });
+
   it('首次 selectProject（无上一个项目）不误清会话态', async () => {
     const ws = useWorkspaceStore();
     const chat = useChatStore();
