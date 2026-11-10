@@ -11,7 +11,8 @@
 // 分支全部删除，收敛到 composables/useSessionTranscript（历史拉取 + SSE 增量 +
 // pairToolCards 单一配对来源）。判据 3：confirm_request / plan_approval_request
 // 不再静默吞掉——pendingDecisions 计数上浮，渲染统一禁用提示（本面板不做交互回填）。
-import { computed, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { useTaskDetailPanelLayout } from '../composables/useTaskDetailPanelLayout';
 import { api } from '../api/client';
 import { useTasksStore } from '../stores/tasks';
 import ToolCallCard from './ToolCallCard.vue';
@@ -22,6 +23,20 @@ const tasks = useTasksStore();
 
 const task = computed(() => tasks.openTask);
 const panelOpen = computed(() => tasks.openTaskId != null);
+
+const layout = useTaskDetailPanelLayout(panelOpen);
+const scrollRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => layout.widthPx.value,
+  async () => {
+    const el = scrollRef.value;
+    if (!el) return;
+    const top = el.scrollTop;
+    await nextTick();
+    el.scrollTop = top;
+  },
+);
 
 // ── Worker 会话消息流（T9：状态与 SSE 全部由 composable 承担，切任务自动重置）──
 const tr = useSessionTranscript({
@@ -107,7 +122,29 @@ onUnmounted(() => tr.dispose());
 </script>
 
 <template>
-  <aside v-if="panelOpen" class="tdp">
+  <aside
+    v-if="panelOpen"
+    class="tdp"
+    :class="{ 'tdp--resizing': layout.resizing.value, 'tdp--overlay': layout.isNarrow.value }"
+    :style="{ width: `${layout.widthPx.value}px`, transitionDuration: layout.resizing.value ? '0ms' : `${layout.transitionMs}ms` }"
+  >
+    <button
+      v-if="layout.expandEnabled.value"
+      type="button"
+      class="tdp-expand-handle"
+      :title="layout.handleLabel.value"
+      :aria-label="layout.handleLabel.value"
+      :aria-expanded="layout.isExpanded.value"
+      @click="layout.cycleTier()"
+    >
+      <span aria-hidden="true">{{ layout.handleIcon.value }}</span>
+    </button>
+    <div
+      v-if="layout.expandEnabled.value"
+      class="tdp-drag-edge"
+      title="拖动调整宽度（松手吸附档位）"
+      @pointerdown="layout.startDrag"
+    />
   <template v-if="task">
     <!-- 头部：标题 + 状态 chip + 关闭 -->
     <header class="tdp-head">
@@ -153,7 +190,7 @@ onUnmounted(() => tr.dispose());
     <div v-else-if="loadFailed" class="tdp-empty">会话记录加载失败（该任务可能由外部 agent 执行）</div>
 
     <!-- 会话流：工具卡 + 助手文本 + 用户消息 -->
-    <div v-else class="tdp-scroll">
+    <div v-else ref="scrollRef" class="tdp-scroll">
       <div v-for="(m, i) in msgs" :key="m.seq ?? `local-${i}`" class="tdp-msg" :class="`tdp-msg--${m.role}`">
         <span class="tdp-role">{{ m.role === 'user' ? '你' : m.role === 'assistant' ? '助手' : '工具' }}</span>
         <div class="tdp-bubble">{{ m.content }}</div>
@@ -205,20 +242,61 @@ onUnmounted(() => tr.dispose());
 </template>
 
 <style scoped>
-/* 右滑面板：固定右侧非模态（不挡侧栏/主区点击），380px；入场滑入 */
+/* 右滑面板：固定右侧；宽度由 layout 驱动，主区让位见全局样式 */
 .tdp {
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 380px;
   z-index: 60;
   display: flex;
   flex-direction: column;
   background: var(--bg-chrome);
   border-left: 1px solid var(--border);
+  transition: width 220ms ease;
   animation: tdp-slide 0.18s ease-out;
+  overflow: hidden;
 }
+.tdp--resizing { transition-duration: 0ms !important; }
+.tdp--overlay {
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+}
+.tdp-expand-handle {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  width: 22px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px 0 0 999px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.72;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.tdp-expand-handle:hover,
+.tdp-expand-handle:focus-visible {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--text);
+  outline: none;
+}
+.tdp-drag-edge {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+.tdp-drag-edge:hover { background: var(--accent-soft); }
 @keyframes tdp-slide {
   from { transform: translateX(30px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -309,7 +387,7 @@ onUnmounted(() => tr.dispose());
   flex-direction: column;
   gap: 8px;
 }
-.tdp-msg { display: flex; flex-direction: column; gap: 3px; }
+.tdp-msg { display: flex; flex-direction: column; gap: 3px; max-width: min(100%, 48rem); }
 .tdp-msg--user .tdp-role { color: var(--text-faint); }
 .tdp-role { font-size: 10px; color: var(--text-faint); }
 .tdp-bubble {
@@ -347,7 +425,12 @@ onUnmounted(() => tr.dispose());
 .tdp-stop:hover:not(:disabled) { background: var(--red-soft, rgba(248, 81, 73, 0.12)); }
 .tdp-stop:disabled { opacity: 0.5; cursor: not-allowed; }
 .tdp-cancel-row { padding-bottom: 8px; }
-.tdp-composer { border-top: 1px solid var(--border); padding: 10px 14px; }
+.tdp-composer {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+  background: var(--bg-chrome);
+}
 .tdp-send-error { font-size: 11px; color: var(--red); padding-bottom: 6px; }
 .tdp-input-row { display: flex; gap: 8px; }
 .tdp-input {
@@ -376,4 +459,17 @@ onUnmounted(() => tr.dispose());
   cursor: pointer;
 }
 .tdp-send:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+
+<style>
+/* 主区让位（rail 不变；过渡与面板同步） */
+html.tdp-panel-open .tasks-page,
+html.tdp-panel-open .workbench {
+  padding-right: var(--delta-tdp-reserve, 0px);
+  transition: padding-right 220ms ease;
+  box-sizing: border-box;
+}
+html.tdp-panel-open .tasks-page {
+  overflow-x: hidden;
+}
 </style>
