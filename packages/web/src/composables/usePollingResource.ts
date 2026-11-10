@@ -35,14 +35,17 @@ export function createPollingResource<T>(opts: PollingResourceOptions<T>): Polli
   let currentId: string | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let interval = opts.intervalMs;
+  /** 同一 id 下并发 tick 的发起序号；仅最新一轮允许 apply（防旧轮询覆盖 dispatch 后的新列表） */
+  let tickGen = 0;
 
   const tick = async (): Promise<void> => {
     const captured = currentId;
     if (!captured) return;
+    const gen = ++tickGen;
     try {
       const data = await opts.fetch(captured);
-      // 资源已切换/停止：丢弃过期响应（不串台）
-      if (currentId === captured) opts.apply(data);
+      // 资源已切换/停止，或已有更新的 tick 在进行：丢弃过期响应（不串台、不回滚）
+      if (currentId === captured && gen === tickGen) opts.apply(data);
     } catch {
       /* 瞬时失败静默：保持现状，下一轮重试（对齐两 store 既有口径） */
     }
@@ -61,6 +64,7 @@ export function createPollingResource<T>(opts: PollingResourceOptions<T>): Polli
     },
     stop(): void {
       currentId = null; // in-flight 响应按 id 不匹配丢弃
+      tickGen++;
       if (timer) clearInterval(timer);
       timer = null;
     },

@@ -223,6 +223,18 @@ describe('tasks store (F-58 任务台)', () => {
     s.watch(null);
   });
 
+  it('openTaskPanel 可带 row 兜底（列表尚未包含该 id 时仍可打开面板）', async () => {
+    const s = useTasksStore();
+    mocks.listWorkerTasks.mockResolvedValue({ tasks: [] });
+    s.watch('p1');
+    await advance();
+    const row = task('fresh', 'queued');
+    s.openTaskPanel('fresh', row);
+    expect(s.openTask?.id).toBe('fresh');
+    expect(s.tasks.some((t) => t.id === 'fresh')).toBe(true);
+    s.watch(null);
+  });
+
   it('openTaskPanel / openTask：面板状态跟随轮询刷新的最新任务行', async () => {
     const s = useTasksStore();
     mocks.listWorkerTasks.mockResolvedValue({ tasks: [task('a', 'running')] });

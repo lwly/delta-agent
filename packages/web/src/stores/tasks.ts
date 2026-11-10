@@ -113,9 +113,17 @@ export const useTasksStore = defineStore('tasks', {
       this.openTaskId = null;
     },
 
-    /** 打开/关闭任务详情右滑面板（taskId 传 null = 关闭） */
-    openTaskPanel(taskId: string | null): void {
+    /** 按 id 合并或插入任务行（委派后立即打开面板时保证 openTask 可解析） */
+    upsertTask(row: WorkerTaskView): void {
+      const i = this.tasks.findIndex((t) => t.id === row.id);
+      if (i >= 0) this.tasks[i] = row;
+      else this.tasks = [row, ...this.tasks];
+    },
+
+    /** 打开/关闭任务详情右滑面板（taskId 传 null = 关闭；row 可选，列表尚未刷到时兜底） */
+    openTaskPanel(taskId: string | null, row?: WorkerTaskView | null): void {
       this.openTaskId = taskId;
+      if (taskId && row) this.upsertTask(row);
     },
 
     /**
@@ -136,6 +144,7 @@ export const useTasksStore = defineStore('tasks', {
         dispatch: true,
       });
       await this.refresh();
+      this.upsertTask(r.task);
       return r.task;
     },
 

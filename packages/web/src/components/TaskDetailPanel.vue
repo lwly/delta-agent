@@ -20,6 +20,7 @@ import { useSessionTranscript } from '../composables/useSessionTranscript';
 const tasks = useTasksStore();
 
 const task = computed(() => tasks.openTask);
+const panelOpen = computed(() => tasks.openTaskId != null);
 
 // ── Worker 会话消息流（T9：状态与 SSE 全部由 composable 承担，切任务自动重置）──
 const tr = useSessionTranscript({
@@ -86,7 +87,8 @@ onUnmounted(() => tr.dispose());
 </script>
 
 <template>
-  <aside v-if="task" class="tdp">
+  <aside v-if="panelOpen" class="tdp">
+  <template v-if="task">
     <!-- 头部：标题 + 状态 chip + 关闭 -->
     <header class="tdp-head">
       <span class="tdp-title" :title="task.title">{{ task.title }}</span>
@@ -160,6 +162,13 @@ onUnmounted(() => tr.dispose());
         <button class="tdp-send" type="button" :disabled="!canSend || !input.trim()" @click="send">↑</button>
       </div>
     </footer>
+  </template>
+  <div v-else class="tdp-loading">
+    <header class="tdp-head">
+      <span class="tdp-title">加载任务…</span>
+      <button class="tdp-close" type="button" title="关闭面板" @click="tasks.openTaskPanel(null)">×</button>
+    </header>
+  </div>
   </aside>
 </template>
 
@@ -182,6 +191,7 @@ onUnmounted(() => tr.dispose());
   from { transform: translateX(30px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+.tdp-loading { flex: 1; display: flex; flex-direction: column; }
 .tdp-head {
   display: flex;
   align-items: center;

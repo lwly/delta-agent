@@ -3,7 +3,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useTasksStore } from '../stores/tasks';
-import { api, apiFetch, type ExternalAgentInfo } from '../api/client';
+import { api, apiFetch, type ExternalAgentInfo, type WorkerTaskView } from '../api/client';
 import TaskDetailPanel from '../components/TaskDetailPanel.vue';
 
 const ws = useWorkspaceStore();
@@ -58,7 +58,7 @@ function assistantName(executor: string | null | undefined): string {
   return a ? a.displayName || a.label || a.id : executor;
 }
 
-const delegateToast = ref<{ assistant: string; title: string; taskId: string } | null>(null);
+const delegateToast = ref<{ assistant: string; title: string; task: WorkerTaskView } | null>(null);
 let delegateToastTimer: ReturnType<typeof setTimeout> | null = null;
 onUnmounted(() => {
   if (delegateToastTimer) clearTimeout(delegateToastTimer);
@@ -78,7 +78,7 @@ async function dispatchFromHome() {
       executor: homeExecutor.value || null,
     });
     homeInput.value = '';
-    delegateToast.value = { assistant: assistantName(task.executor), title: task.title, taskId: task.id };
+    delegateToast.value = { assistant: assistantName(task.executor), title: task.title, task };
     if (delegateToastTimer) clearTimeout(delegateToastTimer);
     delegateToastTimer = setTimeout(() => (delegateToast.value = null), 8000);
   } catch (e) {
@@ -89,8 +89,11 @@ async function dispatchFromHome() {
 }
 
 function openDelegated() {
-  if (delegateToast.value) tasksStore.openTaskPanel(delegateToast.value.taskId);
+  const hint = delegateToast.value;
+  if (!hint) return;
   delegateToast.value = null;
+  if (delegateToastTimer) clearTimeout(delegateToastTimer);
+  tasksStore.openTaskPanel(hint.task.id, hint.task);
 }
 </script>
 

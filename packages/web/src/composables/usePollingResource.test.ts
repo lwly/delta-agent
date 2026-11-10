@@ -34,6 +34,32 @@ describe('createPollingResource (T5b 轮询工厂)', () => {
     r.stop();
   });
 
+  it('同一 id 下后发 tick 先返回、先发 tick 后返回时不覆盖新数据', async () => {
+    let resolveSlow!: (v: { v: number }) => void;
+    let slowStarted = false;
+    const fetch = vi.fn((id: string) => {
+      if (!slowStarted) {
+        slowStarted = true;
+        return new Promise<{ v: number }>((r) => (resolveSlow = r));
+      }
+      return Promise.resolve({ v: 2 });
+    });
+    const applied: Array<{ v: number }> = [];
+    const r = createPollingResource<{ v: number }>({
+      fetch,
+      apply: (d) => applied.push(d),
+      intervalMs: 100,
+    });
+    r.start('p1'); // 慢请求
+    void r.refresh(); // 快请求（dispatch 后手动 refresh 同类场景）
+    await vi.advanceTimersByTimeAsync(0);
+    expect(applied).toEqual([{ v: 2 }]);
+    resolveSlow({ v: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(applied).toEqual([{ v: 2 }]); // 慢响应不得回滚
+    r.stop();
+  });
+
   it('切 id 后旧 in-flight 响应被丢弃（不串台）', async () => {
     let resolveA!: (v: unknown) => void;
     const fetch = vi.fn((id: string) => {
